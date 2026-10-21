@@ -31,8 +31,9 @@ Setup (Cora, once):
 1. Create private repo `cosmos-search-truth`.
 2. In GitHub → Settings → Applications → Claude → Repository access, use **Only select repositories** and
    leave `cosmos-search-truth` out. Do not add it under the project's repositories either.
-3. Generate an `age` key pair locally. Commit the public key to `keys/cosmos-search.age.pub` in *both*
-   repos. The private key never enters a container.
+3. Generate two `age` key pairs locally (Cora's, and the reveal key). Commit the public keys as
+   `keys/cora.age.pub` and `keys/reveal.age.pub` in *both* repos. Cora's private key never enters a
+   container; the reveal key's private half is the environment secret `COSMOS_REVEAL_KEY`.
 4. Give the truth repo read access to `cosmos-search` (a fine-grained token with read-only contents
    permission on that one repo, stored as an Actions secret), and write access to the durable store once
    it exists.
@@ -51,12 +52,13 @@ What runs there:
 In this repo, `.gitignore` excludes plaintext truth patterns, and a pre-commit hook refuses anything under
 `truth/` that is not `age`-encrypted, as a backstop.
 
-Until the truth repo and durable store exist, the DR3 tuning set (visible truth, §5) is all we need, so
-none of this blocks early work.
+Status: all four steps done and the smoke run passed (2026-10-21; Cora is removing Claude's access).
+Injected products currently leave the truth repo as a workflow artifact; publishing them to the durable
+store waits on that store. Until then the visible tuning set (§5) is all the analysis needs.
 
 ## 2. Frozen snapshot for blind runs
 
-The classical tier and the blind expert stage read only from a snapshot of the data store taken *after*
+The detectors and the blind vetting stage read only from a snapshot of the data store taken *after*
 injection. During a blind run, the archive clients are disabled (the shared HTTP layer refuses requests
 when `COSMOS_BLIND=1`). This is what stops an agent from noticing that an injected light curve differs from
 the MAST copy.
@@ -65,7 +67,7 @@ the MAST copy.
 
 **Stage A, blind physical interpretation.** Each expert subagent receives one packet: anonymised ID,
 coordinates rotated or withheld, distance, photometry, SED, light-curve features and plots, spectra,
-classical-tier residuals. Decoys and controls are mixed in at a hidden ~10% rate (statistics.md §6).
+detector outputs and residuals. Decoys and controls are mixed in at a hidden ~10% rate (statistics.md §6).
 The expert agent is defined in `.claude/agents/expert-blind.md` with **no tools**; the packet is inlined
 in its prompt. With no tools it cannot read files, run code or reach the network. Its output is a
 structured verdict: explanation class, probability, and the evidence it used.

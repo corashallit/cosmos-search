@@ -1,1 +1,1 @@
-"""cosmos-search: a census that explains every object within 100 pc."""
+"""cosmos-search: a first look at Gaia DR4 for technosignature-style anomalies."""

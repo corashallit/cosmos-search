@@ -1,0 +1,83 @@
+# Statistics
+
+Shared by all arms. The search runs over up to 1.8 × 10⁹ sources, so every number we report has to survive
+the multiple-testing arithmetic and an instrument that produces most of the outliers.
+
+## 1. False alarms are a budget
+
+With N sources and a per-source false-alarm probability p, the expected number of false alarms is Np. At
+N = 1.8 × 10⁹, a Gaussian 6σ tail (p ≈ 10⁻⁹) already gives ~2. Real tails are heavier, so analytic p-values
+are wrong by orders of magnitude out there. Every threshold is therefore set from an **empirical** null and
+stated as an expected false-alarm count over the searched set, with the vetting budget (~10³) as the
+ceiling.
+
+## 2. Empirical nulls
+
+Nulls are built from the data so that they keep its systematics:
+
+- **Mirror null.** Instrumental scatter is roughly symmetric; occultation is one-sided. The distribution of
+  brightening statistics, computed in the same strata (magnitude, colour, ecliptic latitude, crowding, number
+  of transits), estimates the dimming statistic's null. Brightening has its own astrophysics (flares,
+  microlensing), which makes this null conservative in some strata. Measure that, don't assume it.
+- **Stratified permutation.** Re-assign epochs between sources in the same stratum that share scan
+  history, which keeps the cadence and calibration systematics but breaks any star-specific signal.
+- **Invariance nulls.** Gaia's redundancy gives tests whose null is exact: agreement across the 9 CCDs of a
+  transit, across the two fields of view, between G and BP/RP. An artefact usually fails at least one.
+
+## 3. Multiple testing
+
+Within a source, combine statistics with a method robust to correlation (Cauchy combination, or minimum p
+with a Šidák correction). Across sources, control the false discovery rate (Benjamini–Hochberg, or Storey
+q-values when nearly all sources are null). Periodogram and dip searches carry a per-light-curve
+look-elsewhere effect; calibrate it with injections and nulls, not analytically.
+
+## 4. Injection-recovery
+
+Inject into real light curves and real astrometric residuals so the systematics are real. Families should
+span more than the signals we expect, because they measure how agnostic each detector is:
+
+| Family | Examples |
+|---|---|
+| Astrophysical | Long-period eclipses, dust dips (reddened), transits, flares, spots, secular trends |
+| Occulter geometry | Grey dips of varied depth, duration and recurrence; dips that are not periodic and not random |
+| Non-astrophysical structure | Step changes, regularly spaced dips at intervals no orbit produces, number-theoretic spacings, chromatic oddities (BP dims while RP brightens) |
+| Astrometric | Constant thrust, impulsive velocity changes, radiation-pressure accelerations correlated with flux |
+
+Hosts are drawn from the real sample with matched magnitude, colour and sky distributions. Report
+completeness as maps over the family's parameters. Split injections into a visible **tuning** set and a
+**sealed** set made by the truth repo; final numbers come only from the sealed set (blinding.md).
+
+## 5. Ranking as a decision
+
+A vetting slot is worth spending on candidate i in proportion to
+
+  value_i ≈ P(real and unexplained | data)_i × P(cheaply verifiable)_i
+
+where verifiability covers brightness (G ≲ 13 for amateur photometry), current activity, sky visibility and
+TESS/ZTF coverage. The terms start from flat priors and are refitted as vetting outcomes and injection
+recovery accumulate (with monotone constraints so a stronger anomaly never ranks lower, all else equal).
+
+**Random audit.** Spend ~5–10% of vetting slots on candidates drawn at random from below the threshold,
+with known inclusion probabilities. Weighting their outcomes by those probabilities gives an unbiased
+estimate of what the ranking misses, which is the only honest check on its built-in assumptions.
+
+## 6. Decoys and controls for vetting
+
+The main failure mode for LLM vetting is confabulation: a fluent, physical-sounding story for anything.
+Mix into the vetting queue, at a fixed hidden fraction (~10%):
+
+- **Incoherent decoys**: injected signals with no consistent explanation. Correct answer: "unexplained" or
+  "artefact". The rate of invented explanations is the confabulation rate.
+- **Coherent rare decoys**: physically consistent injections of rare natural scenarios.
+- **Known-answer positives**: real, studied dippers (KIC 8462852 and others) with identifiers stripped.
+- **Negative controls**: ordinary variables.
+
+Vetters state probabilities; score calibration with Brier scores and reliability curves. A vetting verdict
+counts only if the vetter's calibration on decoys is acceptable.
+
+## 7. Recalibration and freezing
+
+Detectors, nulls and rankings change as evidence comes in (plan.md, principle 2). The constraint is order:
+anything evaluated on the sealed injection set, and anything run on DR4 day one, uses a frozen, tagged
+version written down before the data or the truth is seen. Changes after that are new versions with their
+own evaluation.

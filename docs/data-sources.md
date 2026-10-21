@@ -1,6 +1,6 @@
 # Data sources
 
-The current target list. Checked 2026-10-21. Rate limits are what each service documents; where nothing is documented, we follow
+What the DR4 track reads, and the rules for reading it. Checked 2026-10-21. Rate limits are what each service documents; where nothing is documented, we follow
 the polite-client defaults at the bottom. Items marked *(verify)* came from secondary or older pages.
 
 ## Contact email
@@ -9,26 +9,36 @@ Most of these services do not ask bots to register; the convention is a descript
 contact. Every request we make carries:
 
 ```
-User-Agent: cosmos-search/<version> (100 pc census; mailto:cora.shallit@gmail.com)
+User-Agent: cosmos-search/<version> (mailto:cora.shallit@gmail.com)
 ```
 
 Services that need an account tied to an email are listed under **Auth**. Account creation involves
 accepting terms and setting a password, so Cora needs to do it; credentials go into environment secrets,
 never into the repo.
 
-## Core
+## Primary
+
+The searches themselves.
 
 | Source | Release to use | Role | Coverage | Access | Auth | Limits / policy |
 |---|---|---|---|---|---|---|
-| **Gaia** | DR3 now; DR4 on 2026-12-02 | Astrometry, G/BP/RP, XP and RVS spectra, NSS, variability, AP | All sky, G ≲ 20.7 | ESA TAP+ (`gea.esac.esa.int/tap-server/tap`), DataLink; HATS copy at `data.lsdb.io/hats/gaia_dr3` | Account in env vars `GAIA_USER` / `GAIA_PASSWORD` (cookie login via `Gaia.login`) | Anonymous: async 3 × 10⁶ rows, 90 min; registered: unlimited rows, 120 min, 20 GB job space; DataLink ≤ 5,000 sources per call *(verify; from the older FAQ)*. Since the 2026-10-14 archive release: **≤ 5 jobs executing in parallel per user, queue of 50, excess rejected**; DataLink structures renamed RAW → `DATAMODEL_GAIA`, INDIVIDUAL → `DATAMODEL_STANDARD`; DataLink limits changed (see the Archive user guide). Bulk catalogue download explicitly supported. |
-| **Hipparcos** (van Leeuwen 2007) | I/311 | Astrometry for G ≲ 3 stars Gaia handles poorly | All sky, bright | VizieR TAP | none | CDS limits (below) |
+| **Gaia** | DR3 now; DR4 on 2026-12-02 | Epoch photometry (DR3: 11.75 M variable sources, 74 GB as 3,386 bulk CDN files; DR4: all sources, incl. per-CCD G), epoch astrometry (DR4), variability summaries, astrometry, XP/RVS | All sky, G ≲ 20.7 | ESA TAP+ (`gea.esac.esa.int/tap-server/tap`), DataLink; HATS copy at `data.lsdb.io/hats/gaia_dr3` | Account in env vars `GAIA_USER` / `GAIA_PASSWORD` (cookie login via `Gaia.login`) | Anonymous: async 3 × 10⁶ rows, 90 min; registered: unlimited rows, 120 min, 20 GB job space; DataLink ≤ 5,000 sources per call *(verify; from the older FAQ)*. Since the 2026-10-14 archive release: **≤ 5 jobs executing in parallel per user, queue of 50, excess rejected**; DataLink structures renamed RAW → `DATAMODEL_GAIA`, INDIVIDUAL → `DATAMODEL_STANDARD`; DataLink limits changed (see the Archive user guide). Bulk catalogue download explicitly supported. |
+| **TESS** | Sectors to date | Light curves: SPOC 2-min/20-s, QLP, TGLC, TESS-SPOC FFI | ~All sky, bright to T ≈ 16 | MAST (`astroquery.mast`), TESScut; public S3 `stpubdata/tess/public` incl. HATS TIC | none for public data | TESScut ≤ 10 simultaneous calls per user (503 above). TICA cutouts discontinued Aug 2025. |
+
+## Vetting context
+
+Used to explain candidates away (or fail to): infrared excess and the energy budget, independent light curves,
+spectra, activity, literature.
+
+| Source | Release to use | Role | Coverage | Access | Auth | Limits / policy |
+|---|---|---|---|---|---|---|
+| **Hipparcos** (van Leeuwen 2007) | I/311 | Long-baseline astrometry and photometry for bright stars (secular trends since 1991) | All sky, bright | VizieR TAP | none | CDS limits (below) |
 | **2MASS** PSC | final | JHK_s, epoch ~1998–2001 | All sky | IRSA TAP `fp_psc`; Gaia `tmass_psc_xsc_best_neighbour`; HATS `two_mass` | none | IRSA: none published; TAP async, avoid >2 GB per sync query |
 | **AllWISE** | final | W1–W4 | All sky | IRSA TAP `allwise_p3as_psd` | none | as IRSA |
-| **CatWISE2020** | final | W1/W2 + proper motions; finds brown dwarfs Gaia misses | All sky | IRSA `catwise_2020`, VizieR II/365, Data Lab `catwise2020.main` | none | as host |
+| **CatWISE2020** | final | W1/W2 + proper motions | All sky | IRSA `catwise_2020`, VizieR II/365, Data Lab `catwise2020.main` | none | as host |
 | **unWISE** | 2019 catalogue (neo7 coadds) | Deeper W1/W2, crowded fields | All sky | IRSA `unwise_2019`, Data Lab `unwise_dr1` | none | as host |
 | **NEOWISE-R** single exposure | final (mission ended 2024) | W1/W2 time series 2014–2024 | All sky, ~2 visits/yr | IRSA TAP `neowiser_p1bs_psd`; HEALPix Parquet on S3 `nasa-irsa-wise/wise/neowiser/catalogs/p1bs_psd/healpix_k5/` | none | Catalog engine truncates at 2 GB; use S3 Parquet for bulk |
 | **unTimely** (Meisner et al. 2023) | v1 | Deep W1/W2 time series, ~16 epochs, 2010–2020 | All sky | IRSA (DOI 10.26131/IRSA580), ~4 TB total | none | bulk files; we read by sky tile |
-| **TESS** | Sectors to date | Light curves: SPOC 2-min/20-s, QLP, TGLC, TESS-SPOC FFI | ~All sky, bright to T ≈ 16 | MAST (`astroquery.mast`), TESScut; public S3 `stpubdata/tess/public` incl. HATS TIC | none for public data | TESScut ≤ 10 simultaneous calls per user (503 above). TICA cutouts discontinued Aug 2025. |
 | **ZTF** | DR24 (2026-01-22) | g/r/i light curves | δ > −31°; saturates G ≈ 12.5–13 | IRSA light-curve API, TAP `ztf_objects_dr24`, bulk Parquet; HATS up to `ztf_dr22` | none (forced-photometry service needs email registration) | IRSA asks for bulk downloads instead of many API calls |
 | **ASAS-SN** Sky Patrol v2 | live | V/g light curves for bright stars (fills ZTF saturation gap) | All sky, ~8 < g < 17 | `skypatrol` (`pyasassn.client`) | none | Batch queries of up to 10⁶ light curves; bandwidth-limited. Throttling not documented. |
 | **VLASS** | Epoch 1 & 2 QL component catalogues (CIRADA) | 3 GHz detections / limits | δ > −40° | CIRADA downloads; Epoch 1 also VizieR J/ApJS/255/30 | none | static files |
@@ -46,26 +56,23 @@ never into the repo.
 
 | Source | Role | Access |
 |---|---|---|
-| GALEX GR6/7 | UV: separates white dwarfs and WD+M pairs, measures chromospheric activity | MAST TAP / `astroquery.mast` |
+| GALEX GR6/7 | UV: chromospheric activity, hot companions | MAST TAP / `astroquery.mast` |
 | Pan-STARRS1 DR2, SkyMapper DR4 | Optical SED points between Gaia and 2MASS; some close pairs Gaia merges | MAST (PS1), HATS `skymapper_dr4` |
 | 4XMM-DR14, Chandra CSC 2.1 | Deeper pointed X-ray where it exists | HEASARC TAP |
 | NASA Exoplanet Archive | Known planets explain TESS / RV / astrometric signals | Exoplanet Archive TAP |
-| UltracoolSheet, Montreal White Dwarf Database | Curated brown dwarf and white dwarf lists | static downloads |
 | AAVSO VSX | Known variable classifications as priors | HATS `vsx` |
+| Kepler / K2 light curves | Known aperiodic dippers (KIC 8462852 and others) as known-answer controls | MAST |
+| AAVSO observer network | Ground follow-up of bright candidates (Alert Notices, campaigns) | Needs an AAVSO account (Cora) when we have a candidate |
 
 ## Rate-limit summary and client defaults
 
 Documented hard limits: SIMBAD/CDS (≤ 6 queries/s per IP), TESScut (≤ 10 concurrent), ADS (5,000/day),
 Gaia row and time quotas, IRSA catalog engine (2 GB per query). Nothing else publishes numbers.
 
-Client defaults for every service, enforced in one shared HTTP layer:
-- at most 2 concurrent connections per host (TESScut: 8), at most 2 requests/s to CDS;
-- prefer one TAP upload join of 10⁴ rows over 10⁴ cone searches;
-- exponential backoff with jitter on 429/503/connection refused, and stop for an hour on repeated blacklist
-  signals rather than retrying;
-- content-addressed cache of every response (key = service + query hash), so reruns cost nothing;
-- prefer static bulk copies (S3 Parquet, HATS, VizieR downloads) over live query services for anything
-  sky-wide.
+Per-host concurrency, throttling, backoff and caching live in one shared client, `cosmos_search.net`; the
+per-host policy table is in [infra/net.md](infra/net.md) and is the only place those numbers are kept.
+Principles: one TAP upload join beats 10⁴ cone searches; static bulk copies (S3 Parquet, HATS, the Gaia CDN
+bulk files) beat live query services for anything sky-wide; repeated blacklist signals mean stop, not retry.
 
 ## Footprint gaps to keep in mind
 
