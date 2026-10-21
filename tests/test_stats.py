@@ -237,3 +237,46 @@ def test_tail_ratio_is_one_for_symmetric_noise_and_flags_dimmers():
     by = {(r["stratum"], r["threshold"]): r for r in rows}
     assert by[("b", 3.0)]["ratio_lo"] < 1 < by[("b", 3.0)]["ratio_hi"] * 1.05
     assert by[("a", 20.0)]["ratio_lo"] > 3
+
+
+def _asymmetric_world(rng, n_real, per=4000, depth=30.0):
+    """Bright-star strata with real dimmers; faint strata with capped dips and heavy bright spikes; symmetric nulls."""
+    dims, brights, strata, real = [], [], [], []
+    for k in range(10):
+        x = rng.standard_t(4, size=(per, 40))
+        r = np.zeros(per, bool)
+        if k < 4:
+            x[:n_real, 0] -= depth
+            r[:n_real] = True
+        elif k < 7:
+            spikes = rng.random(per) < 0.3
+            x[spikes, 1] += rng.pareto(1.0, spikes.sum()) * 20
+            x = np.maximum(x, -6.0)
+        dims.append(-x.min(axis=1)), brights.append(x.max(axis=1))
+        strata.append(np.full(per, k)), real.append(r)
+    return np.concatenate(dims), np.concatenate(brights), np.concatenate(strata), np.concatenate(real)
+
+
+def test_stratified_knockoff_survives_asymmetric_strata_and_controls_fdr():
+    from cosmos_search.stats import knockoff_q, stratified_knockoff_q
+
+    rng = np.random.default_rng(18)
+    fdp, power, pooled_power = [], [], []
+    for _ in range(15):
+        dim, bright, strata, real = _asymmetric_world(rng, n_real=60)
+        found = stratified_knockoff_q(dim, bright, strata) <= 0.1
+        fdp.append((found & ~real).sum() / max(found.sum(), 1))
+        power.append((found & real).sum() / real.sum())
+        pooled_power.append(((knockoff_q(dim, bright) <= 0.1) & real).sum() / real.sum())
+    # Pooled competition: faint strata's bright spikes cancel every real dimmer. Stratified: found, FDR held.
+    assert np.mean(pooled_power) < 0.05
+    assert np.mean(power) > 0.9
+    assert np.mean(fdp) <= 0.1 + 0.02
+
+
+def test_stratified_knockoff_rarely_selects_under_a_global_null():
+    from cosmos_search.stats import stratified_knockoff_q
+
+    rng = np.random.default_rng(19)
+    any_selected = [(stratified_knockoff_q(*_asymmetric_world(rng, n_real=0)[:3]) <= 0.1).any() for _ in range(40)]
+    assert np.mean(any_selected) <= 0.1

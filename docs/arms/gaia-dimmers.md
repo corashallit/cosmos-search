@@ -137,3 +137,9 @@ Record changes of approach here, with the evidence that prompted them.
   (59–66% on unblended stars), and blended stars are effectively untested. We accept that, because a mask that
   removes real dips does more harm than faults that reach vetting. G3 still reports both the raw and the
   cleaned extremes (`single_raw` vs `single`).
+- **2026-10-21.** First G3 run on all 11.75 M cleaned DR3 sources (archive thread) selected nothing: 0 at q ≤ 0.1
+  for `single`, `fov` and `single_raw`. Symmetry by stratum explains it. At 30 robust σ, G 8–12 has 20–43 times
+  more dim than bright exceedances (G = 10, n ≥ 20: 151 vs 3). G 19–20 has only bright ones (G = 20, n ≥ 20:
+  0 vs 689), because a faint star's dip is capped by its S/N while spikes are not. Pooled over all sources, at
+  |W| ≥ 200, there were 369 dim winners and 875 bright, down from 1,386 bright before Stage 0. Competition now
+  runs per G bin (statistics.md §2), and the pooled q is kept for comparison.
