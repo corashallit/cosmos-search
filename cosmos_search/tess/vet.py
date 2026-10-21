@@ -148,7 +148,17 @@ def cmd_build(args):
             entries.append((to_candidate(qlp.clean(lc), f"tic:{int(r.tic)}:s{int(r.sector)}"), {"kind": "real"}))
     if args.controls:
         ctl = pd.read_csv(args.controls)
-        ev = [(i, s) for i, s, state in jobs(ctl, max_event=1, max_quiet=0) if state == "event"]
+        ev = [(i, s) for i, s, state in jobs(ctl, max_event=3, max_quiet=0) if state == "event"]
+        # Stage A calibration only transfers if controls pass the same detector as real candidates, so use
+        # event sectors in which the detector fired (controls.evaluate writes controls_results.parquet).
+        res = run / "controls_results.parquet"
+        if res.exists():
+            r = pd.read_parquet(res)
+            r = r[r.state.eq("event") & r.flag_either]
+            fired = set(zip(r.ctl, r.sector))
+            ev = [(i, s) for i, s in ev if (i, s) in fired]
+        else:
+            print("no controls_results.parquet: run `python -m cosmos_search.tess.controls` first; using all event sectors")
         for k in rng.permutation(len(ev))[:args.n_controls]:
             i, sector = ev[k]
             r = ctl.loc[i]
