@@ -205,7 +205,9 @@ def build(candidate, holdout=(), packet_id=None):
         "dips": dips,
         # Detector outputs were computed on the full light curve, so a tail holdout would leak through them.
         "tests": {} if t_cut is not None else
-                 {k: {kk: sig(vv, 3) for kk, vv in v.items() if isinstance(vv, (int, float))} for k, v in cand.tests.items()},
+                 {k: {kk: (sig(vv, 3) if isinstance(vv, (int, float)) else vv) for kk, vv in v.items()
+                      if isinstance(vv, (int, float)) or (kk == "description" and isinstance(vv, str))}
+                  for k, v in cand.tests.items()},
         "scores": {} if t_cut is not None else
                   {k: sig(v, 3) for k, v in cand.scores.items() if isinstance(v, (int, float))},
         "context": {k: (sig(v, 3) if isinstance(v, (int, float)) else v) for k, v in cand.context.items()
@@ -237,8 +239,9 @@ def render(packet, lcs):
         out += ["## Context", json.dumps(packet["context"], sort_keys=True), ""]
     if packet["tests"] or packet["scores"]:
         out += ["## Detector scores and false-positive tests",
-                "Scores are calibrated false-alarm probabilities unless named otherwise; tests give the statistic and "
-                "the p-value of the null 'this false-positive class does not explain the dip'.",
+                "Scores are calibrated false-alarm probabilities unless named otherwise. Tests give a statistic, a "
+                "description of it where the pipeline supplies one, and, where available, the p-value of the null "
+                "'this false-positive class does not explain the dip'.",
                 json.dumps({"scores": packet["scores"], "tests": packet["tests"]}, sort_keys=True), ""]
     if packet["dips"]:
         out += ["## Detected dips", *(json.dumps(d, sort_keys=True) for d in packet["dips"]), ""]

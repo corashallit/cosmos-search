@@ -1,4 +1,5 @@
 import json
+import re
 
 import numpy as np
 import pytest
@@ -68,9 +69,12 @@ def test_leak_scan_passes_ordinary_packet_text():
 def test_packet_is_rezeroed_and_clean():
     packet, key = build(gaia_like(dip_at=2457500.0))
     assert key["candidate_id"].startswith("gaia_dr3")
-    assert "2457" not in packet["text"]
+    # Every rendered time is on the packet clock (the light curve spans ~1000 d), never a JD.
+    assert not re.search(r"(?<![\d.])24[5-6]\d{4}\.\d", packet["text"])
+    t_col = [float(line.split()[0]) for line in packet["text"].splitlines() if re.match(r"^\d+\.\d{4} ", line)]
+    assert t_col and max(t_col) < 1001
     assert packet["summaries"]["G"]["n_epochs"] == 120
-    assert leak_scan(packet["text"]) == []
+    assert leak_scan(packet["text"].replace(packet["packet_id"], "")) == []
 
 
 def test_packet_refuses_leaky_context():
@@ -91,7 +95,7 @@ def test_holdouts_withhold_data_and_record_truth():
     assert key["truths"]["dip_colour_ratio"] == pytest.approx(1, abs=0.2)  # injected grey dip
     assert packet["summaries"]["G"]["span_days"] < 0.85 * 1000
     for t in packet["targets"]:
-        assert "2457" not in t["question"]
+        assert all(float(x) < 1001 for x in re.findall(r"t = (-?[\d.]+) d", t["question"]))
 
 
 def test_batch_harmonises_fields_and_shuffles():
@@ -306,3 +310,11 @@ def test_audit_catches_a_field_only_decoys_lack():
     assert audit(packets, planted, n_perm=200)["auc"] > 0.9
     fair = [build(gaia_like(seed=100 + i))[0] for i in range(60)]
     assert audit(fair, planted, n_perm=200)["p"] > 0.01
+
+
+def test_test_descriptions_are_rendered():
+    cand = gaia_like()
+    cand.tests["z_bkg"] = {"statistic": 4.2, "description": "in-dip background excess in its own scatter"}
+    packet, _ = build(cand)
+    assert packet["tests"]["z_bkg"]["description"].startswith("in-dip")
+    assert "in-dip background excess" in packet["text"]
