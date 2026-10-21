@@ -34,6 +34,13 @@ COINCIDENCE_WINDOW = 5.0    # days
 CONTEXT_KEYS = {"allwise_w1mpro": "W1", "allwise_w2mpro": "W2", "allwise_w3mpro": "W3", "allwise_w4mpro": "W4",
                 "allwise_p_cal": "wise_match_p", "2mass_k_m": "Ks", "2mass_p_cal": "twomass_match_p"}
 P_U_SHORTLIST = 0.25        # pilots 2-3: probes 4/8 and controls 0/26 at P(unexplained) >= 0.25
+# Shortlist rule v1 (docs/dayone.md, pre-registered before batch 2): for a technosignature search the rare
+# astrophysical leaves are as interesting as "unexplained", so the score is their sum. YSO dippers stay common.
+INTERESTING = ("disk_occultation", "debris_transit", "other_astrophysical", "unexplained")
+S_SHORTLIST = 0.35
+# Injected families an ideal v1 shortlist should keep; the others should read as EB, YSO or instrumental.
+TARGET_FAMILIES = ("grey_dip", "blue_dip", "dip_train_poisson", "dip_train_primes", "dip_train_geometric",
+                   "chromatic_flip", "secular_fade")
 
 
 def candidate_dicts(queue, ranked, lc_dir, wide=None):
@@ -66,7 +73,9 @@ def candidate_dicts(queue, ranked, lc_dir, wide=None):
                 v = ctx.at[sid, col] if col in ctx.columns else np.nan
                 context[name] = float(v) if pd.notna(v) else float("nan")
         out.append({"candidate_id": f"gaia_dr3:{sid}", "arm": "gaia", "source": source, "lightcurves": lcs,
-                    "context": context, "role": row["role"]})
+                    "context": context, "role": row["role"],
+                    "control_label": row["control_label"] if "control_label" in row and pd.notna(row.get("control_label"))
+                    else "eclipsing_binary"})
     return out
 
 
@@ -136,6 +145,19 @@ def coincidence_at(ranked):
     return at
 
 
+def _control_label(c):
+    """Known-answer label for a control. Tier-3 EB controls are labelled at the dip. Other DPAC-class controls are
+    labelled by star, so an instrumental reading of their dip is acceptable too (pilot 3: labels must be dip-level)."""
+    label = c.get("control_label", "eclipsing_binary")
+    acceptable = ["astrophysical"] if label == "eclipsing_binary" else ["astrophysical", "instrumental"]
+    return {"label": label, "acceptable": acceptable}
+
+
+def interesting_score(class_probs):
+    """Shortlist score v1: the probability mass on the rare astrophysical leaves plus unexplained."""
+    return float(sum(class_probs.get(k, 0.0) for k in INTERESTING))
+
+
 def build(queue, ranked, lc_dir, out, wide=None, rng=None, sso_check=True):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -144,7 +166,7 @@ def build(queue, ranked, lc_dir, out, wide=None, rng=None, sso_check=True):
     _, flagged = coincidence_tests(ranked)
     cands = add_tests(cands, coincidence_at(ranked), sso_check)
     entries = [(c, {"kind": "control" if c["role"] == "control" else "real", "role_in_queue": c["role"],
-                    **({"label": "eclipsing_binary", "acceptable": ["astrophysical"]} if c["role"] == "control" else {})})
+                    **(_control_label(c) if c["role"] == "control" else {})})
                for c in cands]
     # The batch detector, as a hook: with no hook, build_batch also clears the tests and scores.
     packets, keys = build_batch(entries, rng, holdout=("tail",), detect=lambda c: setattr(c, "dips", simple_dips(c)))
@@ -179,6 +201,7 @@ def score_batch(out, batch, plan=None):
                      "role_in_queue": k.get("role_in_queue"), "injected_family": k.get("injected_family"),
                      "ok": v.ok, "p_unexplained": v.groups["unexplained"] if v.ok else None,
                      "decision": decision(v) if v.ok else None,
+                     "s_interesting": interesting_score(v.class_probs) if v.ok else None,
                      "top_leaf": max(v.class_probs, key=v.class_probs.get) if v.ok else None})
     table = pd.DataFrame(rows).sort_values("p_unexplained", ascending=False)
     short = table[(table.kind == "real") & (table.p_unexplained >= P_U_SHORTLIST)]
@@ -186,9 +209,41 @@ def score_batch(out, batch, plan=None):
     rep["shortlist_rule"] = f"real packets with P(unexplained) >= {P_U_SHORTLIST}"
     ctrl = table[table.kind == "control"]
     rep["controls_flagged"] = {"k": int((ctrl.p_unexplained >= P_U_SHORTLIST).sum()), "n": len(ctrl)}
+    rep["v1"] = score_v1(table)
     table.to_csv(out / "verdicts_table.csv", index=False)
     (out / "report.json").write_text(json.dumps(rep, indent=2, sort_keys=True, default=str))
     return rep, table
+
+
+def score_v1(table, threshold=S_SHORTLIST):
+    """Shortlist rule v1 and its pre-registered measures (docs/dayone.md): recall on target-family decoys, the
+    false-interesting rate on controls and on the other decoys, and AUCs of S and P(u) for decoys vs controls."""
+    from cosmos_search.inject.recovery import wilson
+
+    ok = table[table.ok]
+    hit = ok.s_interesting >= threshold
+    target = (ok.kind == "decoy") & ok.injected_family.isin(TARGET_FAMILIES)
+    other = (ok.kind == "decoy") & ~ok.injected_family.isin(TARGET_FAMILIES)
+    ctrl = ok.kind == "control"
+
+    def rate(mask):
+        k, n = int((hit & mask).sum()), int(mask.sum())
+        lo, hi = wilson(k, n) if n else (float("nan"), float("nan"))
+        return {"k": k, "n": n, "rate": k / n if n else float("nan"), "interval_95": [float(lo), float(hi)]}
+
+    def auc(col, pos, neg):
+        a, b = ok.loc[pos, col].to_numpy(float), ok.loc[neg, col].to_numpy(float)
+        if not len(a) or not len(b):
+            return float("nan")
+        return float(((a[:, None] > b[None, :]).sum() + 0.5 * (a[:, None] == b[None, :]).sum()) / (len(a) * len(b)))
+
+    short = ok[(ok.kind == "real") & hit]
+    return {"rule": f"real packets with S = P({' + '.join(INTERESTING)}) >= {threshold}",
+            "shortlist": short.to_dict("records"),
+            "target_decoy_recall": rate(target), "other_decoys_flagged": rate(other), "controls_flagged": rate(ctrl),
+            "real_flagged": rate(ok.kind == "real"),
+            "auc_s_target_vs_controls": auc("s_interesting", target, ctrl),
+            "auc_pu_target_vs_controls": auc("p_unexplained", target, ctrl)}
 
 
 # Decoy labels by injected family, as vetting_decoys.DECOY_SPECS reads them (what an ideal observer could conclude

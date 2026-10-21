@@ -60,3 +60,23 @@ def test_coincidence_excludes_the_star_itself():
     r = at(10.0, "gaia_dr3:1")
     assert r["k"] == 1 and r["n"] == 1
     assert at(30.0, "gaia_dr3:3")["n"] == 0
+
+
+def test_score_v1_counts_rare_astrophysics_as_interesting():
+    from cosmos_search.dayone.vet import interesting_score, score_v1
+
+    assert interesting_score({"disk_occultation": 0.3, "unexplained": 0.1, "eclipsing_binary": 0.6}) == 0.4
+    assert interesting_score({"yso_dipper": 0.9, "unexplained": 0.1}) == 0.1
+    table = pd.DataFrame([
+        {"kind": "decoy", "injected_family": "grey_dip", "ok": True, "s_interesting": 0.7, "p_unexplained": 0.1},
+        {"kind": "decoy", "injected_family": "dip_train_primes", "ok": True, "s_interesting": 0.2, "p_unexplained": 0.2},
+        {"kind": "decoy", "injected_family": "g_only", "ok": True, "s_interesting": 0.5, "p_unexplained": 0.5},
+        {"kind": "control", "injected_family": None, "ok": True, "s_interesting": 0.1, "p_unexplained": 0.05},
+        {"kind": "real", "injected_family": None, "ok": True, "s_interesting": 0.4, "p_unexplained": 0.1},
+    ])
+    rep = score_v1(table, threshold=0.35)
+    assert rep["target_decoy_recall"]["k"] == 1 and rep["target_decoy_recall"]["n"] == 2
+    assert rep["other_decoys_flagged"]["k"] == 1
+    assert rep["controls_flagged"]["k"] == 0
+    assert len(rep["shortlist"]) == 1
+    assert rep["auc_s_target_vs_controls"] == 1.0

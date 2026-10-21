@@ -155,3 +155,26 @@ two highest scores of the 44 are injections.
    sources/s a 10⁴ pull takes most of a day.
 6. **SSO fallback.** Cache a Miriade route or a local ephemeris for the dip epochs.
 7. Run V3's calibration batch before December, so the shortlist FP figure has real precision.
+
+## Shortlist rule v1 (pre-registered 2026-10-21, before batch 2 was built)
+
+Written after the rehearsal batch and committed before the second batch's packets exist, so the rehearsal
+numbers that suggested it do not count as its test.
+
+- **Score.** S = P(disk_occultation) + P(debris_transit) + P(other_astrophysical) + P(unexplained), from each
+  Stage A reply's leaf probabilities (`dayone.vet.interesting_score`). YSO dippers stay among the common
+  classes, because they are frequent in star-forming regions and would flood the list.
+- **Rule.** Shortlist = real packets with S ≥ 0.35 (`S_SHORTLIST`). On the rehearsal batch this would have
+  taken 2 of 5 injections, 0 of 31 real packets and 0 of 8 controls; that is where 0.35 comes from.
+- **Batch 2.** All injection-driven G3 selections not vetted yet (dip sampled, and not selected when pulled
+  again without the injection); the 3 real grey selections outside tier 3; further tier-1 sources in ranking-v0
+  order, excluding injected hosts, up to 16 real packets; 8 new tier-3 EB controls labelled at the dip; 6
+  tier-2 controls with a non-EB DPAC class, labelled by star (an instrumental reading of their dip is also
+  accepted). One blind subagent per packet, transcripts audited, verdicts committed before the reveal.
+- **Measures** (`dayone.vet.score_v1`). Recall on target-family decoys (grey, blue, Poisson, prime and
+  geometric dip trains, chromatic flip, secular fade); the flagged rate on controls, on the other decoys
+  (periodic trains, dust dips, steps, G-only) and on real packets; AUC of S and of P(u) for target decoys
+  against controls. All with 95% Wilson intervals.
+- **Decision.** Adopt v1 for the D2 freeze if target recall ≥ 0.5, at most 1 of the 14 controls is flagged,
+  and AUC(S) ≥ AUC(P(u)). Otherwise revise it and test again on another fresh batch. The batch is small, so
+  the result decides which rule goes forward, while the shortlist FP figure still waits for V3's calibration run.
