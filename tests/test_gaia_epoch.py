@@ -121,9 +121,12 @@ def test_stage0_removes_g_only_faults_but_keeps_grey_dips():
     fault[10] *= 0.6
     flat = 10_000 + rng.uniform(-20, 20, 40)
     lc = epoch.read_epoch_csv(synth_csv([(1, grey, {}), (2, fault, {"bp": flat * 0.5, "rp": flat * 0.8})]))
-    f = features.source_features(lc).set_index("source_id")
+    f = features.source_features(lc, blend={1: 0.0, 2: 0.0}).set_index("source_id")
     assert f.loc[1, "min_z_rob"] < -50 and f.loc[1, "stage0_n_band_inconsistent"] == 0
     assert f.loc[2, "min_z_raw"] < -50 and f.loc[2, "stage0_n_band_inconsistent"] == 1
     assert f.loc[2, "min_z_rob"] > -5
+    # Without blend counts the quiet source's G-only dip could be a diluted real one, so it is left untested.
+    unknown = features.source_features(lc).set_index("source_id")
+    assert unknown.loc[2, "stage0_n_band_inconsistent"] == 0 and unknown.loc[2, "min_z_rob"] < -50
     raw = features.source_features(lc, clean=False).set_index("source_id")
     assert raw.loc[2, "min_z_rob"] < -50 and "stage0_n_consistent" not in raw

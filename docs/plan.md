@@ -62,7 +62,7 @@ These apply to every arm and every thread.
 | A2 | Nested model fits (single, acceleration, 1–2 Keplerians) plus VIM and scan-angle terms | A1 | unassigned |
 | A3 | Injections of non-gravitational motion into real residuals | A2 | unassigned |
 | **Vetting** | | | |
-| V1 | Packet builder, anonymiser and leak scan; FP-class catalogue; Stage 0 cross-candidate coincidence ✓. SSO (SkyBoT) check pending I1 | G6 for real input | Vetting thread |
+| V1 | Packet builder, anonymiser and leak scan; FP-class catalogue; Stage 0 cross-candidate coincidence, band consistency and SSO check ✓ | G6 for real input | Vetting thread |
 | V2 | Stage A / Stage B agents, decoy generator, commit-then-reveal, scoring, held-out targets ✓. Known-answer control lists (Gaia: vetting; TESS: `tess/controls.csv`) | V1, truth repo ✓ | Vetting thread |
 | V3 | Statistics ✓ (label-shift shortlist FP, recalibration, allocation, sequential acceptance, simulation). Calibration run of ~400 on DR3 controls and decoys; then rehearsal on DR3 candidates | V2, G6, I4 | Vetting thread |
 | **Decision and freeze** | | | |

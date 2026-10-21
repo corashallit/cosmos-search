@@ -145,13 +145,15 @@ def _raw_extremes(table):
     return pd.DataFrame({"source_id": uniq, "min_z_raw": _take(g["z"], lo), "max_z_raw": _take(g["z"], hi)})
 
 
-def source_features(table, clean=True):
+def source_features(table, clean=True, blend=None):
     """Compute one row of features per source from a light-curve table (epoch.SCHEMA). Returns pandas.
 
-    clean=True (the default, and what injections must go through too) removes Stage 0 faults first."""
+    clean=True (the default, and what injections must go through too) removes Stage 0 faults first. blend maps
+    source_id to its BP/RP blended-transit fraction (stage0.blend_fraction of gaia_source's stage0.BLEND_COLS);
+    without it Stage 0 leaves quiet sources untested, since a G-only change there could be a diluted real one."""
     if clean:
         raw = _raw_extremes(table)
-        table, counts = stage0.clean_long(table)
+        table, counts = stage0.clean_long(table, blend=blend)
         extra = raw.merge(counts, on="source_id", how="left")
     df = _features(table)
     if clean:

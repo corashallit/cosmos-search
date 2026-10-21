@@ -37,7 +37,7 @@ HOST_CLASSES = {"SOLAR_LIKE": 6, "RS": 6}
 DECOYS = {"grey_primes": 1, "grey_geometric": 1, "duration_tension": 2, "chromatic_flip": 2, "dust_dip": 2,
           "periodic_grey": 2}
 SOURCE_COLS = "s.source_id, s.ra, s.dec, s.phot_g_mean_mag, s.bp_rp, s.parallax, s.parallax_error, s.ruwe, " \
-              "s.ipd_frac_multi_peak, s.phot_bp_rp_excess_factor"
+              "s.ipd_frac_multi_peak, s.phot_bp_rp_excess_factor, " + ", ".join(stage0.BLEND_COLS)
 
 
 def select(cls, n, extra="", after=0):
@@ -51,7 +51,8 @@ def select(cls, n, extra="", after=0):
 
 def candidates(rows, lc):
     # Stage 0 first, as in the queue: a control's detected dip, and so its label, must be about the star.
-    lc, _ = stage0.clean_long(lc)
+    blend = {int(r["source_id"]): stage0.blend_fraction({c: None if np.ma.is_masked(r[c]) else r[c] for c in stage0.BLEND_COLS}) for r in rows}
+    lc, _ = stage0.clean_long(lc, blend=blend)
     out = []
     for r in rows:
         sid = int(r["source_id"])

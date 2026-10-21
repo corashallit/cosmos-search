@@ -55,15 +55,74 @@ def _robust(x):
     return robust_sigma(x) if len(x) >= 5 else 0.0
 
 
-def _assess(d_g, e_g, d_bp, e_bp, d_rp, e_rp, nsigma, err_ratio, w_range):
-    """Verdicts from per-G-epoch fractional changes and errors, with BP/RP NaN where the transit has none."""
+PARTNER_DAYS = 0.1  # the other field of view's transit follows ~0.074 d later
+BLEND_MAX = 0.05  # blended-transit fraction below which a quiet source is taken as unblended
+RATIO_SIG = 10.0  # G changes (in G errors) used to measure the BP/RP dilution ratio
+
+
+def _partner(t):
+    """Index of the nearest other G epoch within PARTNER_DAYS (the other field of view's transit), else -1."""
+    t = np.asarray(t, float)
+    order = np.argsort(t)
+    ts = t[order]
+    best = np.full(len(t), -1)
+    if len(t) < 2:
+        return best
+    gap_prev = np.r_[np.inf, np.diff(ts)]
+    gap_next = np.r_[np.diff(ts), np.inf]
+    use_next = gap_next < gap_prev
+    nearest = np.where(use_next, np.arange(len(ts)) + 1, np.arange(len(ts)) - 1)
+    ok = np.minimum(gap_prev, gap_next) <= PARTNER_DAYS
+    best[order[ok]] = order[nearest[ok]]
+    return best
+
+
+def dilution_floor(d_g, e_g, d_bp, d_rp, blend_frac=None, min_epochs=5):
+    """Lower bound on r = (BP/RP response) / (G response) to a change in the source's light, for one source.
+
+    BP and RP are measured in a 3.5 x 2.1 arcsec window, G in a 0.7 x 2.1 arcsec one, so a neighbour adds
+    constant light to BP and RP and dilutes the source's changes there by a factor r <= 1. A real G dip then sits
+    outside the unblended interval by about 1/r (DR3 eclipsing binaries in the LMC: dips removed with BP/RP
+    blended in every transit). Where the source changes significantly in G at >= min_epochs epochs, r is
+    measured from them: a generous fraction of the lower quintile of mix / d_G for a source known to be
+    unblended (blend_frac < BLEND_MAX), of the minimum otherwise, because a neighbour enters the BP/RP window
+    only at some scan angles and so dilutes only some transits. The minimum includes the epoch under test:
+    leaving it out gains ~4 points of G-only recall but vetoed 2-8% of diluted real changes in the injection
+    test (docs/vetting.md §12). A quiet source gives no measurement: r = 1 if
+    it is known to be unblended, else 0, which leaves every G change untested rather than vetoed. On a
+    blended source the test is therefore lenient by design.
+    """
+    unblended = blend_frac is not None and np.isfinite(blend_frac) and blend_frac < BLEND_MAX
+    mix = 0.5 * (d_bp + d_rp)
+    sig = np.isfinite(mix) & (np.abs(d_g) > RATIO_SIG * e_g)
+    if sig.sum() >= min_epochs:
+        ratio = mix[sig] / d_g[sig]
+        return float(np.clip(0.7 * (np.quantile(ratio, 0.2) if unblended else ratio.min()), 0.0, 1.0))
+    return 1.0 if unblended else 0.0
+
+
+def _assess(d_g, e_g, d_bp, e_bp, d_rp, e_rp, nsigma, err_ratio, w_range, r_lo=1.0, partner=None):
+    """Verdicts from per-G-epoch fractional changes and errors, with BP/RP NaN where the transit has none.
+
+    r_lo (per source; scalar or per-epoch array) is dilution_floor's bound: the allowed G interval is the
+    BP-RP mixing interval scaled by every r in [r_lo, 1], and BP/RP noise is scaled by 1 / r_lo. partner is
+    _partner's index array; an inflated G error is only a fault when neither BP/RP nor the partner transit
+    corroborates the change.
+    """
+    r_lo = np.broadcast_to(np.asarray(r_lo, float), np.shape(d_g))
+    inv = np.divide(1.0, r_lo, out=np.full(np.shape(d_g), np.inf), where=r_lo > 0)
     ends = np.array([w * d_bp + (1 - w) * d_rp for w in w_range])
-    lo, hi = ends.min(axis=0), ends.max(axis=0)
+    lo0, hi0 = ends.min(axis=0), ends.max(axis=0)
+    with np.errstate(invalid="ignore"):
+        lo = np.where(lo0 < 0, lo0 * inv, lo0)  # dilution only shrinks BP/RP changes towards zero
+        hi = np.where(hi0 > 0, hi0 * inv, hi0)
     outside = np.where(d_g > hi, d_g - hi, np.where(d_g < lo, d_g - lo, 0.0))
-    outside[~np.isfinite(lo)] = np.nan
+    outside[~np.isfinite(lo0)] = np.nan
     e_other = np.fmax(e_bp, e_rp)
+    with np.errstate(invalid="ignore"):
+        e_scaled = e_other * inv
     tested = np.isfinite(outside)
-    noise = np.fmax(np.hypot(e_g, e_other), _robust(d_g - 0.5 * (d_bp + d_rp)))
+    noise = np.fmax(np.hypot(e_g, e_scaled), _robust(d_g - 0.5 * (d_bp + d_rp)))
     g_err_ratio = e_g / np.median(e_g)
 
     def z(d, e):  # a band's change in units of its own scatter (or the epoch's error, if larger)
@@ -71,28 +130,57 @@ def _assess(d_g, e_g, d_bp, e_bp, d_rp, e_rp, nsigma, err_ratio, w_range):
 
     g_at_fault = z(d_g, e_g) > np.fmax(np.nan_to_num(z(d_bp, e_bp)), np.nan_to_num(z(d_rp, e_rp)))
     verdict = np.full(len(d_g), "untested", dtype=object)
-    verdict[tested & (nsigma * e_other < np.abs(d_g))] = "consistent"
-    bad = tested & (np.abs(np.nan_to_num(outside)) > nsigma * noise)
+    with np.errstate(invalid="ignore"):
+        verdict[tested & (nsigma * e_scaled < np.abs(d_g))] = "consistent"
+        bad = tested & (np.abs(np.nan_to_num(outside)) > nsigma * noise)
     verdict[bad & g_at_fault] = "band_inconsistent"
     verdict[bad & ~g_at_fault] = "colour_fault"
-    verdict[g_err_ratio > err_ratio] = "inflated_error"
+    inflated = g_err_ratio > err_ratio
+    # Seen by an independent measurement: BP or RP at this transit, or G at the other field of view's, changed
+    # the same way by more than 3 of its own errors. Lenient on purpose: this rule has no physics behind it.
+    with np.errstate(invalid="ignore"):
+        corroborated = np.zeros(len(d_g), bool)
+        for d, e in ((d_bp, e_bp), (d_rp, e_rp)):
+            corroborated |= (np.abs(d) > 3 * e) & (np.sign(d) == np.sign(d_g))
+    if partner is not None:
+        p = np.asarray(partner)
+        q = np.clip(p, 0, None)
+        corroborated |= ((p >= 0) & ~inflated[q] & (np.abs(d_g[q]) > 3 * e_g[q])
+                         & (np.sign(d_g[q]) == np.sign(d_g)))
+    verdict[inflated & ~corroborated] = "inflated_error"
     return {"verdict": verdict, "d_g": d_g, "d_bp": d_bp, "d_rp": d_rp, "outside": outside, "noise": noise,
-            "g_err_ratio": g_err_ratio}
+            "g_err_ratio": g_err_ratio, "r_lo": r_lo}
+
+
+BLEND_COLS = ("phot_bp_n_obs", "phot_bp_n_blended_transits", "phot_rp_n_obs", "phot_rp_n_blended_transits")
+
+
+def blend_fraction(source):
+    """Largest of the BP and RP blended-transit fractions from gaia_source columns, or None if absent."""
+    out = []
+    for b in ("bp", "rp"):
+        n, k = source.get(f"phot_{b}_n_obs"), source.get(f"phot_{b}_n_blended_transits")
+        if n and k is not None and np.isfinite(float(k)):
+            out.append(float(k) / float(n))
+    return max(out) if out else None
 
 
 def epoch_verdicts(cand, nsigma=4.0, err_ratio=5.0, w_range=W_RANGE):
     """Per G epoch: a verdict and the numbers behind it, as a dict of arrays aligned with the G light curve.
 
-    Verdicts: "consistent"; "band_inconsistent" (G outside the BP-RP mixing interval by more than nsigma, G at
-    fault); "colour_fault" (the same, BP or RP at fault); "inflated_error" (G error > err_ratio times the
-    median); "untested" (no BP/RP in that transit, or BP/RP errors too large to have shown a change this size).
+    Verdicts: "consistent"; "band_inconsistent" (G outside the BP-RP mixing interval, allowing for BP/RP
+    dilution, by more than nsigma, G at fault); "colour_fault" (the same, BP or RP at fault); "inflated_error"
+    (G error > err_ratio times the median, not corroborated by BP/RP or the partner transit); "untested" (no
+    BP/RP in that transit, BP/RP too noisy or too diluted to have shown a change this size).
     """
     g = cand.band("G")
     if g is None:
         return None
     med = float(np.median(g.flux))
-    ev = _assess(1 - g.flux / med, g.flux_err / med, *_matched(cand.band("BP"), g.time),
-                 *_matched(cand.band("RP"), g.time), nsigma, err_ratio, w_range)
+    d_g, e_g = 1 - g.flux / med, g.flux_err / med
+    (d_bp, e_bp), (d_rp, e_rp) = _matched(cand.band("BP"), g.time), _matched(cand.band("RP"), g.time)
+    r_lo = dilution_floor(d_g, e_g, d_bp, d_rp, blend_fraction(cand.source))
+    ev = _assess(d_g, e_g, d_bp, e_bp, d_rp, e_rp, nsigma, err_ratio, w_range, r_lo, _partner(g.time))
     return {"time": g.time, **ev}
 
 
@@ -103,11 +191,12 @@ def verdict_counts(verdicts):
     return {f"stage0_n_{name}": int((v == name).sum()) for name in VERDICTS}
 
 
-def clean_long(table, nsigma=4.0, err_ratio=5.0, w_range=W_RANGE):
+def clean_long(table, nsigma=4.0, err_ratio=5.0, w_range=W_RANGE, blend=None):
     """Stage 0 on gaia.epoch's long light-curve table (one row per observation, G/BP/RP sharing transit_id).
 
     Returns (table without the faulty measurements, pandas frame of per-source verdict_counts). Matching is
-    by transit_id, which is exact. For the statistics downstream to stay valid, run this before every
+    by transit_id, which is exact. blend maps source_id to its BP/RP blended-transit fraction (blend_fraction
+    of the gaia_source row); a quiet source missing from it is left untested (dilution_floor). For the statistics downstream to stay valid, run this before every
     statistic that reads the light curves (dim and bright alike, so a mirrored null stays symmetric) and on
     injected light curves too, so completeness is measured after cleaning.
     """
@@ -134,10 +223,14 @@ def clean_long(table, nsigma=4.0, err_ratio=5.0, w_range=W_RANGE):
         cols = []
         for b in ("BP", "RP"):
             d, e = changes(rows[b])
+            if len(d) == 0:
+                cols += [np.full(len(g), np.nan)] * 2
+                continue
             at = {t: i for i, t in enumerate(tid[rows[b]])}
             j = np.array([at.get(t, -1) for t in tid[g]])
-            cols += [np.where(j >= 0, d[j], np.nan), np.where(j >= 0, e[j], np.nan)]
-        v = _assess(d_g, e_g, *cols, nsigma, err_ratio, w_range)["verdict"]
+            cols += [np.where(j >= 0, d[np.clip(j, 0, None)], np.nan), np.where(j >= 0, e[np.clip(j, 0, None)], np.nan)]
+        r_lo = dilution_floor(d_g, e_g, cols[0], cols[2], (blend or {}).get(sid))
+        v = _assess(d_g, e_g, *cols, nsigma, err_ratio, w_range, r_lo, _partner(df["t"].to_numpy()[g]))["verdict"]
         drop[g[np.isin(v, ARTEFACTS)]] = True
         faulty = set(tid[g][v == "colour_fault"])
         for b in ("BP", "RP"):
@@ -159,7 +252,7 @@ def band_consistency(cand, dips, **kw):
         row = {"t_min": d["t_min"], "verdict": str(ev["verdict"][i])}
         if abs(ev["time"][i] - d["t_min"]) > MATCH_DAYS:
             row["verdict"] = "untested"
-        for k in ("d_g", "d_bp", "d_rp", "outside", "noise", "g_err_ratio"):
+        for k in ("d_g", "d_bp", "d_rp", "outside", "noise", "g_err_ratio", "r_lo"):
             row[k] = float(ev[k][i])
         out.append(row)
     return out
