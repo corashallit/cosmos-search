@@ -19,6 +19,15 @@ Nulls are built from the data so that they keep its systematics:
   brightening statistics, computed in the same strata (magnitude, colour, ecliptic latitude, crowding, number
   of transits), estimates the dimming statistic's null. Brightening has its own astrophysics (flares,
   microlensing), which makes this null conservative in some strata. Measure that, don't assume it.
+- **Per-source competition.** Each source's dimming statistic competes with its own brightening
+  statistic, and the bright winners above a threshold estimate the false discoveries among the dim winners
+  (knockoff+, Barber & Candès 2015; the same idea as target–decoy competition in proteomics). FDR control
+  is finite-sample and needs only that each source's own noise be symmetric, not that sources be
+  exchangeable, so epoch count, magnitude and sky position cannot leak in through the null. It is the
+  default for selection; cross-source mirror p-values are still needed for ranking and combination.
+  Power has a cliff: a dimmer is only found once it is deeper than nearly every bright winner in the
+  set, so it is run per arm and per channel, not on everything pooled. Code: `cosmos_search.stats.mirror`,
+  with `tail_ratio` to measure the symmetry first.
 - **Strata must include the number of epochs.** Statistics that take an extreme over a light curve
   (minimum flux, largest gap, longest run) have nulls that widen with the number of points, roughly as
   √(2 ln n) for near-Gaussian noise. Gaia's epoch count follows the scanning law, mostly ecliptic latitude,
