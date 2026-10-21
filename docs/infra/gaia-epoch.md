@@ -74,11 +74,14 @@ pandas query (default: all). Light-curve Parquet metadata records the control fr
 random controls' inclusion probability (0.01) travels with the data.
 
 `--sketch` writes `sketches/<file>.json.gz` (`cosmos_search.gaia.sketches`): one `stats.TailSketch` per
-0.5-mag G stratum and per side, `dim` = −`min_z_rob` and `bright` = `max_z_rob`, over sources with ≥ 10 G
-transits. Each keeps the top 2% of its stratum exactly (at least 100 values) and a 0.05σ histogram on
-0–50σ for the rest; gzip keeps the mostly empty histograms small. `sketches.merge(paths)` gives one sketch
-per stratum across files and sessions, and `sk.p(stat)` gives the mirror-null p-value. The sketch sees every
-source, before `--feature-cut`.
+stratum of 0.5-mag G × n_g (10–20, 20–40, 40–80, 80+) and per side, `dim` = −`min_z_rob` and `bright` =
+`max_z_rob`, over sources with ≥ 10 G transits. Both statistics are extremes over n_g transits, so their
+null widens with n_g (roughly √(2 ln n_g)), and n_g follows the scanning law; pooling n_g would show up as
+false structure on the sky. Each sketch keeps the top 2% of its stratum exactly (at least 100 values) and a
+0.05σ histogram on 0–50σ for the rest; gzip keeps the mostly empty histograms small. `sketches.merge(paths)`
+gives one sketch per stratum across files and sessions, and `sk.p(stat)` gives the mirror-null p-value.
+Where a stratum is thin, coarsen G rather than dropping n_g. The sketch sees every source, before
+`--feature-cut`.
 
 ```
 python -m cosmos_search.gaia.dr3_pass --out /tmp/work --durable /mnt/project-files/data/gaia-dr3-epoch --shard 0/2 --workers 5
