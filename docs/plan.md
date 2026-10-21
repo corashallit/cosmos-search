@@ -49,7 +49,7 @@ These apply to every arm and every thread.
 | **Gaia dimmers (main)** | | | |
 | G1 | DR3 rehearsal sample: full DR3 epoch photometry (11.75 M) plus random controls ✓ (features for every source; docs/infra/gaia-epoch.md) | I2 | Archive thread |
 | G2 | Detectors v0: invariance tests (FoV pairs, bands: stage-0 mask ✓ `vetting/stage0.py`), dip colour, secular trend, surprisal score. The per-candidate path (DataLink → `stage0.clean_long` → detector) is not written yet | G1 | TESS thread's survey-agnostic detector in `dimming/`, then Gaia-specific tests |
-| G3 | Empirical nulls (brightening mirror, stratified permutation) and calibrated false-alarm rates | G2 | DR4 plan thread (library ✓ `stats/`); detector owner (strata and runs) |
+| G3 | Empirical nulls (brightening mirror, stratified permutation) and calibrated false-alarm rates. Mirror competition per G bin ✓ on all of DR3 (`scripts/dr3_g3.py`; arms/gaia-dimmers.md log). No power yet at G ≥ 16; stratified permutation not started | G2 | DR4 plan thread (library ✓ `stats/`); detector owner (strata and runs) |
 | G4 | Injection families (library ✓ `inject/lightcurve.py`) and recovery maps on DR3 (binning ✓ `inject/recovery.py`) | G2 | DR4 plan thread (library); detector owner (maps) |
 | G5 | Energy-budget test against WISE | I5, G2 | unassigned |
 | G6 | Ranking with value term, plus a random-audit stream below threshold (audit sampler ✓ `stats/audit.py`) | G3, G4, G5 | unassigned |
@@ -68,7 +68,7 @@ These apply to every arm and every thread.
 | **Decision and freeze** | | | |
 | D1 | Compare arms on equal footing: recovery on injections and vetting cost per surviving candidate; reallocate effort | G4, T4, A3, V3 | DR4 plan thread → Cora |
 | D2 | Freeze `dr4-day-one`: queries, thresholds, code, pre-registered analysis | D1, G7; before DR4 | DR4 plan thread |
-| D3 | DR4 day one: TAP prefilter → DataLink pull of the top ~10⁴; full bulk stream of epoch photometry with detectors per file (falls back to a random DataLink channel if there are no bulk files) → ranking → vetting | D2, DR4 release | all |
+| D3 | DR4 day one: TAP prefilter → DataLink pull of the top ~10⁴; full bulk stream of epoch photometry with detectors per file (falls back to a random DataLink channel if there are no bulk files); for G ≥ 16, a per-CCD DataLink pull of the top ~10⁴ by \|W\| per G bin (sign-blind, so competition stays valid) → ranking → vetting | D2, DR4 release | all |
 | D4 | Shortlist with measured recall and false-positive rate; decide on outreach to technosignature groups | D3 | Cora |
 
 ## Open decisions

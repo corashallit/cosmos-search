@@ -143,3 +143,21 @@ Record changes of approach here, with the evidence that prompted them.
   0 vs 689), because a faint star's dip is capped by its S/N while spikes are not. Pooled over all sources, at
   |W| ≥ 200, there were 369 dim winners and 875 bright, down from 1,386 bright before Stage 0. Competition now
   runs per G bin (statistics.md §2), and the pooled q is kept for comparison.
+- **2026-10-21.** G3 with per-G-bin competition on all 11.75 M cleaned DR3 sources. Selections at q ≤ 0.1:
+  16,288 for `single` (100 at q ≤ 0.01), 6,624 for `fov`, and 14,696 for `single_raw`, so cleaning adds 11%.
+  Pooled competition gives 0 for all three. The `fov` selections lie entirely at G 8–15. The deepest are
+  eclipsing-binary-like: depths 25–65%, R 0.78–1.05, 1–5 episodes, RUWE ~1. That is expected, because DR3 epoch
+  photometry is DPAC's variables. Known-class removal and the per-event physics term (G2, G6) come next.
+  Two consequences for DR4 follow:
+  - **No power at G ≥ 16.** Those bins have 220–300 k dim winners each but select nothing in `fov`, because bright
+    spikes keep pace with dips at every threshold. Most DR4 sources are this faint. Per-CCD G in DR4 is the
+    fix to plan for: a cosmic ray or a neighbour's crossing hits one or two of the 9 CCDs of a transit, while
+    an occultation lasting more than ~45 s dims all 9. Requiring all-CCD consistency on both sides of the
+    mirror should remove most of the bright tail at faint G and restore symmetry where the search needs it.
+    It needs testing on the DR4 data model (G7) and on injections before it is relied on. The June draft data
+    model puts per-CCD G (`epoch_photometry_ccd`) in DataLink only, so on day one the test runs on a pull of the
+    top ~10⁴ by |W| in each G ≥ 16 bin, ~9 h at DR3 rates. The pull is chosen by |W| regardless of sign, so
+    each source's dim/bright coin stays fair and knockoff+ on the CCD-cleaned W of the pulled set stays valid.
+    Choosing by the dim score alone would bias it.
+  - **The floor binds.** At q ≤ 0.01 each G bin needs 100 discoveries, so `fov` reports none. Lists for
+    vetting use q ≤ 0.1.
