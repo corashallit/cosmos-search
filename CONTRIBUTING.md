@@ -1,0 +1,35 @@
+# Contributing
+
+Several Claude threads work in this repo at once. These rules keep them out of each other's way.
+
+## Branches
+
+- `main` is the integration branch. Never push work-in-progress to it.
+- Each thread works on its own branch from `main` and opens a pull request into `main`.
+- Rebase on `main` before merging; merge only when CI is green. Squash-merge is fine.
+- Keep PRs to one package or concern where possible.
+
+## Ownership
+
+| Path | Owner thread | Contents |
+|---|---|---|
+| `cosmos_search/net/` | Archive client and Gaia epoch photometry | HTTP client, TAP layer, cache |
+| `cosmos_search/gaia/` | Archive client and Gaia epoch photometry | DataLink, epoch photometry, DR4 adapters |
+| `cosmos_search/targets/` | Archive client and Gaia epoch photometry | Versioned ADQL target queries, freeze manifest |
+| `cosmos_search/tess/` | TESS aperiodic dimmers | FFI access, light curves |
+| `cosmos_search/dimming/` | TESS aperiodic dimmers (first), then shared | Dip detection and features used by both arms |
+| `cosmos_search/inject/` | DR4 plan and repo layout | Injector core and sealing; arms add classes in `inject/classes/` |
+| `cosmos_search/astrometry/`, `vetting/`, `xmatch/` | unassigned | Later milestones |
+| `docs/` | DR4 plan and repo layout | Arms own their page under `docs/arms/` and `docs/infra/` |
+
+To change a package you don't own, message its owner thread first.
+
+## Code
+
+- Python ≥ 3.11. Dependencies go in `pyproject.toml`; resolve conflicts there by rebasing, not by deleting
+  other threads' entries.
+- Every outbound request goes through `cosmos_search.net` once it exists (User-Agent with the contact email,
+  throttling, cache). Respect the limits in `docs/data-sources.md`.
+- Tests live in `tests/` and run offline. Mark anything that needs a live archive with
+  `@pytest.mark.network`; CI skips those.
+- Never commit data, credentials, or plaintext injection truth (see `docs/blinding.md`).
