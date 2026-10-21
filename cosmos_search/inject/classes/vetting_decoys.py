@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from cosmos_search.inject import lightcurve as lcinj
+from cosmos_search.vetting import physics
 from cosmos_search.vetting.batch import build_batch, simple_dips
 from cosmos_search.vetting.candidate import Candidate, LightCurve
 from cosmos_search.vetting.packet import HOLDOUT_TAIL, robust_sigma
@@ -31,6 +32,7 @@ from cosmos_search.vetting.packet import HOLDOUT_TAIL, robust_sigma
 DECOY_SPECS = {
     "grey_primes": ("dip_train_primes", "anomaly_probe", "unexplained", ["unexplained"], "all"),
     "grey_geometric": ("dip_train_geometric", "anomaly_probe", "unexplained", ["unexplained"], "all"),
+    "duration_tension": ("duration_tension", "anomaly_probe", "unexplained", ["unexplained"], "all"),
     "chromatic_flip": ("chromatic_flip", "incoherent", "unexplained", ["unexplained", "instrumental"], "all"),
     "single_band_dip": ("grey_dip", "incoherent", "other_instrumental", ["instrumental", "unexplained"], "one"),
     "step": ("step", "incoherent", "calibration_offset", ["instrumental", "unexplained"], "all"),
@@ -39,6 +41,47 @@ DECOY_SPECS = {
     "grey_dip": ("grey_dip", "ambiguous", "unexplained", ["astrophysical", "unexplained"], "all"),
     "secular_fade": ("secular_fade", "ambiguous", "unexplained", ["astrophysical", "unexplained", "instrumental"], "all"),
 }
+
+
+def _loguniform(rng, lo, hi):
+    return float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
+
+
+def _sample_duration_tension(rng, host, t_min, t_max):
+    """Identical grey flat-bottomed dips recurring far faster than any one orbit allows for their duration.
+
+    Sparse photometry rarely shows that a dip train is aperiodic (docs/vetting.md §10), but it can show that
+    a dip lasted a day and came back a week later on a dwarf, where a single body crossing in a day needs
+    P of years (vetting.physics). Identical depths and shapes make a family of natural bodies on one orbit
+    unlikely. Returns None when the host's parallax cannot give R* and M*, or the floor is too short.
+    """
+    sp = physics.stellar_params(host.source)
+    if sp is None:
+        return None
+    dur = _loguniform(rng, 0.5, 4.0)
+    floor = physics.min_period_days(dur, *sp)
+    lo, hi = 1.5 * dur, min(floor / 10, 0.5 * (t_max - t_min))
+    if hi <= lo:
+        return None
+    n = int(rng.integers(3, 9))
+    gaps = rng.uniform(lo, hi, n - 1)
+    room = (t_max - t_min) - gaps.sum()
+    start = t_min + (rng.uniform(0, room) if room > 0 else 0.0)
+    ing = dur * rng.uniform(0.05, 0.15)
+    cov = _loguniform(rng, 0.05, 0.4)
+    times = start + np.concatenate([[0.0], np.cumsum(gaps)])
+    return lcinj.Composite([lcinj.Dip(t0=float(t), covering=cov, ingress=ing, egress=ing, flat=dur - 2 * ing)
+                            for t in times])
+
+
+# Families whose draw depends on the host, not only on its time span.
+HOST_SAMPLERS = {"duration_tension": _sample_duration_tension}
+
+
+def _sample(rng, family, host, t_min, t_max):
+    if family in HOST_SAMPLERS:
+        return HOST_SAMPLERS[family](rng, host, t_min, t_max)
+    return lcinj.sample(rng, family, t_min, t_max)
 
 
 def _read_jsonl(path):
@@ -175,7 +218,7 @@ def _width(signal):
     return max((d.ingress + d.flat + d.egress for d in dips), default=1.0)
 
 
-def _flip_visible(devs):
+def _flip_visible(devs, host=None, signal=None):
     """A chromatic flip is incoherent only if the packet shows both halves: BP down and RP up at the same epochs."""
     if "BP" not in devs or "RP" not in devs:
         return False
@@ -188,8 +231,42 @@ def _flip_visible(devs):
     return bool(np.any(near & (d_b <= -3)))
 
 
+def _tension_visible(t, dev, host, signal, margin=3.0):
+    """The shown epochs prove both a long dip and a recurrence far inside the floor its duration sets.
+
+    Events are runs of epochs >= 3 sigma separated by an epoch back at baseline (< 0.5 sigma), so a single
+    long dip cannot pose as two. The duration seen is the longest span of in-dip epochs within one event, a
+    lower bound on the true one. The margin covers the photometric R* and M* (R* enters cubed).
+    """
+    sp = physics.stellar_params(host.source)
+    order = np.argsort(t)
+    t, dev = t[order], dev[order]
+    events, cur, gap_seen = [], [], False
+    for ti, di in zip(t, dev):
+        if di >= 3:
+            if cur and gap_seen:
+                events.append(cur)
+                cur = []
+            cur.append(ti)
+            gap_seen = False
+        elif di < 0.5:
+            gap_seen = True
+    if cur:
+        events.append(cur)
+    info = {"n_events": len(events)}
+    if sp is None or len(events) < 2:
+        return False, info
+    d_obs = max(e[-1] - e[0] for e in events)
+    spacing = float(np.min(np.diff([e[0] for e in events])))
+    floor = physics.min_period_days(d_obs, *sp)
+    info.update(d_obs=float(d_obs), spacing=spacing, period_floor=floor)
+    return bool(d_obs >= 0.25 and spacing * margin < floor), info
+
+
 # Specs whose label rests on more than one band: the feature that makes them what they are must be visible too.
 IDENTIFIABLE = {"chromatic_flip": _flip_visible}
+# Anomaly probes identified by per-event physics instead of the timing test.
+PROBE_TESTS = {"duration_tension": _tension_visible}
 
 
 def visibility(host, signal, bands, t_cut, role, spec=None):
@@ -213,6 +290,10 @@ def visibility(host, signal, bands, t_cut, role, spec=None):
     if spec in IDENTIFIABLE and not IDENTIFIABLE[spec](devs):
         info["identifiable"] = False
         return False, info
+    if spec in PROBE_TESTS:
+        ok, more = PROBE_TESTS[spec](t, dev, host, signal)
+        info.update(more)
+        return ok, info
     if role == "anomaly_probe":
         ev = _events(t, dev)
         info["n_events"] = len(ev)
@@ -257,7 +338,9 @@ def make_decoy(host, spec, rng, t_cut=np.inf, max_tries=500, detect=simple_dips)
     family, role, label, acceptable, mode = DECOY_SPECS[spec]
     t0, t1 = host.time_span()
     for _ in range(max_tries):
-        signal = lcinj.sample(rng, family, t0, t1)
+        signal = _sample(rng, family, host, t0, t1)
+        if signal is None:
+            continue
         bands = [host.lightcurves[0].band] if mode == "one" else None
         ok, info = visibility(host, signal, bands, t_cut, role, spec)
         if ok:

@@ -433,3 +433,20 @@ def test_decoys_trigger_the_candidate_detector():
         assert simple_dips(cand)
         if spec == "single_band_dip":
             assert truth["bands"] == ["G"]
+
+
+def test_period_floor_from_duration_matches_the_sun():
+    from cosmos_search.vetting import physics
+    r, m = physics.stellar_params({"phot_g_mean_mag": 4.67, "bp_rp": 0.82, "parallax": 100.0, "parallax_error": 0.1})
+    assert 0.9 < r < 1.1 and 0.85 < m < 1.15
+    assert 6.0 < physics.min_period_days(1.0, 1.0, 1.0, e_max=0.0) / 365.25 < 6.6
+    assert 0.8 < physics.min_period_days(106.5 / 1440, 1.0, 1.0, e_max=0.0) < 1.0
+    assert physics.stellar_params({"phot_g_mean_mag": 15.0, "bp_rp": 1.0, "parallax": 0.1, "parallax_error": 0.1}) is None
+
+
+def test_duration_tension_probes_recur_inside_their_period_floor():
+    host = gaia_like(seed=12, n=400)
+    cand, extra, truth = make_decoy(host, "duration_tension", np.random.default_rng(6), max_tries=5000)
+    v = truth["visibility"]
+    assert extra["role"] == "anomaly_probe" and v["n_events"] >= 2 and v["d_obs"] >= 0.25
+    assert 3 * v["spacing"] < v["period_floor"]

@@ -31,7 +31,7 @@ CONTROLS = {
     "AGN": ("extragalactic", ["astrophysical"], 2),
 }
 HOST_CLASSES = {"SOLAR_LIKE": 6, "RS": 6}
-DECOYS = {"grey_primes": 2, "grey_geometric": 2, "chromatic_flip": 2, "single_band_dip": 2, "dust_dip": 2,
+DECOYS = {"grey_primes": 1, "grey_geometric": 1, "duration_tension": 2, "chromatic_flip": 2, "single_band_dip": 2, "dust_dip": 2,
           "periodic_grey": 2}
 SOURCE_COLS = "s.source_id, s.ra, s.dec, s.phot_g_mean_mag, s.bp_rp, s.parallax, s.parallax_error, s.ruwe, " \
               "s.ipd_frac_multi_peak, s.phot_bp_rp_excess_factor"
