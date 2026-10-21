@@ -118,12 +118,17 @@ def rank_sectors(sectors, near=None, span=GAIA_DR4_SPAN):
 
 
 def _bin(t, f, width):
-    """Mean flux in fixed-width bins with the scatter of the mean as the error (TGLC gives no per-point errors)."""
+    """Mean flux in fixed-width bins, with error = per-point scatter / sqrt(n), the per-point scatter taken from
+    point-to-point differences (robust, so dips and trends barely move it). TGLC gives no per-point errors.
+
+    Bins with a single point are kept: sectors 1-26 (all of DR4's concurrent TESS data) have 30-min FFIs, one
+    point per 30-min bin, and a rule that needed two points per bin dropped every one of them."""
     key = np.floor((t - t.min()) / width).astype(np.int64)
     df = pd.DataFrame({"k": key, "t": t, "f": f}).groupby("k")
-    agg = df.agg(t=("t", "mean"), f=("f", "mean"), s=("f", "std"), n=("f", "size"))
-    agg = agg[agg.n >= 2]
-    return agg.t.to_numpy(), agg.f.to_numpy(), (agg.s / np.sqrt(agg.n)).to_numpy()
+    agg = df.agg(t=("t", "mean"), f=("f", "mean"), n=("f", "size"))
+    d = np.diff(f)
+    s = 1.4826 * np.median(np.abs(d - np.median(d))) / np.sqrt(2) if len(d) else np.nan
+    return agg.t.to_numpy(), agg.f.to_numpy(), (s / np.sqrt(agg.n)).to_numpy()
 
 
 def tess(source_id, ra, dec, max_sectors=None, near=None):
@@ -142,7 +147,7 @@ def tess(source_id, ra, dec, max_sectors=None, near=None):
             continue
         t, f, e = _bin(lc.t[ok], lc.flux[ok] / np.median(lc.flux[ok]), TESS_BIN_DAYS)
         # Flat blocks (one value repeated) come from failed fits; the robust scatter of a real star is never 0.
-        if not np.isfinite(e).any() or np.nanmedian(e) == 0:
+        if not np.isfinite(e).any() or np.nanmedian(e) == 0 or len(t) < 100:
             continue
         out.append(pd.DataFrame({"source_id": int(source_id), "band": "TESS", "t": t, "flux": f, "err": e}))
     return pd.concat(out, ignore_index=True) if out else _empty()
