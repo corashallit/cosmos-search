@@ -642,3 +642,68 @@ the rule.
 measured, so the batch mainly checks Stage A's behaviour and the controls. Its data are mostly fetched, and the
 rule was pre-registered against it. The larger DR4 investments for single dips are the two levers above: a
 concurrent-coverage fetch, and a one-look dip-rate census built on `eb_rate` (shared census tooling).
+
+### Batch 5 result: v4 not adopted
+
+64 packets: 16 single-event decoys (8 grey dips, 4 blue dips, 4 chromatic flips), 2 dust dips, 16 old real
+packets, 8 tier-1 single-event stars, 14 old controls and 8 single-eclipse EB controls. One blind subagent per
+packet. All 64 transcripts show one Read of the prompt and one Write of the reply (plus the harness's hand-back).
+The verdicts were committed and pushed to `prereg/verdicts/dayone-batch5` (cf60d94, code at 8a0881e, plan SHA-256
+ef6815f7…) before the reveal.
+
+| measure | v3b (adopted) | v4 = v3b or flag | flag alone | criterion for v4 |
+|---|---|---|---|---|
+| single-event recall | 10/16 (95% CI 0.39–0.82) | 11/16 (0.44–0.86) | 9/16 (0.33–0.77) | ≥ 0.75: **fails** |
+| old controls flagged | 1/14 | 1/14 | 0/14 | ≤ 1: passes |
+| single-eclipse EB controls flagged | 0/8 | 0/8 | 0/8 (1 testable) | ≤ 1: passes |
+| dust dips flagged | 0/2 | 0/2 | 0/2 | |
+| real packets flagged | 2/24 | 2/24 (the same) | 0/24 | |
+| AUC, single events vs controls | S 0.93, P(u) 0.90 | | | |
+
+v4g (secondary) gives the same numbers as v4. By the pre-registered decision, v4 is not adopted and the D2 rule
+stays v3b (`ADOPTED_RULE` unchanged).
+
+**By family.** On testable events, the flag caught 7 of 7 grey dips, 0 of 4 blue dips and 2 of 3 chromatic flips.
+That is 9 of 14, against 63 of 67 in the calibration. One grey dip was untestable in its packet (below), and one
+chromatic flip had quiet_ratio_g 3.02, just over the limit. The agents follow the same split: S ≥ 0.35 for 7 of 8
+grey dips, 0 of 4 blue dips and 1 of 4 flips (batch 4: 0 of 4 single events). The single-event test in the
+packet moved them on the deep grey dips. v4 adds one grey dip over v3b (S 0.26, flag set).
+
+**Why blue dips and flips fail.** They are shallow in G. Their depths are 0.9–5.5%; the grey dips' are 2–39%,
+mostly above 6%. Seven of the nine misses are two-epoch events on two transit pairs (0.18 d). For two-epoch events
+in the calibration, the ratio rises with depth (correlation 0.59 with log depth), and the testable two-epoch blue
+dips there sat at median 2.8, only just above the 2.5 threshold. Batch 5's blue dips gave 1.2–2.3 (p_eb 0.12–0.84).
+So the threshold was set in-sample (red-team R3) on a population whose two-epoch events cluster close to it, and a
+fresh draw landed below it. The test is reading the physics correctly here: a shallow blue dip is what eclipsing a
+hotter companion looks like, and two looks 4 h apart do not rule out an orbit. The flag is reliable for deep events
+and for colour exclusion (1 of 1 flips where it fired); for shallow chromatic single dips it has little power at
+Gaia cadence.
+
+**Two consistency gaps in the pipeline.**
+
+- **plan5's testability gate differs from the test.** `single_cal.single_event_count` counts in-dip epochs before
+  `single_event.test` drops lone ZTF epochs. One grey dip (33% deep) passed the gate on a Gaia epoch plus a ZTF
+  epoch, then showed one in-dip epoch in the packet. The gate should call the test itself.
+- **The two tests define events differently.** The recurrence test set `aperiodic` on 6 of the 16 single-event
+  decoys, so it counted several dip events where the single-event test found one. The cause is the same lone-epoch
+  handling. The "Concurrent ZTF and TESS coverage" thread's `relax_lone` and `event_joined` (PR #49) address it for
+  DR4. Its numbers: as the test stands, ZTF and TESS raise testable/caught for 1–10 d dips from 22% to 23%, and to
+  25% with the relaxed rule (30–31% for northern G 13–17 stars with ZTF). Adding real TGLC makes 30% of
+  Gaia-testable dips "more than one event" because of TGLC's own dip-like systematics. That calibration, on EBs and
+  active stars, is needed before adopting the relaxed rule.
+
+**Real packets.** v3b flags 3047786003881272448 again (S 0.48, disk occultation), and a tier-1 single-event star,
+2035622809661715072 (aperiodic, S 0.25, read as an eclipsing binary). Both go to the expert queue under v3b. The
+flagged old control is an EB the agent scored S 0.37; in batch 4 it was a different control (an irregular
+pulsator, via `aperiodic`).
+
+**What this changes.** It confirms the step back above. Single dips at DR3/DR4 Gaia cadence are mostly not
+arguable one star at a time. The deep, multi-visit ones are, and v3b plus the agents already catch most of those
+(grey 7/8). The shallow chromatic ones are not, so for DR4 they belong to the population census (summed `eb_rate`
+per bin, split-half replication) and to concurrent coverage, not to a per-star flag. The single-event test stays
+in the packets, where it moved the agents on deep events. Follow-ups, none inside the D2 freeze:
+
+- make plan5's gate call `single_event.test`;
+- unify event definitions across the two tests (with PR #49);
+- a confirmatory set of active-star single-event controls;
+- the test on residual light curves, and a k-event generalisation (from the residual-search thread).
