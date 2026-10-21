@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
 Name: cosmos-search
 Version: 0.0.1
-Summary: Explain every object within 100 pc
+Summary: First look at Gaia DR4 for technosignature-style anomalies
 Requires-Python: >=3.11
 Requires-Dist: numpy
 Requires-Dist: pyyaml
@@ -11,5 +11,10 @@ Requires-Dist: pyvo
 Requires-Dist: astroquery
 Requires-Dist: astropy
 Requires-Dist: pyarrow
+Requires-Dist: pandas
+Requires-Dist: scipy
+Requires-Dist: scikit-learn
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
+Provides-Extra: plots
+Requires-Dist: matplotlib; extra == "plots"
