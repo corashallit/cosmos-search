@@ -199,6 +199,7 @@ def _features(table):
         out[f"fov_{side}"] = _take(g["fov"], i, fill=0)
         out[f"row_{side}"] = _take(g["row"], i, fill=0)
         out[f"nobs_{side}"] = _take(g["nobs"], i, fill=0)
+        out[f"tid_{side}"] = _take(g["tid"], i, fill=-1)  # for per-CCD tests at this transit (gaia.dr4)
         # Same-transit BP and RP deviations, for dip colour.
         key = pd.DataFrame({"tid": _take(g["tid"], i, fill=-1), "sid": uniq})
         for code, name in ((1, "bp"), (2, "rp")):
@@ -266,7 +267,7 @@ def keep_light_curve(feat):
 
 
 def features_schema_version():
-    return "features-v1-stage0"
+    return "features-v2"
 
 
 def to_arrow(df):

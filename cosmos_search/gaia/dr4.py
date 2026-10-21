@@ -152,3 +152,36 @@ def ccd_consistency(ccd_long):
     n = g.size()
     chi2 = g["r2"].sum() / (n - 1).where(n > 1)
     return pd.DataFrame({"transit_id": n.index, "n_ccd": n.to_numpy(), "chi2_red": chi2.to_numpy()})
+
+
+def ccd_at_extremes(feat, ccd_long, nsigma=3.0):
+    """Per-CCD tests at each source's faintest and brightest transits (features' tid_min, tid_max).
+
+    An occultation lasting more than the ~45 s AF crossing dims all nine AF CCDs; a cosmic ray, a CCD
+    defect or a neighbour entering one window moves one or two. At the faintest transit, frac_ccd_low is the
+    fraction of AF CCDs below that source's own baseline on that CCD by more than nsigma; at the brightest,
+    frac_ccd_high is the mirror. Baseline and scale are per source and CCD (median, and the larger of the
+    quoted error and 1.4826 MAD), so CCD calibration offsets cancel. Both sides are computed the same way,
+    so the mirror null stays symmetric. chi2_ccd_* is ccd_consistency's reduced chi-squared at that transit.
+
+    ccd_long: epoch_photometry_ccd_to_long rows covering all transits of the sources (the baseline needs
+    them). Returns pandas indexed like feat's source_id, NaN where the transit has no CCD rows.
+    """
+    import pandas as pd
+
+    df = ccd_long.select(["source_id", "transit_id", "ccd", "flux", "err"]).to_pandas()
+    grp = df.groupby(["source_id", "ccd"])["flux"]
+    df["base"] = grp.transform("median")
+    df["mad"] = (df["flux"] - df["base"]).abs().groupby([df["source_id"], df["ccd"]]).transform("median")
+    df["z"] = (df["flux"] - df["base"]) / np.fmax(df["err"], 1.4826 * df["mad"])
+    chi = ccd_consistency(ccd_long).set_index("transit_id")
+    df["low"], df["high"] = (df["z"] < -nsigma).astype(float), (df["z"] > nsigma).astype(float)
+    per = df.groupby(["source_id", "transit_id"]).agg(n=("z", "size"), low=("low", "mean"), high=("high", "mean"))
+    out = pd.DataFrame({"source_id": feat["source_id"].to_numpy()})
+    for side, frac in (("min", "low"), ("max", "high")):
+        key = pd.MultiIndex.from_arrays([out["source_id"], feat[f"tid_{side}"].to_numpy()])
+        row = per.reindex(key)
+        out[f"n_ccd_{side}"] = row["n"].to_numpy()
+        out[f"frac_ccd_{frac}_{side}"] = row[frac].to_numpy()
+        out[f"chi2_ccd_{side}"] = chi["chi2_red"].reindex(feat[f"tid_{side}"].to_numpy()).to_numpy()
+    return out

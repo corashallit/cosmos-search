@@ -56,3 +56,27 @@ def test_ccd_consistency_separates_coherent_dip_from_single_ccd_hit():
     c = dr4.ccd_consistency(dr4.epoch_photometry_ccd_to_long(table)).set_index("transit_id")
     assert c.loc[11, "chi2_red"] < 1e-6 and c.loc[12, "chi2_red"] > 100
     assert c.loc[11, "n_ccd"] == 9
+
+
+def test_ccd_at_extremes_tells_coherent_dip_from_one_ccd_spike():
+    import pandas as pd
+
+    rng = np.random.default_rng(4)
+    n = 30
+    flux = 1000 + rng.normal(0, 5, (n, 9))
+    flux[7] *= 0.7  # transit 7: all nine CCDs dim (occultation)
+    flux[12, 3] += 400  # transit 12: one CCD hit (cosmic ray)
+    t = 2000 + np.arange(n)[:, None] * 0.3 + np.arange(9)[None, :] * 4.85 / 86400
+    table = Table({"source_id": np.full(n, 5, np.int64), "transit_id": np.arange(n, dtype=np.int64) + 100,
+                   "af_obs_time": list(t), "af_flux": list(flux), "af_flux_error": list(np.full((n, 9), 5.0))})
+    feat = pd.DataFrame({"source_id": [5, 6], "tid_min": [107, 999], "tid_max": [112, 999]})
+    r = dr4.ccd_at_extremes(feat, dr4.epoch_photometry_ccd_to_long(table)).set_index("source_id")
+    assert r.loc[5, "frac_ccd_low_min"] == 1.0 and r.loc[5, "n_ccd_min"] == 9
+    assert r.loc[5, "frac_ccd_high_max"] == 1 / 9 and r.loc[5, "chi2_ccd_max"] > 100
+    assert np.isnan(r.loc[6, "frac_ccd_low_min"])
+
+
+def test_features_carry_extreme_transit_ids():
+    rows = dr4_rows(dip_at=10)
+    f = features.source_features(dr4.epoch_photometry_to_lc(rows), clean=False)
+    assert f.loc[0, "tid_min"] in set(rows["transit_id"][10:12])
