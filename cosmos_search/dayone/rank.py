@@ -29,6 +29,7 @@ Steps, and why:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -232,7 +233,8 @@ def main(argv=None):
     ap.add_argument("--n-vet", type=int, default=30)
     ap.add_argument("--n-audit", type=int, default=6)
     ap.add_argument("--n-controls", type=int, default=8)
-    ap.add_argument("--seed", type=int, default=20261202)
+    # Drawn from urandom at run time so the audit sample cannot be predicted; pass the recorded seed to replay.
+    ap.add_argument("--seed", type=int)
     a = ap.parse_args(argv)
     from cosmos_search.gaia.archive import tap
 
@@ -243,12 +245,13 @@ def main(argv=None):
     phys = lc_physics(read_lightcurves(a.lightcurves, sel["source_id"]), ctx)
     ranked = rank(sel, ctx, phys)
     ranked.to_parquet(out / "ranked.parquet", index=False)
-    q = queue(ranked, a.n_vet, a.n_audit, a.n_controls, np.random.default_rng(a.seed))
+    seed = a.seed if a.seed is not None else int.from_bytes(os.urandom(8), "little")
+    q = queue(ranked, a.n_vet, a.n_audit, a.n_controls, np.random.default_rng(seed))
     q.to_parquet(out / "queue.parquet", index=False)
     summary = {"selected": len(sel), "by_channel": sel["channel"].value_counts().to_dict(),
                "by_tier": ranked["tier"].value_counts().sort_index().to_dict(),
                "flags": {f: int(ranked[f].sum()) for f in ("fov", "grey", "tension", "bright")},
-               "queue": q["role"].value_counts().to_dict()}
+               "queue": q["role"].value_counts().to_dict(), "seed": seed}
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=int))
     print(json.dumps(summary, indent=2, default=int))
     return 0
