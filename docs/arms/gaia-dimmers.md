@@ -24,7 +24,7 @@ to a star's output must do, and from what Gaia can test.
 
 | Signal | Why it matters | Gaia test |
 |---|---|---|
-| **Dimming episodes** | Something passes in front of, or modulates, the star | Low flux in ≥ 1 transit, reproduced on all 9 CCDs, in both fields of view where both are sampled, and in BP and RP |
+| **Dimming episodes** | Something passes in front of, or modulates, the star | Low flux in ≥ 1 transit, reproduced on all 9 CCDs, in both fields of view where both are sampled, and in BP and RP. G spans both passbands, so a change in the source's light puts the G change between the BP and RP changes; an epoch outside that interval is an instrument fault and is dropped before any statistic, on the bright side too (`vetting.stage0`, docs/vetting.md §12) |
 | **Dip colour** | Small dust grains redden (extinction rising toward the blue); bodies much larger than the wavelength are grey; some physics makes dips bluer | R = (ΔF/F)_RP / (ΔF/F)_BP. R ≈ 1 is grey. Plot against depth; natural dust dippers sit at R < 1 |
 | **Secular fading or brightening** | Boyajian's star faded ~0.34 %/yr over Kepler's first ~3 years, then ~2.5 % in 200 days (Montet & Simon 2016); quiet main-sequence stars change far less | Trend over 66 months relative to stars with the same magnitude, colour and sky region (which removes calibration drift); extend with DR3, Hipparcos/Tycho for bright stars |
 | **Energy budget** | Absorbed starlight must come out somewhere. Covering fraction f ≈ depth × duty cycle implies an infrared excess L_IR ≈ f L_* at T ≈ 280 K × (L_*/L_☉)^¼ (r/1 au)^-½ | Predict the W3/W4 excess from the measured dimming and compare with AllWISE/unWISE. A dimmer with *no* excess where one is predicted is more interesting than one with it: the material is cold, far out, reflective or not absorbing |
@@ -78,6 +78,10 @@ no longer a selection: it only decides what we look at first. So:
      dimming and brightening statistics exactly (up to a fixed count, by default 10⁵) and a fine histogram
      of the rest. The mirror null then stays exact where thresholds are set (statistics.md §2), sketches
      from different files and sessions merge exactly, and nothing near 1.8 × 10⁹ rows is kept.
+   - Statistics are computed after the stage-0 band-consistency mask (`vetting.stage0.clean_long`). It drops
+     G epochs whose change BP and RP cannot account for, on both sides, so the mirror stays symmetric.
+     Injections pass through the same mask, so recovery is measured after cleaning. Dropped epochs are counted
+     per source and per verdict as features, because their rate is an instrument diagnostic in its own right.
    - The stream must resume after a container is reclaimed, so it records which files it has processed.
 4. **Fallback if DR4 has no bulk files at release.** The random full-light-curve channel then goes through
    DataLink at ~10⁵ sources per ~18 h, which is still large enough to measure the rejected-transit channel
@@ -115,3 +119,10 @@ Record changes of approach here, with the evidence that prompted them.
   rate is also high at Galactic |b| 10–20° (8.9%, against 4.8–6.1% elsewhere), within every n_g bin and
   more so in the south. Until a sky map explains it, treat rejected-dip candidates from that band with
   suspicion.
+- **2026-10-21.** Stage 0 band consistency joins the detector chain (vetting PR #25). In pilot 3, about half the
+  detector's non-EB triggers were G-only dips with BP and RP flat. DPAC had not flagged those epochs. The mask
+  catches 71–77% of single-transit G-only dips at ≥ 10σ and passes grey, dust and flip changes (≤ 0.3% flagged).
+  The DR4 stream features (schema `dr4-features-v1`, archive thread) apply it before the robust statistics.
+  They also keep the raw extremes and the per-source fault counts, so the effect of cleaning can be audited.
+  G3 on DR3 runs without the mask. Its `fov` statistic needs the partner transit in the other field of view,
+  so a fault in a single transit cannot pass it on its own.
