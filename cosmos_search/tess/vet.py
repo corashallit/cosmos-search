@@ -50,6 +50,9 @@ TEST_DESCRIPTIONS = {
     "z_x": "in-dip column centroid shift against random placements of the same window",
     "z_y": "in-dip row centroid shift against random placements of the same window",
 }
+# The packet renders test statistics only, so their meanings travel in the context.
+TEST_CONTEXT = "; ".join(f"{k}: {v}" for k, v in TEST_DESCRIPTIONS.items())
+MAX_DIPS = 3  # dips listed and zoomed in each packet
 TEST_KEYS = ("placement_z", "explained_bkg", "depth_ratio_sml", "depth_ratio_lag", "edge_frac", "edge_sigma",
              "kinematic_limit", "z_bkg", "z_x", "z_y")
 
@@ -107,10 +110,13 @@ class Detector:
     def __call__(self, cand):
         lc = to_dimming(cand)
         traces = scan(lc)
-        events = sorted(find_events(lc, traces, threshold=5.0), key=lambda e: -e.snr)[:6]
+        events = sorted(find_events(lc, traces, threshold=5.0), key=lambda e: -e.snr)[:MAX_DIPS]
         cand.dips = [{"t_min": e.t_peak, "t_start": e.t_start, "t_end": e.t_end, "depth": e.depth,
                       "duration": e.t_end - e.t_start, "n_points": e.n_points} for e in events]
-        cand.scores, cand.tests = {}, {}
+        # Every packet carries every test name (None when it cannot be computed), because the batch keeps only
+        # names all packets share and a test missing from some packets would be dropped from all.
+        cand.scores, cand.tests = {}, {k: {"statistic": None} for k in TEST_KEYS}
+        cand.context["tests"] = TEST_CONTEXT
         if not events:
             cand.scores["dip_false_alarm_p"] = 1.0
             return cand
@@ -123,7 +129,7 @@ class Detector:
         for k in TEST_KEYS:
             v = diag.get(k)
             if v is not None and np.isfinite(v):
-                cand.tests[k] = {"statistic": float(v), "description": TEST_DESCRIPTIONS[k]}
+                cand.tests[k] = {"statistic": float(v)}
         return cand
 
 
