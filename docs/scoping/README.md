@@ -50,21 +50,29 @@ decoys. See [blinding.md](blinding.md).
 
 | Item | Status |
 |---|---|
-| Gaia Archive account and ADS API token (cora.shallit@gmail.com), stored as environment secrets | Cora, in progress |
-| Durable storage, ~250 GB (options in storage.md) | Deferred to late November |
-| Truth repo with the Claude GitHub App *not* installed (blinding.md §1) | Cora |
-| `age` key pair; public key committed to `keys/` | Cora |
+| Gaia Archive, ADS, SciServer credentials | Done, verified |
+| Durable storage, ~250 GB (options in storage.md) | Deferred; needed before DR4 |
+| Truth repo with the Claude GitHub App *not* installed (blinding.md §1) | Set up, smoke run passed; Cora removing Claude's access |
+| `age` key pairs (Cora's, reveal); public keys committed to `keys/` | Done |
 | Expert budget: queue of ~10³ objects is plausible, ~10⁴ is expensive (statistics.md §6) | Open |
 | Scope of "everything": stars, brown dwarfs, compact objects and their companions/disks. Solar-system bodies are modelled as contaminants; the ISM and the Local Bubble are context | Proposed |
 
-## Six-week plan to DR4
+## Milestones
 
-| Week (Mon) | Milestone |
-|---|---|
-| 26 Oct | Polite archive client, sample selection v0 on DR3 |
-| 2 Nov | Proper-motion-aware cross-match to 2MASS / WISE / CatWISE / eROSITA / VLASS / RACS |
-| 9 Nov | Classical model tier v0: SED + CMD + astrometric + variability residuals |
-| 16 Nov | Injection harness and sealed-truth tooling; first completeness maps |
-| 23 Nov | Durable store in place; expert-stage rehearsal with decoys and known-answer controls on DR3 |
-| 30 Nov | Freeze code and thresholds (`dr3-frozen` tag), pre-register the DR4 analysis |
-| 2 Dec | DR4: rerun mean-product tiers blind; epoch products follow |
+Ordered by dependency, with no durations. The only fixed dates are external: Gaia DR4 on 2 December 2026,
+DESI DR2 expected early 2027.
+
+| # | Milestone | Depends on | Done |
+|---|---|---|---|
+| 1 | Shared archive client: User-Agent, throttling, backoff, response cache | — | |
+| 2 | Sample selection v0 on DR3: membership probabilities, fidelity cut, ϖ > 8 mas buffer | 1 | |
+| 3 | Proper-motion-aware cross-match to 2MASS / WISE / CatWISE / eROSITA / VLASS / RACS, with shifted-sky false-match rates | 2 | |
+| 4 | Time-series and spectra fetchers (TESS, ZTF, ASAS-SN, NEOWISE, LAMOST/SDSS/DESI) streaming to features | 1, 2 | |
+| 5 | Classical model tier v0: SED + CMD + astrometric + variability residuals | 3, 4 | |
+| 6 | Calibrated p-values, FDR ranking, expert queue | 5 | |
+| 7 | Injection classes in `cosmos_search/inject/` feeding the truth-repo workflow; first completeness maps | 4, 5; truth repo ✓ | |
+| 8 | Durable store, so injected products reach the analysis side | Cora | |
+| 9 | Expert stages A and B with decoys and known-answer controls, rehearsed on DR3 | 6, 7, 8 | |
+| 10 | Validation against GCNS, CNS5, 40 pc WDs, 20 pc ultracools | 5, 6 | |
+| 11 | Freeze code and thresholds (`dr3-frozen` tag), pre-register the DR4 analysis | 9, 10; before DR4 | |
+| 12 | DR4: rerun mean-product tiers blind; epoch products follow | 11; DR4 release | |
