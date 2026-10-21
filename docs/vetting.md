@@ -44,7 +44,7 @@ and a source of known-answer controls or decoys, or its α is unmeasured.
 | blend_or_crowding | Flux tracks scan angle (Gaia) or pointing (TESS); BP/RP excess; centroid shifts | flux vs scan angle; `ipd_frac_multi_peak`, `phot_bp_rp_excess_factor`; TESS centroid z, aperture depth ratio | Gaia detectors (G2); TESS thread | close pairs from Gaia DR3 with known separations |
 | scattered_light | Dip when background rises, near orbit ends | background z, straylight flags, segment-edge distance | TESS thread | TESS sectors with known scattered-light episodes |
 | pointing_or_momentum | Brief excursions at dump times | `dump_dist` | TESS thread | stars at known dump epochs |
-| detector_defect | Single epoch, one band or one CCD; G ≲ 13 gating | per-CCD agreement (DR4); magnitude stratification | Gaia detectors | random stars with flagged CCD transits |
+| detector_defect | Single epoch, one band or one CCD; G ≲ 13 gating | **G vs BP/RP band consistency and G error inflation** (`vetting/stage0.py`, §12); per-CCD agreement (DR4); magnitude stratification | vetting; Gaia detectors | G-only injections into DR3 light curves (`scripts/stage0_recovery.py`) |
 | calibration_offset | Steps between FoVs, CCDs, sectors, calibration epochs | FoV pair test; step test at known calibration boundaries | Gaia detectors | step decoys |
 | shared_systematic | Same epoch dims in unrelated stars | **cross-candidate coincidence** (`vetting/coincidence.py`, below); TESS common-mode per CCD | vetting; TESS thread | coincident-dip injections across hosts |
 | processing | Detrending or background-model artefacts, cross-match errors | re-extraction with an independent pipeline (TGLC for TESS; DataLink re-pull for Gaia) | arm threads | — |
@@ -60,9 +60,9 @@ k ~ Binomial(n, τ/W): the local rate is taken as flat over W, which absorbs cov
 how many stars are observed. Groups (camera/CCD, Gaia scan) restrict the comparison to dips that could share a
 cause. This runs over the whole queue plus the random-control stream, which only the vetting stage sees at once.
 
-Stage 0 vetoes outright only on exact nulls (per-CCD disagreement, FoV disagreement, coincidence with p below a
-queue-wide Bonferroni threshold). Everything else goes into the packet as evidence, so Stage A's calibration
-includes how it weighs the tests.
+Stage 0 vetoes outright only on exact nulls: per-CCD disagreement, FoV disagreement, G changes that the BP and RP
+changes of the same transit rule out (§12), and coincidence with p below a queue-wide Bonferroni threshold.
+Everything else goes into the packet as evidence, so Stage A's calibration includes how it weighs the tests.
 
 ## 4. Stage A: blind expert
 
@@ -355,6 +355,53 @@ there. The first part is a pool mismatch: `vetting_pilot.py fetch` now matches o
 log(epochs). Two dust dips were read as blends on hosts with `ipd_frac_multi_peak` = 1, in pilot 2 and again here.
 Under §10's veto rule a blend-flagged host should not carry decoys.
 
+## 12. Stage 0 band consistency (Gaia)
+
+`vetting/stage0.py` tests each G epoch against the BP and RP epochs of the same transit (matched within 0.01 d).
+G covers both passbands, so any change in the light from the source gives a G change near a flux-weighted mean of
+the BP and RP changes, d_G ≈ w d_BP + (1 − w) d_RP, where w is the BP share of the G signal. Bounding w to
+[0.1, 0.9] covers M dwarfs to A stars with no spectral model, and a chromatic flip (BP down, RP up) still passes.
+An epoch whose G change lies outside that interval by more than 4σ is a measurement fault. Faults are excursions,
+so the fault lies with whichever instrument moved more in units of its own scatter. `band_inconsistent` means G is
+at fault, and that G epoch is dropped. `colour_fault` means BP or RP is at fault, and BP and RP are dropped at that
+transit. A G error more than 5 times the star's median is `inflated_error`, and that G epoch is dropped as well.
+Epochs where BP or RP is missing, or too noisy to have shown the change, are `untested`.
+
+The noise is the larger of the quoted errors and the star's own scatter in d_G − (d_BP + d_RP)/2. On the 50 DR3
+stars from pilots 2 and 3, that scatter is about twice what the quoted errors predict (median ratio 2.1), so the
+errors alone would over-flag. The DPAC reject flags were 0 on every epoch these stars kept.
+
+**Injection test** (`scripts/stage0_recovery.py`, the 68 controls and hosts of pilots 1–3, 20 single-transit
+injections each):
+
+| G deficit (σ_G) | G-only dips flagged | grey, dust (β = 2) or flip flagged |
+|---|---|---|
+| 3 | 0.38 (G < 14: 0.68; G > 18: 0.01) | ≤ 0.003 |
+| 10 | 0.71 (14–16: 0.89; G > 18: 0.41) | ≤ 0.001 |
+| 20 | 0.77 (14–16: 0.91) | ≤ 0.003 |
+
+Grey and flip injections were never flagged, and dust only at the 0.1–0.3% level. At 20σ the missed G-only dips
+are 9% with no BP or RP epoch in the transit, 5% too noisy in BP/RP, and 10% on stars whose variability puts the
+injected G change inside the interval. A veto that removes a real signal costs more than one that lets an artefact
+through to Stage A, so the threshold stays at 4σ.
+
+**On the pilot-3 controls**, Stage 0 removes the dips behind two of the four instrumental readings: G errors 27 and
+21 times the median at the dip epoch. The other two, a 5% G dip and a 4% G dip with BP and RP flat, are `untested`.
+The stars are faint (G = 16.7), and the band-residual scatter is about 3%, so the data do not show these dips to be
+faults. Their vetters' "instrumental" is a plausible reading, but not a known answer. Across the 50 stars Stage 0
+drops 1.6% of G epochs for inflated errors, and BP/RP at 3.3% of transits for colour faults. The colour faults are
+mostly single BP or RP values tens of times the median.
+
+Consequences for the pilots:
+
+- `vetting_pilot.py fetch` cleans every control and host with `stage0.clean` before the detector runs, so a
+  control's detected dip, and with it the label, is about the star. Control stars are no longer reused as hosts:
+  pilots 2 and 3 each had two stars in both roles, because both lists come from the same `random_index` walk.
+- `build` passes `stage0.veto` to `vetting_batch`, so every decoy must pass the queue's Stage 0.
+- The `single_band_dip` decoy leaves the Gaia mix. Where BP and RP could show it, Stage 0 removes it. Where they
+  cannot, the packet does not show it to be single-band, so its "instrumental" label would not be what an ideal
+  observer can conclude. Its false-positive class is measured by the injection test above instead.
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -375,3 +422,7 @@ Under §10's veto rule a blend-flagged host should not carry decoys.
   probes from controls (pooled AUC 0.97; at P(u) ≥ 0.25, 4/8 probes and 0/26 controls), and confabulation is 0/4.
   Half the detector's non-EB triggers were most likely DR3 artefacts (G-only dips), so control labels must be
   dip-level, and Stage 0 needs a band-consistency test. Decoy hosts are now matched to the controls' cadence.
+- 2026-10-21. Stage 0 band consistency (§12): G epochs outside the BP–RP mixing interval, or with inflated
+  errors, are dropped before detection. In an injection test, G-only dips were flagged 71–77% of the time at
+  ≥ 10σ, and grey, dust and flip changes ≤ 0.3%. Pilot controls and hosts are cleaned first, control stars are
+  no longer reused as hosts, and single-band decoys leave the Gaia mix.

@@ -464,3 +464,68 @@ def test_decoys_must_pass_the_queue_veto():
     assert len(seen) == 3
     with pytest.raises(RuntimeError):
         make_decoy(host, "grey_dip", np.random.default_rng(4), max_tries=50, veto=lambda c: ["always"])
+
+
+# --- Stage 0 ----------------------------------------------------------------
+
+
+def _one_epoch(cand, i, factors):
+    """Multiply epoch i of each band by its factor (G, BP and RP share epochs in gaia_like)."""
+    for lc in cand.lightcurves:
+        lc.flux[i] *= factors.get(lc.band, 1.0)
+    return cand
+
+
+def test_stage0_flags_a_g_only_dip_and_passes_coherent_ones():
+    from cosmos_search.vetting.stage0 import band_consistency, clean, veto
+    i = 40
+    cases = {
+        "band_inconsistent": {"G": 0.9},  # G dips, BP and RP flat
+        "consistent": {"G": 0.9, "BP": 0.9, "RP": 0.9},  # grey
+        "colour_fault": {"BP": 3.0},  # BP brightens threefold at an otherwise flat transit
+    }
+    for want, f in cases.items():
+        cand = _one_epoch(gaia_like(seed=1), i, f)
+        t = cand.lightcurves[0].time[i]
+        (row,) = band_consistency(cand, [{"t_min": t, "depth": 0.1}])
+        assert row["verdict"] == want, (want, row)
+    # A chromatic sign flip, BP down and RP up with G between, is no fault.
+    flip = _one_epoch(gaia_like(seed=1), i, {"BP": 0.8, "G": 0.95, "RP": 1.1})
+    (row,) = band_consistency(flip, [{"t_min": flip.lightcurves[0].time[i]}])
+    assert row["verdict"] == "consistent"
+    # G-only dips are vetoed and cleaned from G alone; BP/RP faults leave G alone.
+    g_only = _one_epoch(gaia_like(seed=1), i, {"G": 0.9})
+    assert veto(g_only) == ["band_inconsistent"]
+    cleaned, dropped = clean(g_only)
+    assert len(dropped) >= 1 and len(cleaned.lightcurves[0].time) < 120 and len(cleaned.lightcurves[1].time) == 120
+    assert not simple_dips(cleaned) or min(d["depth"] for d in simple_dips(cleaned)) < 0.05
+    bp_fault = _one_epoch(gaia_like(seed=1), i, {"BP": 3.0})
+    cleaned, dropped = clean(bp_fault)
+    assert len(cleaned.lightcurves[0].time) == 120 and len(cleaned.lightcurves[1].time) < 120
+
+
+def test_stage0_flags_inflated_errors_and_leaves_noisy_colours_untested():
+    from cosmos_search.vetting.stage0 import band_consistency
+    cand = gaia_like(seed=1)
+    i = 40
+    cand.lightcurves[0].flux[i] *= 0.9
+    cand.lightcurves[0].flux_err[i] *= 20
+    (row,) = band_consistency(cand, [{"t_min": cand.lightcurves[0].time[i]}])
+    assert row["verdict"] == "inflated_error"
+    noisy = gaia_like(seed=1)
+    for lc in noisy.lightcurves[1:]:
+        lc.flux_err[:] = 0.2  # BP/RP too poor to have shown a 10% dip
+    noisy.lightcurves[0].flux[i] *= 0.9
+    (row,) = band_consistency(noisy, [{"t_min": noisy.lightcurves[0].time[i]}])
+    assert row["verdict"] == "untested"
+
+
+def test_stage0_passes_injected_decoys():
+    from cosmos_search.vetting.stage0 import epoch_verdicts
+    host = gaia_like(seed=9, n=150)
+    for spec in ("grey_primes", "chromatic_flip", "dust_dip"):
+        cand, _, _ = make_decoy(host, spec, np.random.default_rng(3))
+        g0 = epoch_verdicts(host)["verdict"]
+        g1 = epoch_verdicts(cand)["verdict"]
+        new = (g1 == "band_inconsistent") & (g0 != "band_inconsistent")
+        assert not new.any(), spec
