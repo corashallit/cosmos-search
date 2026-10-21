@@ -26,7 +26,7 @@ from cosmos_search.vetting.batch import build_batch
 from cosmos_search.vetting.candidate import Candidate, LightCurve
 
 from . import qlp
-from .analyse import CLASSES, calibrated_p, event_class, tmag_stratum
+from .analyse import CLASSES, calibrated_p, event_class, tmag_stratum, veto_reasons
 from .controls import jobs
 
 # Candidate meta channel <-> dimming aux name.
@@ -109,10 +109,29 @@ class Detector:
     def __init__(self, null):
         self.null = null
 
-    def __call__(self, cand):
+    def _strongest(self, cand):
+        """(lc, top events by SNR, their p-values, the event with the smallest p) for a candidate."""
         lc = to_dimming(cand)
-        traces = scan(lc)
-        events = sorted(find_events(lc, traces, threshold=5.0), key=lambda e: -e.snr)[:MAX_DIPS]
+        events = sorted(find_events(lc, scan(lc), threshold=5.0), key=lambda e: -e.snr)[:MAX_DIPS]
+        if not events:
+            return lc, events, [], None
+        stratum = tmag_stratum([cand.source.get("tmag", 12.0)])
+        ps = [calibrated_p([e.snr], stratum, self.null[c].values, self.null.stratum.values)[0]
+              for e, c in zip(events, event_class([e.scale for e in events]))]
+        return lc, events, ps, events[int(np.argmin(ps))]
+
+    def veto(self, cand):
+        """Stage 0 vetoes on the dip the packet presents (make_decoy's veto hook): a list of reasons, empty if
+        it passes. Common mode needs the whole CCD's light curves, so it is not checked here."""
+        lc, _, _, e = self._strongest(cand)
+        if e is None:
+            return []
+        row = {**event_diagnostics(lc, e), "variant": "real", "sector": 0, "camera": 0, "ccd": 0,
+               "t_start": e.t_start, "t_end": e.t_end, "edge_dist": e.edge_dist}
+        return [w for w in veto_reasons(pd.DataFrame([row]), {}, {})[0].split(";") if w]
+
+    def __call__(self, cand):
+        lc, events, ps, e = self._strongest(cand)
         cand.dips = [{"t_min": e.t_peak, "t_start": e.t_start, "t_end": e.t_end, "depth": e.depth,
                       "duration": e.t_end - e.t_start, "n_points": e.n_points} for e in events]
         # Every packet carries every test name (None when it cannot be computed), because the batch keeps only
@@ -122,10 +141,6 @@ class Detector:
         if not events:
             cand.scores["dip_false_alarm_p"] = 1.0
             return cand.dips
-        stratum = tmag_stratum([cand.source.get("tmag", 12.0)])
-        ps = [calibrated_p([e.snr], stratum, self.null[c].values, self.null.stratum.values)[0]
-              for e, c in zip(events, event_class([e.scale for e in events]))]
-        e = events[int(np.argmin(ps))]
         cand.scores["dip_false_alarm_p"] = float(min(1.0, len(CLASSES) * min(ps)))
         diag = event_diagnostics(lc, e)
         for k in TEST_KEYS:
@@ -184,7 +199,7 @@ def cmd_build(args):
         host = to_candidate(qlp.clean(lc), f"tic:{int(r.tic)}:s{int(r.sector)}")
         spec = str(rng.choice(TESS_DECOYS))
         try:
-            dec, extra, truth = make_decoy(host, spec, rng, detect=detector)
+            dec, extra, truth = make_decoy(host, spec, rng, detect=detector, veto=detector.veto)
         except RuntimeError:
             continue
         entries.append((dec, extra))

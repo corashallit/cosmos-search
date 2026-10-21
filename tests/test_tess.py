@@ -76,3 +76,25 @@ def test_veto_reasons():
     assert out == ["common_mode", "common_mode;systematics", "common_mode", "common_mode;one_sided", "common_mode"]
     out = veto_reasons(pd.DataFrame(rows), {}, {})
     assert out == ["", "systematics", "", "one_sided", ""]
+
+
+def test_detector_veto_hook():
+    import pandas as pd
+
+    from cosmos_search.vetting.candidate import Candidate, LightCurve
+    from cosmos_search.tess.vet import Detector
+
+    rng = np.random.default_rng(1)
+    t = np.arange(0, 20, 200 / 86400)
+    null = pd.DataFrame({"row": range(500), "stratum": np.repeat(range(5), 100),
+                         "short": rng.normal(3, 0.5, 500), "long": rng.normal(3, 0.5, 500)})
+    det = Detector(null)
+
+    def cand(t0):
+        flux = 1 + 1e-3 * rng.standard_normal(t.size)
+        flux[(t >= t0) & (t < t0 + 0.5)] -= 0.02
+        meta = {"background": 100 + rng.standard_normal(t.size)}
+        return Candidate("x", "tess", {"tmag": 10.0}, [LightCurve("TESS", t, flux, np.full(t.size, 1e-3), meta)])
+
+    assert det.veto(cand(10.0)) == []                 # mid-segment dip passes
+    assert "one_sided" in det.veto(cand(0.0))         # dip touching the segment start is vetoed
