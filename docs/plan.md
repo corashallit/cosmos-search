@@ -68,7 +68,7 @@ These apply to every arm and every thread.
 | **Decision and freeze** | | | |
 | D1 | Compare arms on equal footing: recovery on injections and vetting cost per surviving candidate; reallocate effort | G4, T4, A3, V3 | DR4 plan thread → Cora |
 | D2 | Freeze `dr4-day-one`: queries, thresholds, code, pre-registered analysis | D1, G7; before DR4 | DR4 plan thread |
-| D3 | DR4 day one: TAP prefilter → DataLink pull of the top ~10⁴; full bulk stream of epoch photometry with detectors per file (falls back to a random DataLink channel if there are no bulk files); for G ≥ 16, a per-CCD DataLink pull of the top ~10⁴ by \|W\| per G bin (sign-blind, so competition stays valid) → ranking → vetting | D2, DR4 release | all |
+| D3 | DR4 day one: TAP prefilter → DataLink pull of the top ~10⁴; full bulk stream of epoch photometry with detectors per file (falls back to a random DataLink channel if there are no bulk files); for G ≥ 16, a per-CCD DataLink pull of the top ~10⁴ by \|W\| per G bin (sign-blind, so competition stays valid; `gaia.dr4.ccd_at_extremes`, docs/infra/targets.md) → ranking → vetting | D2, DR4 release | all |
 | D4 | Shortlist with measured recall and false-positive rate; decide on outreach to technosignature groups | D3 | Cora |
 
 ## Open decisions

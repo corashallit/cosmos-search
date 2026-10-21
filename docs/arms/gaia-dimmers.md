@@ -158,6 +158,8 @@ Record changes of approach here, with the evidence that prompted them.
     model puts per-CCD G (`epoch_photometry_ccd`) in DataLink only, so on day one the test runs on a pull of the
     top ~10⁴ by |W| in each G ≥ 16 bin, ~9 h at DR3 rates. The pull is chosen by |W| regardless of sign, so
     each source's dim/bright coin stays fair and knockoff+ on the CCD-cleaned W of the pulled set stays valid.
-    Choosing by the dim score alone would bias it.
+    Choosing by the dim score alone would bias it. The test is `gaia.dr4.ccd_at_extremes` (PR #36): `frac_ccd_*`
+    and a trimmed coherent shift `z_trim_*`, which drops the 2 most extreme CCDs on that side, at each source's
+    faintest and brightest transits.
   - **The floor binds.** At q ≤ 0.01 each G bin needs 100 discoveries, so `fov` reports none. Lists for
     vetting use q ≤ 0.1.
