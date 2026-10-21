@@ -56,17 +56,16 @@ the bright one (≈ α N, as designed), and 2,865 controls. The faint/bright rat
 excess, mostly known variable classes.
 
 **Recall against full light curves.** `python -m cosmos_search.targets.validate` compares the selection with
-features from the DR3 bulk pass. Preliminary numbers, from the first 400 of 3,386 bulk files (3.0 × 10⁶
-sources, weighted toward the Galactic bulge, which the CDN lists first):
+features from the full DR3 bulk pass (all 3,386 files, 11,754,237 sources; the selection is 1.1% of them):
 
 | Class, from full light curves | Sources | Prefilter recall | Recall at G < 13 |
 |---|---|---|---|
-| Deep dip (≤ −8σ) confirmed in the other FoV (partner ≤ −4σ) | 24,383 | 46% | 72% |
-| Deep dip, partner transit disagrees (> −1σ) | 24,505 | 11% | 38% |
-| Deep dip, no partner transit | 33,389 | 25% | 56% |
-| Only DPAC-rejected faint points (≥ 3σ), otherwise quiet | 236,396 | 0.3% | 0.2% |
-| Mirror: bright spike confirmed in the other FoV | 16,198 | 4% | 13% |
-| Random controls | 30,045 | 1.1% | 3.2% |
+| Deep dip (≤ −8σ) confirmed in the other FoV (partner ≤ −4σ) | 149,761 | 37% | 70% |
+| Deep dip, partner transit disagrees (> −1σ) | 118,588 | 9% | 40% |
+| Deep dip, no partner transit | 196,677 | 21% | 57% |
+| Only DPAC-rejected faint points (≥ 3σ), otherwise quiet | 695,805 | 0.3% | 0.1% |
+| Mirror: bright spike confirmed in the other FoV | 150,352 | 2.0% | 11% |
+| Random controls | 117,838 | 1.2% | 2.7% |
 
 Two things follow:
 
@@ -74,14 +73,12 @@ Two things follow:
    population. On DR4, where most of the 4 × 10⁸ sources are not variable, the same α gives lower
    thresholds. The rule is frozen; the numbers it produces are not.
 2. **The prefilter cannot see dips that DPAC's variability processing rejected.** `vari_summary` statistics
-   use only non-rejected transits. Of the DR3 sources processed so far, 7.9% have at least one rejected point
-   ≥ 3σ below their median while the rest of the light curve is quiet. Many will be genuine artefacts, but a
+   use only non-rejected transits. Of all DR3 sources, 5.9% have at least one rejected point ≥ 3σ below their
+   median while the rest of the light curve is quiet (by stratum: docs/infra/gaia-epoch.md). Many will be genuine artefacts, but a
    rejection rule tuned on ordinary variables is exactly the kind of filter that would discard a rare,
    deep, one-off dip. DR4's `vari_epoch_flags` (DataLink-only) carries the same information. The defence is
    the random controls plus a budgeted random pull of full light curves, so that the rejected-dip channel
    is measured and searched directly rather than inherited from the prefilter.
-
-Final numbers replace these when the full pass finishes.
 
 ## Freezing
 

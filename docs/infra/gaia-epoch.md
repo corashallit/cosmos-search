@@ -85,11 +85,25 @@ Where a stratum is thin, coarsen G rather than dropping n_g. The sketch sees eve
 
 ```
 python -m cosmos_search.gaia.dr3_pass --out /tmp/work --durable /mnt/project-files/data/gaia-dr3-epoch --shard 0/2 --workers 5
-python -m cosmos_search.gaia.dr3_pass --durable /mnt/project-files/data/gaia-dr3-epoch --out x --consolidate /mnt/project-files/data/gaia-dr3-epoch/merged
+python -m cosmos_search.gaia.dr3_pass --durable /mnt/project-files/data/gaia-dr3-epoch --out x --consolidate /mnt/project-files/data/gaia-dr3-epoch/
 ```
 
 `cosmos_search.gaia.strata` tabulates the rate of a feature-defined class (default: quiet except for a
 DPAC-rejected faint point) by magnitude, colour and crowding, for sizing a stratified random pull.
+
+On the full DR3 pass the rate is 5.9% overall (695,805 of 11,754,237). It varies mildly with colour and
+crowding (4–7% across BP−RP and `ipd_frac_multi_peak` bins), but it doubles at G < 13 (12–13%, likely
+gating and saturation rejections). It also rises with n_g (4.0% below 20 transits, 8.5% at 80 or more),
+since each transit is another chance of a rejection. One sky band stands out: |b| 10–20° is at 8.9%
+against 5–6% elsewhere, and in every n_g bin, so the scanning law does not explain it. It is higher south
+(9.9%) than north (7.0%), which points at the bulge outskirts or a scan-direction pattern in DPAC's
+rejections. Stratify a random pull by G and n_g; map the |b| 10–20° excess before trusting rejected-dip
+candidates from there.
+
+**DR3 outputs on the project share** (`/mnt/project-files/data/gaia-dr3-epoch/`, 2026-10-21): `features/`
+(34 consolidated Parquet parts, 11,754,237 rows, 3.0 GB), `per-file/lightcurves/` (3,386 files, ~16 GB, the
+light curves passing `keep_light_curve`), `aux_gaia_source.parquet` (G, BP−RP, BP/RP excess,
+`ipd_frac_multi_peak`, RUWE and b for every source) and `manifest.jsonl`.
 
 The pass is one process per file and mostly CPU-bound: on this 4-core container, 5 workers ran at ~70% CPU
 and ~29 MB/s of compressed input. More cores, or more sessions via `--shard`, is where speed comes from.
