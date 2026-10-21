@@ -229,6 +229,73 @@ Changes made because of it:
 6. DR3 BP/RP epoch photometry has frequent single-epoch, single-band outliers. A Stage 0 flag for them is cheap and
    would save vetter attention.
 
+## 10. Pilot 2 (Gaia DR3, 2026-10-21)
+
+The setup was pilot 1's with its fixes and fresh sources (`--after 1000000000`). There were 26 packets. 14 were
+controls, two each of ECL, YSO, RCB, LPV, RS, SOLAR_LIKE and AGN. 12 were decoys, two each of six specs, in 12
+SOLAR_LIKE and RS hosts with G 12–17, so the hosts come from the controls' own classes. Every transcript shows one
+Read and the reply. One launch had a mistyped file name; that agent read nothing, answered nothing, and was
+relaunched. The audit (§4, signal-free fields only) gave AUC 0.69 (p = 0.10).
+
+| Measure | Result |
+|---|---|
+| False "unexplained" on controls | 0 / 14 (95% upper bound 0.16) |
+| Group / leaf accuracy on controls | 13 / 14 / 10 / 14 |
+| P(unexplained): anomaly probes vs controls | probes 0.07, 0.20, 0.36, 0.40; every control ≤ 0.05; AUC 1.0 (p = 0.0005) |
+| Probes where "unexplained" wins the group argmax | 0 / 4 (it was the top single class in 2) |
+| Incoherent decoys given a natural story (rubric) | 3 / 4, but see below |
+| Rare-natural decoys in an acceptable group | 3 / 4 (a dust dip on a host with `ipd_frac_multi_peak` = 1 was called a blend) |
+| Held-out tail minimum, 80% intervals | 73% coverage (controls 64%, decoys 83%) |
+| Cost | 40–62k tokens and 12–150 s per vetter |
+
+**What it says about the vetter.** It ranks well. Every probe got a higher P(unexplained) than every control. The
+two probes with 4–5 visible events got 0.36 and 0.40, with reasoning an astronomer would accept: identical grey
+flat-bottomed dips, no period that fits the dip times and the out-of-dip coverage, and flat bottoms too long for
+an orbital crossing of a dwarf at the allowed recurrence. Argmax over groups is the wrong summary for Stage A,
+because "astrophysical" sums 10 leaves against 1. The report now has `unexplained_ranking`: the AUC of P(u) for
+probes vs controls, and the share of probes above every control. The shortlist threshold is a cut on P(u) set from
+these numbers, not an argmax.
+
+**What it says about the injector, again.** The pilot exposed four problems in the decoys and the selection:
+
+1. **Selection mismatch.** 10 of 12 decoys had "Detected dips" in the packet, against 2 of 14 controls. Real
+   candidates are in the queue because the detector fired, so controls that never trip it calibrate a different
+   population. Controls are now drawn through the same detector (`vetting_pilot.py fetch` keeps class members whose
+   dips the detector finds before the tail cut). The TESS arm did the same (PR #19).
+2. **Decoys never reached the tail.** Signals were drawn before the cut, so no decoy dipped in its withheld tail.
+   The tail-dip question was then meaningless on decoys, and a repeating anomaly that stops at the cut is unreal.
+   Signals are now drawn over the full span and judged on the shown epochs.
+3. **Chromatic flips were not flips.** Both had RP still dimming slightly (by 2% and by 0.5–1%), so steep dust or
+   spots were valid readings. With independent amplitudes, one half of a flip almost always swamps the other.
+   The brightening now scales with the dip depth, and a flip decoy is accepted only if one transit shows BP ≥ 3σ
+   down and RP ≥ 3σ up (`IDENTIFIABLE`).
+4. **Which feature is being classified.** Both RP-only decoys were seen as RP artefacts in the explanation. One
+   vetter still put the mass on the host's spot modulation, because the prompt never said what the classes are
+   for. The prompt now says: classify the cause of the detected dips, and describe the star's other behaviour in
+   the explanation. Single-band decoys now go into the detector's band (G), since a dip the detector cannot see
+   never reaches vetting.
+
+The TESS arm's pilot found two more leaks, both now fixed in `inject_candidate`. Decoys missed the alternate-aperture
+fluxes in `meta`, and errors fell in proportion to flux inside the dip. Every flux channel is now injected, and
+errors and in-dip scatter follow photon noise (√k).
+
+**Identifiability at DR3 cadence is the real limit.** One draw from a dip-train family counts as identifiable
+when it is visible, shows ≥ 4 events, and fits no periodic eclipsing system with a primary and a free secondary.
+Pilot 2 vetters searched exactly that space. On the 12 pilot-2 hosts (23–126 epochs):
+
+| Family | Draws | Visible | ≥ 3 events | ≥ 4 events | No eclipse solution |
+|---|---|---|---|---|---|
+| prime-spaced train | 2400 | 201 | 32 | 6 | 1 |
+| geometric train | 2400 | 191 | 21 | 3 | 0 |
+
+So 1 of 4,800 aperiodic trains drawn from these priors was recognisable as aperiodic in DR3 sampling. DR4 roughly
+doubles the epochs and the baseline, which helps but does not change the picture. Timing alone will rarely
+identify a Gaia anomaly. The evidence that sparse photometry can carry is per event: a dip whose depth, colour,
+shape and duration are inconsistent with any crossing of this star, given its radius and density from the parallax
+and colour, and with the recurrence the epochs allow. Pilot-2 vetters used exactly that argument. This points the
+Gaia arm's anomaly score, and the next probe family, at per-event physics. Timing claims go to dense follow-up
+(TESS, ZTF).
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -238,3 +305,8 @@ Changes made because of it:
   dip injected into ~100 Gaia epochs usually lands between them.
 - 2026-10-21. Pilot 1 (§9): controls behaved, but most decoys were invisible or unidentifiable at DR3 cadence.
   Decoys now pass visibility and identifiability checks before they are accepted.
+- 2026-10-21. Pilot 2 (§10): Stage A ranks probes above every control by P(unexplained), but the decoys and controls
+  still differed in ways real candidates would not. Controls are now drawn through the detector. Decoys are drawn
+  over the full span, injected into every flux channel with photon-noise errors, and must trigger the detector.
+  Flips must show both halves, and anomaly probes must defeat eccentric-binary solutions with ≥ 4 events. The
+  prompt names the detected dips as the thing to classify.
