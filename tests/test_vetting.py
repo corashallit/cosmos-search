@@ -118,7 +118,7 @@ def test_every_decoy_spec_injects(spec):
     cand, extra, truth = make_decoy(host, spec, np.random.default_rng(1))
     assert extra["kind"] == "decoy" and extra["label"] in taxonomy.LEAVES
     assert truth["host"] == host.candidate_id
-    assert truth["snr"] >= 7
+    assert truth["visibility"]["max_dev"] >= 4
     assert any(not np.allclose(a.flux, b.flux) for a, b in zip(cand.lightcurves, host.lightcurves))
 
 
@@ -318,3 +318,46 @@ def test_test_descriptions_are_rendered():
     packet, _ = build(cand)
     assert packet["tests"]["z_bkg"]["description"].startswith("in-dip")
     assert "in-dip background excess" in packet["text"]
+
+
+def test_tail_dip_target_skipped_for_large_amplitude_stars():
+    cand = gaia_like()
+    for lc in cand.lightcurves:
+        lc.flux = 1 + 0.4 * np.sin(lc.time / 30.0)
+    packet, key = build(cand, holdout=("tail",))
+    assert [t["id"] for t in packet["targets"]] == ["tail_min_flux"]
+    assert "withheld" in packet["targets"][0]["question"]
+
+
+def test_decoys_are_visible_before_the_tail_cut():
+    from cosmos_search.inject.classes.vetting_decoys import visibility
+    from cosmos_search.inject import lightcurve as lcinj
+    host = gaia_like(seed=7)
+    t0, t1 = host.time_span()
+    cut = t0 + 0.8 * (t1 - t0)
+    for spec in ("grey_dip", "step", "chromatic_flip", "single_band_dip"):
+        cand, extra, truth = make_decoy(host, spec, np.random.default_rng(3), t_cut=cut)
+        assert truth["visibility"]["max_dev"] >= 4 and truth["visibility"]["n_dev3"] >= 2
+    # A dip placed entirely in the withheld tail is not visible.
+    hidden = lcinj.Dip(t0=t1 - 5, covering=0.5, ingress=1, egress=1, flat=3)
+    assert not visibility(host, hidden, None, cut, "rare_natural")[0]
+
+
+def test_anomaly_probes_must_defeat_every_single_period():
+    from cosmos_search.inject.classes.vetting_decoys import single_period_fits
+    t = np.sort(np.random.default_rng(0).uniform(0, 1000, 150))
+    per = 37.3
+    in_dip = t[np.abs(((t - t[5]) / per + 0.5) % 1 - 0.5) * per < 0.3]
+    out = np.setdiff1d(t, in_dip)
+    assert single_period_fits(in_dip, out, 0.3, 1000)
+    primes = np.array([2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47])
+    ev = 10 + 4.0 * np.cumsum(primes)
+    t2 = np.sort(np.concatenate([t, ev]))
+    in2 = ev[ev < 1000]
+    assert not single_period_fits(in2, np.setdiff1d(t2, in2), 0.3, 1000)
+
+
+def test_anomaly_probe_decoys_pass_the_identifiability_check():
+    host = gaia_like(seed=11, n=150)
+    cand, extra, truth = make_decoy(host, "grey_primes", np.random.default_rng(5))
+    assert extra["role"] == "anomaly_probe" and truth["visibility"]["n_events"] >= 3

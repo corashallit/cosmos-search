@@ -181,6 +181,54 @@ verdict file changed after its commit. In a sealed batch the key is age cipherte
 batch it is plaintext. Batches for the truth repo are built by the `vetting_batch` injector class, whose products
 are the packets and whose reveal map is the scoring key, with each decoy's candidate id replaced by "decoy".
 
+## 9. Pilot 1 (Gaia DR3, 2026-10-21)
+
+`scripts/vetting_pilot.py`. There were 24 packets with the tail held out. 12 were known-answer controls taken from
+DPAC's classifier at score > 0.9 (two each of ECL, YSO, RCB, LPV, RS, AGN). 12 were decoys injected into six quiet
+SOLAR_LIKE stars. The vetters were Stage A subagents, each told to make one Read of its packet and nothing else.
+The transcripts confirm that every agent made exactly one Read plus its reply. All 24 verdicts parsed, and they were
+committed before the key was opened.
+
+| Measure | Result |
+|---|---|
+| False "unexplained" on controls | 0 / 12 (95% upper bound 0.19) |
+| Group accuracy on controls | 11 / 12 (one AGN called a blend: no signal, `ipd_frac_multi_peak` = 1) |
+| Recognition of controls | 0 / 12 named (none are famous) |
+| Held-out tail minimum, 80% intervals | 79% coverage; Brier skill on the tail-dip question +0.52 for controls, ~0 for decoys |
+| Highest P(unexplained) given to any packet | 0.15 |
+| Planted-vs-real audit (§4) | AUC 0.96 (p = 0.002): decoy hosts were a different population from the controls |
+| Cost | ~1.6k packet tokens; ~50k tokens and 25–120 s per vetter, including fixed overhead |
+
+**The decoys mostly measured the injector, not the vetter.** Rechecked with the rules now in `visibility()`:
+
+- 7 of 12 decoys were not visible in the epochs the packet showed. The signal was below the host's own variability,
+  fell between epochs, or sat in the withheld tail. The S/N check had used the photometric errors over the full
+  light curve, which is the wrong noise and the wrong epochs.
+- All 4 "anomaly probes" (prime and geometric dip trains) were labelled "unexplained", but at DR3 cadence a train
+  shows 1–3 events that a single period fits. Calling them eclipsing binaries was the right reading of the data,
+  not a failure to see an anomaly.
+- Only 3 decoys had a label the data supported. A one-band BP dip was called detector_defect (correct). A visible
+  dust dip was called astrophysical (correct group, wrong leaf). A marginal (4.3σ) chromatic flip got a spot story,
+  which is one confabulation out of two valid incoherent decoys.
+
+So the pilot supports one claim: on 12 ordinary known variables, the vetter did not invent anomalies, its held-out
+predictions were calibrated, and it ignored the many single-epoch BP/RP outliers (×20–60 flux spikes) in DR3 epoch
+photometry. It says nothing yet about sensitivity or confabulation rates.
+
+Changes made because of it:
+
+1. Decoys are accepted only if the shown epochs carry them: at least two epochs ≥ 3σ and one ≥ 4σ, in units of
+   the host's robust scatter, before the tail cut.
+2. Anomaly probes must also be identifiable as anomalies from the sampled data: ≥ 3 distinct events, and no single
+   period (brute-force grid) fits both the in-dip and out-of-dip epochs (`single_period_fits`). The general rule is
+   that a decoy's label is what an ideal observer could conclude from the packet, not what the injector drew.
+3. Decoys are spread over hosts by a shuffled round robin. A host that cannot show a decoy passes it to the next.
+4. The tail-dip question is dropped when its 4σ threshold would be negative flux (R CrB, Miras).
+5. Hosts must come from the same population as the packets they are compared with: the real queue in production,
+   the controls' classes in a calibration run. This is what the audit failure says.
+6. DR3 BP/RP epoch photometry has frequent single-epoch, single-band outliers. A Stage 0 flag for them is cheap and
+   would save vetter attention.
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -188,3 +236,5 @@ are the packets and whose reveal map is the scoring key, with each decoy's candi
   probes added as their own decoy role (sensitivity, not only confabulation), and the shortlist figure defined as a
   label-shift estimate with a predictive interval. Decoys are redrawn until their sampled S/N ≥ 7, because a short
   dip injected into ~100 Gaia epochs usually lands between them.
+- 2026-10-21. Pilot 1 (§9): controls behaved, but most decoys were invisible or unidentifiable at DR3 cadence.
+  Decoys now pass visibility and identifiability checks before they are accepted.

@@ -112,13 +112,15 @@ def _tail_targets(cand, t_cut):
         return targets, truths, None
     med, s = float(np.nanmedian(ref.flux[vis])), robust_sigma(ref.flux[vis])
     thresh = med - DIP_SIGMA * s
-    targets.append({"id": "tail_dip", "kind": "binary",
-                    "question": f"The last {HOLDOUT_TAIL:.0%} of the time span ({hid.sum()} {ref.band} epochs after t = "
-                                f"{t_cut:.1f} d) is withheld. Probability that at least one withheld {ref.band} epoch "
-                                f"has flux below {thresh:.4f} ({DIP_SIGMA:g} robust sigma below the visible median)?"})
-    truths["tail_dip"] = bool(np.nanmin(ref.flux[hid]) < thresh)
+    window = f"The last {HOLDOUT_TAIL:.0%} of the time span ({hid.sum()} {ref.band} epochs after t = {t_cut:.1f} d) is withheld."
+    # Stars that vary by tens of per cent (R CrB, Miras) would need a dip below zero flux; ask only the interval there.
+    if thresh > 0:
+        targets.append({"id": "tail_dip", "kind": "binary",
+                        "question": f"{window} Probability that at least one withheld {ref.band} epoch has flux below "
+                                    f"{thresh:.4f} ({DIP_SIGMA:g} robust sigma below the visible median)?"})
+        truths["tail_dip"] = bool(np.nanmin(ref.flux[hid]) < thresh)
     targets.append({"id": "tail_min_flux", "kind": "interval",
-                    "question": f"Central 80% interval for the minimum {ref.band} flux among the withheld epochs."})
+                    "question": f"{window} Central 80% interval for the minimum {ref.band} flux among the withheld epochs."})
     truths["tail_min_flux"] = float(np.nanmin(ref.flux[hid]))
     return targets, truths, t_cut
 
