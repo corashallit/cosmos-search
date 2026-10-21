@@ -1,0 +1,1806 @@
+{
+ "regions": [
+  {
+   "universe": 0,
+   "radius_deg": 3.4165492185937265,
+   "shells": [
+    3,
+    5
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 486,
+   "n_target": 167.11231739317373,
+   "n_injected_sov_A": 4,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  },
+  {
+   "universe": 0,
+   "radius_deg": 2.1605902487128814,
+   "shells": [
+    4,
+    7
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 730,
+   "n_target": 5.229960610584664,
+   "n_injected_sov_A": 1,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  },
+  {
+   "universe": 1,
+   "radius_deg": 5.050481082326296,
+   "shells": [
+    3,
+    4
+   ],
+   "recovered_top5": true,
+   "rank": 1,
+   "n_members": 942,
+   "n_target": 103.40790664434073,
+   "n_injected_sov_A": 41,
+   "best_share": 0.8048780487804879,
+   "recovered": 1.0,
+   "candidate": {
+    "disc": 9166,
+    "shell_window": 3,
+    "ra": 312.18749999999994,
+    "dec": -24.62431835216408,
+    "radius_deg": 4.0,
+    "distance": "1000-2000 pc",
+    "shells": [
+     3,
+     4
+    ],
+    "O": 33.0,
+    "E": 3.058588625027129,
+    "llr": 32.72216109627824,
+    "p_fw": 0.005,
+    "phi": 1.483730552070563
+   }
+  },
+  {
+   "universe": 2,
+   "radius_deg": 3.67130136291027,
+   "shells": [
+    0,
+    2
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 444,
+   "n_target": 5.048592602895295,
+   "n_injected_sov_A": 1,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  },
+  {
+   "universe": 2,
+   "radius_deg": 1.0731931348839872,
+   "shells": [
+    0,
+    1
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 20,
+   "n_target": 149.55062590614713,
+   "n_injected_sov_A": 1,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  },
+  {
+   "universe": 3,
+   "radius_deg": 1.2477954477762128,
+   "shells": [
+    2,
+    5
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 119,
+   "n_target": 11.948631996786853,
+   "n_injected_sov_A": 2,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  },
+  {
+   "universe": 4,
+   "radius_deg": 1.2898738079660135,
+   "shells": [
+    0,
+    2
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 130,
+   "n_target": 10.723660149562503,
+   "n_injected_sov_A": 5,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  },
+  {
+   "universe": 4,
+   "radius_deg": 3.5510888536581766,
+   "shells": [
+    1,
+    3
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 249,
+   "n_target": 124.54894597918175,
+   "n_injected_sov_A": 8,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  },
+  {
+   "universe": 5,
+   "radius_deg": 1.599317867200896,
+   "shells": [
+    2,
+    4
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 723,
+   "n_target": 12.434519391804281,
+   "n_injected_sov_A": 7,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  },
+  {
+   "universe": 6,
+   "radius_deg": 2.74488608665942,
+   "shells": [
+    4,
+    6
+   ],
+   "recovered_top5": true,
+   "rank": 3,
+   "n_members": 4871,
+   "n_target": 26.150310944293935,
+   "n_injected_sov_A": 12,
+   "best_share": 0.5833333333333334,
+   "recovered": 1.0,
+   "candidate": {
+    "disc": 11200,
+    "shell_window": 18,
+    "ra": 270.0,
+    "dec": 2.388015463268772,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 237.0,
+    "E": 116.98689644505976,
+    "llr": 13.613408254004343,
+    "p_fw": 0.02,
+    "phi": 3.4751379705405303
+   }
+  },
+  {
+   "universe": 7,
+   "radius_deg": 2.77862974691117,
+   "shells": [
+    2,
+    4
+   ],
+   "recovered_top5": true,
+   "rank": 1,
+   "n_members": 756,
+   "n_target": 86.52132290786751,
+   "n_injected_sov_A": 32,
+   "best_share": 0.96875,
+   "recovered": 1.0,
+   "candidate": {
+    "disc": 8357,
+    "shell_window": 9,
+    "ra": 19.6875,
+    "dec": -41.81031489577862,
+    "radius_deg": 4.0,
+    "distance": "500-2000 pc",
+    "shells": [
+     2,
+     4
+    ],
+    "O": 31.0,
+    "E": 2.4390721581913235,
+    "llr": 25.93353789356977,
+    "p_fw": 0.005,
+    "phi": 1.9377428132251553
+   }
+  },
+  {
+   "universe": 7,
+   "radius_deg": 1.4896974381344676,
+   "shells": [
+    0,
+    1
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 59,
+   "n_target": 6.455354370293073,
+   "n_injected_sov_A": 2,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  },
+  {
+   "universe": 8,
+   "radius_deg": 1.0692860256749055,
+   "shells": [
+    0,
+    8
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 209,
+   "n_target": 11.121125916179752,
+   "n_injected_sov_A": 8,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  },
+  {
+   "universe": 9,
+   "radius_deg": 1.6073984795811063,
+   "shells": [
+    1,
+    2
+   ],
+   "recovered_top5": true,
+   "rank": 2,
+   "n_members": 363,
+   "n_target": 47.10451691091988,
+   "n_injected_sov_A": 15,
+   "best_share": 0.8666666666666667,
+   "recovered": 1.0,
+   "candidate": {
+    "disc": 5466,
+    "shell_window": 1,
+    "ra": 160.3125,
+    "dec": -41.81031489577862,
+    "radius_deg": 2.0,
+    "distance": "250-500 pc",
+    "shells": [
+     1,
+     2
+    ],
+    "O": 14.0,
+    "E": 1.3980230775787432,
+    "llr": 19.65399757479841,
+    "p_fw": 0.005,
+    "phi": 1.0
+   }
+  },
+  {
+   "universe": 10,
+   "radius_deg": 3.328198898325749,
+   "shells": [
+    2,
+    5
+   ],
+   "recovered_top5": false,
+   "rank": null,
+   "n_members": 19207,
+   "n_target": 6.047193660517346,
+   "n_injected_sov_A": 5,
+   "best_share": 0.0,
+   "recovered": false,
+   "candidate": null
+  }
+ ],
+ "unmatched": [
+  {
+   "universe": 0,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.42675980504885,
+    "llr": 42.43950324193982,
+    "p_fw": 0.005,
+    "phi": 3.525619481073087
+   }
+  },
+  {
+   "universe": 0,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 315.72006868666233,
+    "llr": 21.577240995376467,
+    "p_fw": 0.005,
+    "phi": 3.525619481073087
+   }
+  },
+  {
+   "universe": 0,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.09450239256817,
+    "llr": 14.28333719607019,
+    "p_fw": 0.02,
+    "phi": 3.525619481073087
+   }
+  },
+  {
+   "universe": 0,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 159.9696860642006,
+    "llr": 13.398636993554758,
+    "p_fw": 0.035,
+    "phi": 3.1269244834694643
+   }
+  },
+  {
+   "universe": 1,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.30890345562793,
+    "llr": 41.68491802352334,
+    "p_fw": 0.005,
+    "phi": 3.5933690636308055
+   }
+  },
+  {
+   "universe": 1,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 314.59539547229764,
+    "llr": 21.412584820336278,
+    "p_fw": 0.005,
+    "phi": 3.5933690636308055
+   }
+  },
+  {
+   "universe": 1,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.03370587154038,
+    "llr": 14.031206676042592,
+    "p_fw": 0.005,
+    "phi": 3.5933690636308055
+   }
+  },
+  {
+   "universe": 1,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 160.13500823925324,
+    "llr": 12.83316184624842,
+    "p_fw": 0.025,
+    "phi": 3.2543291509666266
+   }
+  },
+  {
+   "universe": 1,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 328.52483116194526,
+    "llr": 12.410860830256757,
+    "p_fw": 0.035,
+    "phi": 3.5933690636308055
+   }
+  },
+  {
+   "universe": 2,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.42246538862207,
+    "llr": 42.511181293506176,
+    "p_fw": 0.005,
+    "phi": 3.5198152351079877
+   }
+  },
+  {
+   "universe": 2,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 315.71753070495055,
+    "llr": 21.613377917370677,
+    "p_fw": 0.005,
+    "phi": 3.5198152351079877
+   }
+  },
+  {
+   "universe": 2,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.11497682670813,
+    "llr": 14.300991857223872,
+    "p_fw": 0.015,
+    "phi": 3.5198152351079877
+   }
+  },
+  {
+   "universe": 2,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 159.86107777364745,
+    "llr": 13.458168817084257,
+    "p_fw": 0.015,
+    "phi": 3.119606825907618
+   }
+  },
+  {
+   "universe": 2,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 328.3943108142949,
+    "llr": 12.691158139697146,
+    "p_fw": 0.045,
+    "phi": 3.5198152351079877
+   }
+  },
+  {
+   "universe": 3,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.42064208104617,
+    "llr": 43.32857617907589,
+    "p_fw": 0.005,
+    "phi": 3.453472259812263
+   }
+  },
+  {
+   "universe": 3,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 315.68550827207116,
+    "llr": 22.035727972719023,
+    "p_fw": 0.005,
+    "phi": 3.453472259812263
+   }
+  },
+  {
+   "universe": 3,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.10113538212364,
+    "llr": 14.579785482395016,
+    "p_fw": 0.015,
+    "phi": 3.453472259812263
+   }
+  },
+  {
+   "universe": 3,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 159.85457955695455,
+    "llr": 13.553432027548133,
+    "p_fw": 0.03,
+    "phi": 3.0980673269064187
+   }
+  },
+  {
+   "universe": 3,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 328.4188331273277,
+    "llr": 12.930948923447318,
+    "p_fw": 0.045,
+    "phi": 3.453472259812263
+   }
+  },
+  {
+   "universe": 4,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.6397663410065,
+    "llr": 42.5173110832047,
+    "p_fw": 0.005,
+    "phi": 3.512215673695973
+   }
+  },
+  {
+   "universe": 4,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 316.0619556337274,
+    "llr": 21.584672692787315,
+    "p_fw": 0.005,
+    "phi": 3.512215673695973
+   }
+  },
+  {
+   "universe": 4,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.25606629165257,
+    "llr": 14.291250068533778,
+    "p_fw": 0.01,
+    "phi": 3.512215673695973
+   }
+  },
+  {
+   "universe": 4,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 160.1412837354696,
+    "llr": 13.33584611357652,
+    "p_fw": 0.01,
+    "phi": 3.131281097523874
+   }
+  },
+  {
+   "universe": 4,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 328.46880358077664,
+    "llr": 12.7066349158613,
+    "p_fw": 0.015,
+    "phi": 3.512215673695973
+   }
+  },
+  {
+   "universe": 4,
+   "unmatched_candidate": {
+    "disc": 11200,
+    "shell_window": 18,
+    "ra": 270.0,
+    "dec": 2.388015463268772,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 230.0,
+    "E": 116.93086637665576,
+    "llr": 12.107754832825005,
+    "p_fw": 0.04,
+    "phi": 3.512215673695973
+   }
+  },
+  {
+   "universe": 5,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.54493120044634,
+    "llr": 42.71399729811295,
+    "p_fw": 0.005,
+    "phi": 3.4991222921837655
+   }
+  },
+  {
+   "universe": 5,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 315.89071368889813,
+    "llr": 21.703080082695255,
+    "p_fw": 0.005,
+    "phi": 3.4991222921837655
+   }
+  },
+  {
+   "universe": 5,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.20234325070916,
+    "llr": 14.360265882946308,
+    "p_fw": 0.005,
+    "phi": 3.4991222921837655
+   }
+  },
+  {
+   "universe": 5,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 159.89734345091998,
+    "llr": 13.494752171755596,
+    "p_fw": 0.015,
+    "phi": 3.1089794077153887
+   }
+  },
+  {
+   "universe": 5,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 328.49103830469096,
+    "llr": 12.75059308535534,
+    "p_fw": 0.045,
+    "phi": 3.4991222921837655
+   }
+  },
+  {
+   "universe": 6,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.81911466360697,
+    "llr": 42.8994437673829,
+    "p_fw": 0.005,
+    "phi": 3.4751379705405303
+   }
+  },
+  {
+   "universe": 6,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 316.20642178983377,
+    "llr": 21.783031986511084,
+    "p_fw": 0.005,
+    "phi": 3.4751379705405303
+   }
+  },
+  {
+   "universe": 6,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.34701818798808,
+    "llr": 14.417270038588255,
+    "p_fw": 0.015,
+    "phi": 3.4751379705405303
+   }
+  },
+  {
+   "universe": 6,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 160.0092365733087,
+    "llr": 13.359067353563194,
+    "p_fw": 0.03,
+    "phi": 3.1337991379361587
+   }
+  },
+  {
+   "universe": 6,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 328.743213833339,
+    "llr": 12.79765724630648,
+    "p_fw": 0.035,
+    "phi": 3.4751379705405303
+   }
+  },
+  {
+   "universe": 7,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.17698751160177,
+    "llr": 42.377831620104274,
+    "p_fw": 0.005,
+    "phi": 3.538943869953682
+   }
+  },
+  {
+   "universe": 7,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 315.40989163215403,
+    "llr": 21.5636140847953,
+    "p_fw": 0.005,
+    "phi": 3.538943869953682
+   }
+  },
+  {
+   "universe": 7,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.10499117003211,
+    "llr": 14.226553559726165,
+    "p_fw": 0.005,
+    "phi": 3.538943869953682
+   }
+  },
+  {
+   "universe": 7,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 159.74609068197378,
+    "llr": 13.306982844584374,
+    "p_fw": 0.015,
+    "phi": 3.162036009894802
+   }
+  },
+  {
+   "universe": 7,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 329.20413111763895,
+    "llr": 12.493667629855516,
+    "p_fw": 0.03,
+    "phi": 3.538943869953682
+   }
+  },
+  {
+   "universe": 7,
+   "unmatched_candidate": {
+    "disc": 11200,
+    "shell_window": 18,
+    "ra": 270.0,
+    "dec": 2.388015463268772,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 230.0,
+    "E": 116.69268276730712,
+    "llr": 12.08152575652115,
+    "p_fw": 0.045,
+    "phi": 3.538943869953682
+   }
+  },
+  {
+   "universe": 8,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.63492186432055,
+    "llr": 42.319345576326086,
+    "p_fw": 0.005,
+    "phi": 3.5288041700722603
+   }
+  },
+  {
+   "universe": 8,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 316.052553211157,
+    "llr": 21.485253763042486,
+    "p_fw": 0.005,
+    "phi": 3.5288041700722603
+   }
+  },
+  {
+   "universe": 8,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.24169800450565,
+    "llr": 14.22818835488577,
+    "p_fw": 0.005,
+    "phi": 3.5288041700722603
+   }
+  },
+  {
+   "universe": 8,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 159.88686867514446,
+    "llr": 13.417904161360372,
+    "p_fw": 0.01,
+    "phi": 3.1274157397948166
+   }
+  },
+  {
+   "universe": 8,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 328.52096360358547,
+    "llr": 12.638555372564285,
+    "p_fw": 0.02,
+    "phi": 3.5288041700722603
+   }
+  },
+  {
+   "universe": 8,
+   "unmatched_candidate": {
+    "disc": 11200,
+    "shell_window": 18,
+    "ra": 270.0,
+    "dec": 2.388015463268772,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 230.0,
+    "E": 116.90404237202834,
+    "llr": 12.05818980598882,
+    "p_fw": 0.025,
+    "phi": 3.5288041700722603
+   }
+  },
+  {
+   "universe": 9,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.35849437549547,
+    "llr": 42.47039617024321,
+    "p_fw": 0.005,
+    "phi": 3.5252878610300917
+   }
+  },
+  {
+   "universe": 9,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 315.6124959150279,
+    "llr": 21.602793156673727,
+    "p_fw": 0.005,
+    "phi": 3.5252878610300917
+   }
+  },
+  {
+   "universe": 9,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.1303832152598,
+    "llr": 14.274360551851633,
+    "p_fw": 0.01,
+    "phi": 3.5252878610300917
+   }
+  },
+  {
+   "universe": 9,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 159.79413474215116,
+    "llr": 13.360831482218561,
+    "p_fw": 0.025,
+    "phi": 3.1463834122508736
+   }
+  },
+  {
+   "universe": 9,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 328.6075501500748,
+    "llr": 12.637299639628019,
+    "p_fw": 0.035,
+    "phi": 3.5252878610300917
+   }
+  },
+  {
+   "universe": 10,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.4088660436719,
+    "llr": 43.00574899452861,
+    "p_fw": 0.005,
+    "phi": 3.4797764368351665
+   }
+  },
+  {
+   "universe": 10,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 315.65093400367334,
+    "llr": 21.876815398381694,
+    "p_fw": 0.005,
+    "phi": 3.4797764368351665
+   }
+  },
+  {
+   "universe": 10,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.09546084365994,
+    "llr": 14.471228449958849,
+    "p_fw": 0.02,
+    "phi": 3.4797764368351665
+   }
+  },
+  {
+   "universe": 10,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 159.8506401892956,
+    "llr": 13.478095477828269,
+    "p_fw": 0.025,
+    "phi": 3.115620280104939
+   }
+  },
+  {
+   "universe": 10,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 328.39870961344354,
+    "llr": 12.836469946874823,
+    "p_fw": 0.035,
+    "phi": 3.4797764368351665
+   }
+  },
+  {
+   "universe": 11,
+   "unmatched_candidate": {
+    "disc": 12200,
+    "shell_window": 18,
+    "ra": 273.0,
+    "dec": -44.99388015045713,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 517.0,
+    "E": 216.3900993870628,
+    "llr": 42.56597511860459,
+    "p_fw": 0.005,
+    "phi": 3.5163404654754804
+   }
+  },
+  {
+   "universe": 11,
+   "unmatched_candidate": {
+    "disc": 11128,
+    "shell_window": 18,
+    "ra": 286.875,
+    "dec": 7.180755781458274,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 559.0,
+    "E": 315.64788105646187,
+    "llr": 21.65000265474396,
+    "p_fw": 0.005,
+    "phi": 3.5163404654754804
+   }
+  },
+  {
+   "universe": 11,
+   "unmatched_candidate": {
+    "disc": 11922,
+    "shell_window": 18,
+    "ra": 208.92857142857142,
+    "dec": -48.1412077943603,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 256.0,
+    "E": 127.08281500728292,
+    "llr": 14.324399861565077,
+    "p_fw": 0.02,
+    "phi": 3.5163404654754804
+   }
+  },
+  {
+   "universe": 11,
+   "unmatched_candidate": {
+    "disc": 11082,
+    "shell_window": 15,
+    "ra": 284.06249999999994,
+    "dec": -9.594068226860458,
+    "radius_deg": 8.0,
+    "distance": "500-4000 pc",
+    "shells": [
+     2,
+     5
+    ],
+    "O": 289.0,
+    "E": 159.85588808846018,
+    "llr": 13.456868289616727,
+    "p_fw": 0.025,
+    "phi": 3.1202198672353294
+   }
+  },
+  {
+   "universe": 11,
+   "unmatched_candidate": {
+    "disc": 11842,
+    "shell_window": 18,
+    "ra": 256.5,
+    "dec": -60.4344388449523,
+    "radius_deg": 8.0,
+    "distance": "all",
+    "shells": [
+     0,
+     8
+    ],
+    "O": 514.0,
+    "E": 328.39043141412674,
+    "llr": 12.704322817979854,
+    "p_fw": 0.04,
+    "phi": 3.5163404654754804
+   }
+  }
+ ],
+ "plan": [
+  {
+   "regions": [
+    {
+     "dec": 17.911478151390053,
+     "n_members": 486,
+     "n_target": 167.11231739317373,
+     "ra": 168.23572862436012,
+     "radius_deg": 3.4165492185937265,
+     "rate_per_day": 0.34220247604488824,
+     "seed": 2498113412063362949,
+     "shells": [
+      3,
+      5
+     ]
+    },
+    {
+     "dec": 2.770397880992311,
+     "n_members": 730,
+     "n_target": 5.229960610584664,
+     "ra": 246.54925912246318,
+     "radius_deg": 2.1605902487128814,
+     "rate_per_day": 0.003337406426953264,
+     "seed": 4452254594655862796,
+     "shells": [
+      4,
+      7
+     ]
+    }
+   ],
+   "universe": 0
+  },
+  {
+   "regions": [
+    {
+     "dec": -24.25512245404244,
+     "n_members": 942,
+     "n_target": 103.40790664434073,
+     "ra": 311.3869445993873,
+     "radius_deg": 5.050481082326296,
+     "rate_per_day": 0.010327922396930835,
+     "seed": 710699481607467853,
+     "shells": [
+      3,
+      4
+     ]
+    }
+   ],
+   "universe": 1
+  },
+  {
+   "regions": [
+    {
+     "dec": -38.69514585373375,
+     "n_members": 444,
+     "n_target": 5.048592602895295,
+     "ra": 353.26218133176917,
+     "radius_deg": 3.67130136291027,
+     "rate_per_day": 0.0017293650163496088,
+     "seed": 2448962616455045146,
+     "shells": [
+      0,
+      2
+     ]
+    },
+    {
+     "dec": 9.132736652327662,
+     "n_members": 20,
+     "n_target": 149.55062590614713,
+     "ra": 146.2308322949909,
+     "radius_deg": 1.0731931348839872,
+     "rate_per_day": 0.4652352322180302,
+     "seed": 923600237776499836,
+     "shells": [
+      0,
+      1
+     ]
+    }
+   ],
+   "universe": 2
+  },
+  {
+   "regions": [
+    {
+     "dec": -40.879393728770225,
+     "n_members": 119,
+     "n_target": 11.948631996786853,
+     "ra": 43.545136046086895,
+     "radius_deg": 1.2477954477762128,
+     "rate_per_day": 0.015294602991037898,
+     "seed": 2293868087127308558,
+     "shells": [
+      2,
+      5
+     ]
+    }
+   ],
+   "universe": 3
+  },
+  {
+   "regions": [
+    {
+     "dec": -11.62808590449449,
+     "n_members": 130,
+     "n_target": 10.723660149562503,
+     "ra": 260.4198537706396,
+     "radius_deg": 1.2898738079660135,
+     "rate_per_day": 0.007401201110745302,
+     "seed": 1286498263463182660,
+     "shells": [
+      0,
+      2
+     ]
+    },
+    {
+     "dec": 0.9773589447751032,
+     "n_members": 249,
+     "n_target": 124.54894597918175,
+     "ra": 225.77461453346055,
+     "radius_deg": 3.5510888536581766,
+     "rate_per_day": 0.11183547715585718,
+     "seed": 992190326745711073,
+     "shells": [
+      1,
+      3
+     ]
+    }
+   ],
+   "universe": 4
+  },
+  {
+   "regions": [
+    {
+     "dec": 36.67479734965416,
+     "n_members": 723,
+     "n_target": 12.434519391804281,
+     "ra": 61.11837309657467,
+     "radius_deg": 1.599317867200896,
+     "rate_per_day": 0.0018232773845408164,
+     "seed": 269483572630395785,
+     "shells": [
+      2,
+      4
+     ]
+    }
+   ],
+   "universe": 5
+  },
+  {
+   "regions": [
+    {
+     "dec": 8.546379987410656,
+     "n_members": 4871,
+     "n_target": 26.150310944293935,
+     "ra": 275.4305945820737,
+     "radius_deg": 2.74488608665942,
+     "rate_per_day": 0.0024192252485574555,
+     "seed": 4375317165882795065,
+     "shells": [
+      4,
+      6
+     ]
+    }
+   ],
+   "universe": 6
+  },
+  {
+   "regions": [
+    {
+     "dec": -40.985243252389765,
+     "n_members": 756,
+     "n_target": 86.52132290786751,
+     "ra": 21.55026208489228,
+     "radius_deg": 2.77862974691117,
+     "rate_per_day": 0.007770094697350592,
+     "seed": 1977654330566705234,
+     "shells": [
+      2,
+      4
+     ]
+    },
+    {
+     "dec": -51.38179379140664,
+     "n_members": 59,
+     "n_target": 6.455354370293073,
+     "ra": 124.61635481245237,
+     "radius_deg": 1.4896974381344676,
+     "rate_per_day": 0.0075266753473314275,
+     "seed": 147851869653356557,
+     "shells": [
+      0,
+      1
+     ]
+    }
+   ],
+   "universe": 7
+  },
+  {
+   "regions": [
+    {
+     "dec": -21.3379918250982,
+     "n_members": 209,
+     "n_target": 11.121125916179752,
+     "ra": 8.941580919879183,
+     "radius_deg": 1.0692860256749055,
+     "rate_per_day": 0.011989890306874612,
+     "seed": 1744084468572762472,
+     "shells": [
+      0,
+      8
+     ]
+    }
+   ],
+   "universe": 8
+  },
+  {
+   "regions": [
+    {
+     "dec": -41.22938396043521,
+     "n_members": 363,
+     "n_target": 47.10451691091988,
+     "ra": 159.39403873740417,
+     "radius_deg": 1.6073984795811063,
+     "rate_per_day": 0.00908756944371913,
+     "seed": 1853593363895229386,
+     "shells": [
+      1,
+      2
+     ]
+    }
+   ],
+   "universe": 9
+  },
+  {
+   "regions": [
+    {
+     "dec": -29.523973690046674,
+     "n_members": 19207,
+     "n_target": 6.047193660517346,
+     "ra": 116.2180370494401,
+     "radius_deg": 3.328198898325749,
+     "rate_per_day": 2.3798219246866225e-05,
+     "seed": 4275502385955670167,
+     "shells": [
+      2,
+      5
+     ]
+    }
+   ],
+   "universe": 10
+  },
+  {
+   "regions": [],
+   "universe": 11
+  }
+ ]
+}
