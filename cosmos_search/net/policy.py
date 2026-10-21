@@ -51,6 +51,9 @@ POLICIES = {
     "mast.stsci.edu": HostPolicy(max_concurrent=4),
     # ADS: 5,000 queries/day per token; remaining count is in the response headers.
     "api.adsabs.harvard.edu": HostPolicy(max_concurrent=2, min_interval=0.2, budget_reserve=50),
+    # IRSA documents no limit; its ZTF light-curve service takes ~20 s a call, so a few run at once. Calls that hang
+    # are cut short and retried.
+    "irsa.ipac.caltech.edu": HostPolicy(max_concurrent=4, timeout=120.0),
     # HATS catalogues are static Parquet.
     "data.lsdb.io": HostPolicy(max_concurrent=8),
 }

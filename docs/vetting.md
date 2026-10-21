@@ -510,3 +510,8 @@ NEOs within 0.8 au can fall outside the widened cone.
   AUC(P(u)) 0.63. Only 3 of 14 dip decoys had any external epoch in dip, and the one with clear recurrence was
   called a periodic EB because an agent cannot run a period search. Next: a pipeline recurrence test in the
   packet, pre-registered before batch 4 (docs/dayone.md).
+- 2026-10-21. Rule v3b (S ≥ 0.35 or the pipeline's `aperiodic` recurrence flag), pre-registered before batch 4,
+  adopted for the D2 freeze on 48 fresh blind packets: 8/12 dip trains that leave ≥ 4 external dip events, 1/14
+  controls (an irregular pulsator the flag cannot tell from an occulter), 0/4 single events. v3a (S alone) got
+  7/12: the agents read the test and mostly follow it. Out of sample, 3 of 39 testable Gaia DR3 EBs are flagged
+  (periods near 1 d, aliased by ZTF's cadence). The gain is conditional on external coverage (docs/dayone.md).

@@ -42,6 +42,8 @@ P_U_SHORTLIST = 0.25        # pilots 2-3: probes 4/8 and controls 0/26 at P(unex
 INTERESTING = ("disk_occultation", "debris_transit", "other_astrophysical", "unexplained")
 S_SHORTLIST = 0.35
 # Injected families an ideal v1 shortlist should keep; the others should read as EB, YSO or instrumental.
+TRAIN_FAMILIES = ("dip_train_poisson", "dip_train_primes", "dip_train_geometric")
+SINGLE_FAMILIES = ("grey_dip", "blue_dip", "chromatic_flip")
 TARGET_FAMILIES = ("grey_dip", "blue_dip", "dip_train_poisson", "dip_train_primes", "dip_train_geometric",
                    "chromatic_flip", "secular_fade")
 
@@ -234,19 +236,30 @@ def score_batch(out, batch, plan=None):
     ctrl = table[table.kind == "control"]
     rep["controls_flagged"] = {"k": int((ctrl.p_unexplained >= P_U_SHORTLIST).sum()), "n": len(ctrl)}
     rep["v1"] = score_v1(table)
+    # Rule v3 (docs/dayone.md, batch 4): the recurrence test's flag as shown in each packet, and recall on the
+    # dip trains (the families the test exists for) and on single-event families separately.
+    packets = json.loads((out / "products.json").read_text())
+    flags = {p["packet_id"]: bool(p["tests"].get("recurrence", {}).get("aperiodic", False)) for p in packets}
+    table["aperiodic"] = table.packet_id.map(flags).fillna(False)
+    rep["v3"] = {"v3a": score_v1(table, targets=TRAIN_FAMILIES),
+                 "v3b": score_v1(table, flag="aperiodic", targets=TRAIN_FAMILIES),
+                 "single_events_v3b": score_v1(table, flag="aperiodic", targets=SINGLE_FAMILIES)["target_decoy_recall"]}
     table.to_csv(out / "verdicts_table.csv", index=False)
     (out / "report.json").write_text(json.dumps(rep, indent=2, sort_keys=True, default=str))
     return rep, table
 
 
-def score_v1(table, threshold=S_SHORTLIST):
+def score_v1(table, threshold=S_SHORTLIST, flag=None, targets=TARGET_FAMILIES):
     """Shortlist rule v1 and its pre-registered measures (docs/dayone.md): recall on target-family decoys, the
-    false-interesting rate on controls and on the other decoys, and AUCs of S and P(u) for decoys vs controls."""
+    false-interesting rate on controls and on the other decoys, and AUCs of S and P(u) for decoys vs controls.
+    flag: a boolean column of the table that also shortlists (rule v3b's pipeline flag)."""
     from cosmos_search.inject.recovery import wilson
 
     ok = table[table.ok]
     hit = ok.s_interesting >= threshold
-    target = (ok.kind == "decoy") & ok.injected_family.isin(TARGET_FAMILIES)
+    if flag is not None:
+        hit = hit | ok[flag].fillna(False).astype(bool)
+    target = (ok.kind == "decoy") & ok.injected_family.isin(targets)
     other = (ok.kind == "decoy") & ~ok.injected_family.isin(TARGET_FAMILIES)
     ctrl = ok.kind == "control"
 
@@ -262,7 +275,8 @@ def score_v1(table, threshold=S_SHORTLIST):
         return float(((a[:, None] > b[None, :]).sum() + 0.5 * (a[:, None] == b[None, :]).sum()) / (len(a) * len(b)))
 
     short = ok[(ok.kind == "real") & hit]
-    return {"rule": f"real packets with S = P({' + '.join(INTERESTING)}) >= {threshold}",
+    rule = f"real packets with S = P({' + '.join(INTERESTING)}) >= {threshold}" + (f" or {flag}" if flag else "")
+    return {"rule": rule,
             "shortlist": short.to_dict("records"),
             "target_decoy_recall": rate(target), "other_decoys_flagged": rate(other), "controls_flagged": rate(ctrl),
             "real_flagged": rate(ok.kind == "real"),
