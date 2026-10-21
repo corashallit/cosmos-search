@@ -320,7 +320,7 @@ normal brightness (< 2 σ low) so that ingress and egress do not. It reports `n_
 | Poisson, prime and geometric dip trains injected into 35 quiet decoy hosts, redrawn until ≥ 4 external dip events | 319 | 51% (Poisson 63%, prime 43%, geometric 39%) |
 | strict-period dip trains, same hosts and condition | 122 | 0 |
 | Gaia DR3 eclipsing binaries with ZTF light curves (`vari_eclipsing_binary`, G 11–15.5, random subset) | 63 (32 testable) | 1 (4 events) |
-| batch 3's real candidates and controls with external data | 25 (11 testable) | 0 |
+| batch 3's real candidates and controls with external data (the same stars batch 4 then scored) | 25 (11 testable) | 0 |
 
 The Gaia EBs' recovered periods match DPAC's or a factor of 2 from it. Separation grows with the number of
 events: with 15 or more, aperiodic trains align ≤ 0.5 of them and strict-period trains ≥ 0.94; with 4–5 events
@@ -365,7 +365,7 @@ committed locally before the reveal, with the code at 2d15944 (`refs/pull/44/hea
 | measure | v3a (S ≥ 0.35) | v3b (S ≥ 0.35 or aperiodic) | criterion |
 |---|---|---|---|
 | train recall | 7/12 (95% CI 0.32–0.81) | 8/12 (0.39–0.86) | ≥ 0.5: passes |
-| controls flagged | 0/14 (0–0.22) | 1/14 (0.01–0.31) | ≤ 1: passes |
+| controls flagged (in-sample, see below) | 0/14 (0–0.22) | 1/14 (0.01–0.31) | ≤ 1: passes |
 | single-event recall | 0/4 | 0/4 | |
 | other decoys flagged | 2/2 (both strict-period trains) | 2/2 | |
 | real packets flagged | 1/16 (3047786003881272448) | 1/16 (the same) | |
@@ -391,6 +391,65 @@ transit (S 0.66). So recall here is mostly the flag's, and the agent adds about 
   the shortlist; it is a cost on the expert queue, not a reason to change the rule now.
 - **Single events** (grey, blue, chromatic) got 0/4: by design recurrence cannot help them, and the agents
   called them EBs, spots or detector defects. They remain the gap the D2 rule does not close.
+
+## Review fixes and the confirmatory batch (design fixed 2026-10-21, before any of it is built)
+
+The red-team review (2026-10-21) found that the adoptions above are weaker evidence than they read. This section
+records what changed and the design of the one batch that will decide the D2 rule. Every number above that was
+measured on batch 2's 16 real packets and 14 controls is **in-sample**: batches 3, 4 and 5 reused those stars, the
+recurrence calibration included batch 3's, and each rule version was written after seeing the previous batch on
+them. 3047786003881272448 is one star shortlisted in batches 2, 3 and 4, not three findings. The old control set
+was also nearly all eclipsing binaries, while the DR4 queue will be mostly spotted and other active stars (R1).
+
+**What changed in the code.**
+
+- *Pre-registration you can check (R2).* `vetting commit --archive prereg/verdicts/<batch>` commits the verdict
+  file to the repository, and `reveal()` refuses until that commit is on `origin` with a matching hash. Commit
+  refuses a dirty tree. Batches 1–4 are archived in `prereg/verdicts/` after the fact, labelled as unverifiable;
+  their rule and code commits survive in the PR refs (`prereg/README.md`). PRs that carry a pre-registration keep
+  their commits under `refs/pull/<n>/head` even when squashed, so the push order stays on GitHub's timeline.
+- *One adopted rule (R10).* `dayone.vet.ADOPTED_RULE` (now v3b) drives the score headline, the printed summary and
+  `shortlist.csv`. v0, v1 and v3a are reported under `rules` as comparisons.
+- *No coaching (R5).* The packet's recurrence description no longer quotes calibration figures. It says what the
+  test computes, and that spots, irregular pulsation and flares also give dips no period explains. The pipeline's
+  tests are always kept in the key, so a batch built with `--hide-pipeline-flags` can still score rules that use
+  them.
+- *Held-out families (R5).* `inject.lightcurve.HELD_OUT_FAMILIES`: clustered (Neyman–Scott) trains, nearly
+  periodic trains with a drifting period, swarms with widely scattered depths, and a few complex Boyajian-like
+  events. No calibration, decoy plan or rule has used them; a test checks that the calibration modules' family
+  lists exclude them. Nobody, including this thread, has looked at how any flag responds to them.
+- *A reserved control pool (R3).* `dayone.controls` drew `prereg/controls/dayone-controls-v1`: 15 stars in each of
+  9 DPAC classes (SOLAR_LIKE, RS, ACV|CP, ECL, LPV, DSCT|GDOR|SXPHE, YSO, BE|GCAS, AGN), 135 in all. 105 are
+  G3-selected stars from the rehearsal's ranked list; the ACV and AGN strata come from the archive, not
+  G3-selected. Every star used before was excluded (25,083: all queues, decoy hosts, rehearsal injections, the
+  EB sample, the EB filter and single-dip calibration sets, the review's 4,746, and the 560 tier-1 one-episode
+  stars). The pool is sealed to the reveal key and Cora's key; salted hashes of its ids are public, and
+  `dayone.controls.reserved()` lets any draw leave it out (`dayone.decoys.hosts` does). It is used once.
+- *Power (R4).* `vetting.power` computes how often a criterion passes. The old point criteria could not separate
+  a good rule from a mediocre one: "≥ 6 of 12 trains" passes a rule with recall 0.40 33% of the time, and
+  "≤ 1 of 14 controls" passes a rule that flags 10% of controls 58% of the time.
+
+**The confirmatory batch.** It runs once the rule it tests is fixed: ranking v1 and the activity handling from R1
+change what reaches the shortlist, so the rule is written into this doc (and pushed) before the batch is built.
+Its criteria are one-sided 95% Clopper–Pearson bounds, so a rule at the "bad" level passes at most 5% of the time.
+
+| arm | packets | criterion | passes a good rule | passes a bad rule |
+|---|---|---|---|---|
+| held-out decoys, 12 per family | 48 | recall lower bound ≥ 0.30 | 0.84 at recall 0.5 | ≤ 0.05 at 0.3 |
+| reserved controls, all 9 classes | 135 | false-shortlist upper bound ≤ 0.15 | 0.99 at 0.05 | ≤ 0.05 at 0.15 |
+| reserved controls, each class | 15 per class | ≤ 3 of 15 shortlisted in every class | 0.95 at 0.05 (all 9 pass) | 0.09 per class at 0.4 |
+| queue sample: untouched tier-1 stars of the frozen ranking, drawn by urandom at build | 100 | shortlist-rate upper bound ≤ 0.10 | 0.82 at 0.03 | ≤ 0.05 at 0.10 |
+| flags hidden: the 48 decoys and 45 controls (5 per class) rebuilt with `--hide-pipeline-flags` | 93 | none; reports what the vetter adds | | |
+
+The rule is adopted only if the first four rows all pass. Per-class shortlist rates, recall per held-out family and
+the flag-hidden comparison are reported with intervals whatever the outcome. The queue sample's rate is the
+headline false-positive figure for DR4, because it is measured on the population the shortlist will be drawn
+from; real interesting stars in it count against the rule, which makes the figure an upper bound. 376 Stage A
+calls in all, about 6 times batch 4.
+
+Recall on the old families (Poisson, prime, geometric trains) is no longer a pass criterion: the recurrence flag
+was calibrated on them. If the confirmatory batch fails, a new rule needs a new held-out set and a new control
+pool, since these will have been seen.
 
 ## Keep rule v2 (after the rehearsal)
 
@@ -642,3 +701,68 @@ the rule.
 measured, so the batch mainly checks Stage A's behaviour and the controls. Its data are mostly fetched, and the
 rule was pre-registered against it. The larger DR4 investments for single dips are the two levers above: a
 concurrent-coverage fetch, and a one-look dip-rate census built on `eb_rate` (shared census tooling).
+
+### Batch 5 result: v4 not adopted
+
+64 packets: 16 single-event decoys (8 grey dips, 4 blue dips, 4 chromatic flips), 2 dust dips, 16 old real
+packets, 8 tier-1 single-event stars, 14 old controls and 8 single-eclipse EB controls. One blind subagent per
+packet. All 64 transcripts show one Read of the prompt and one Write of the reply (plus the harness's hand-back).
+The verdicts were committed and pushed to `prereg/verdicts/dayone-batch5` (cf60d94, code at 8a0881e, plan SHA-256
+ef6815f7…) before the reveal.
+
+| measure | v3b (adopted) | v4 = v3b or flag | flag alone | criterion for v4 |
+|---|---|---|---|---|
+| single-event recall | 10/16 (95% CI 0.39–0.82) | 11/16 (0.44–0.86) | 9/16 (0.33–0.77) | ≥ 0.75: **fails** |
+| old controls flagged | 1/14 | 1/14 | 0/14 | ≤ 1: passes |
+| single-eclipse EB controls flagged | 0/8 | 0/8 | 0/8 (1 testable) | ≤ 1: passes |
+| dust dips flagged | 0/2 | 0/2 | 0/2 | |
+| real packets flagged | 2/24 | 2/24 (the same) | 0/24 | |
+| AUC, single events vs controls | S 0.93, P(u) 0.90 | | | |
+
+v4g (secondary) gives the same numbers as v4. By the pre-registered decision, v4 is not adopted and the D2 rule
+stays v3b (`ADOPTED_RULE` unchanged).
+
+**By family.** On testable events, the flag caught 7 of 7 grey dips, 0 of 4 blue dips and 2 of 3 chromatic flips.
+That is 9 of 14, against 63 of 67 in the calibration. One grey dip was untestable in its packet (below), and one
+chromatic flip had quiet_ratio_g 3.02, just over the limit. The agents follow the same split: S ≥ 0.35 for 7 of 8
+grey dips, 0 of 4 blue dips and 1 of 4 flips (batch 4: 0 of 4 single events). The single-event test in the
+packet moved them on the deep grey dips. v4 adds one grey dip over v3b (S 0.26, flag set).
+
+**Why blue dips and flips fail.** They are shallow in G. Their depths are 0.9–5.5%; the grey dips' are 2–39%,
+6 of 8 above 6%. Four of the flag's seven misses are two-epoch events on two transit pairs (0.18 d). For two-epoch events
+in the calibration, the ratio rises with depth (correlation 0.59 with log depth), and the testable two-epoch blue
+dips there sat at median 2.8, only just above the 2.5 threshold. Batch 5's blue dips gave 1.2–2.3 (p_eb 0.12–0.84).
+So the threshold was set in-sample (red-team R3) on a population whose two-epoch events cluster close to it, and a
+fresh draw landed below it. The test is reading the physics correctly here: a shallow blue dip is what eclipsing a
+hotter companion looks like, and two looks 4 h apart do not rule out an orbit. The flag is reliable for deep events
+and for colour exclusion (1 of 1 flips where it fired); for shallow chromatic single dips it has little power at
+Gaia cadence.
+
+**Two consistency gaps in the pipeline.**
+
+- **plan5's testability gate differs from the test.** `single_cal.single_event_count` counts in-dip epochs before
+  `single_event.test` drops lone ZTF epochs. One grey dip (33% deep) passed the gate on a Gaia epoch plus a ZTF
+  epoch, then showed one in-dip epoch in the packet. The gate should call the test itself.
+- **The two tests define events differently.** The recurrence test set `aperiodic` on 6 of the 16 single-event
+  decoys, so it counted several dip events where the single-event test found one. The cause is the same lone-epoch
+  handling. The "Concurrent ZTF and TESS coverage" thread's `relax_lone` and `event_joined` (PR #49) address it for
+  DR4. Its numbers: as the test stands, ZTF and TESS raise testable/caught for 1–10 d dips from 22% to 23%, and to
+  25% with the relaxed rule (30–31% for northern G 13–17 stars with ZTF). Adding real TGLC makes 30% of
+  Gaia-testable dips "more than one event" because of TGLC's own dip-like systematics. That calibration, on EBs and
+  active stars, is needed before adopting the relaxed rule.
+
+**Real packets.** v3b flags 3047786003881272448 again (S 0.48, disk occultation), and a tier-1 single-event star,
+2035622809661715072 (aperiodic, S 0.25, read as an eclipsing binary). Both go to the expert queue under v3b. The
+flagged old control is an EB the agent scored S 0.37; in batch 4 it was a different control (an irregular
+pulsator, via `aperiodic`).
+
+**What this changes.** It confirms the step back above. Single dips at DR3/DR4 Gaia cadence are mostly not
+arguable one star at a time. The deep, multi-visit ones are, and v3b plus the agents already catch most of those
+(grey 7/8). The shallow chromatic ones are not, so for DR4 they belong to the population census (summed `eb_rate`
+per bin, split-half replication) and to concurrent coverage, not to a per-star flag. The single-event test stays
+in the packets, where it moved the agents on deep events. Follow-ups, none inside the D2 freeze:
+
+- make plan5's gate call `single_event.test`;
+- unify event definitions across the two tests (with PR #49);
+- a confirmatory set of active-star single-event controls;
+- the test on residual light curves, and a k-event generalisation (from the residual-search thread).
