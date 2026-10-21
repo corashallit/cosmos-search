@@ -222,7 +222,9 @@ MAX_DRAWS5 = 400
 
 
 def single_event_count(ctx_row, lc_dir, external, rec, contamination=None):
-    """(number of dip events, epochs in the event) the single-event test sees for one host with this signal."""
+    """(number of dip events, testable) the single-event test sees for one host with this signal. Testable: the one
+    event has at least MIN_IN_DIP in-dip epochs, one of them in G, spans more than one transit pair (or has three
+    in-dip epochs), and has normal epochs on both sides: what the single-dip flag needs before it can fire."""
     from cosmos_search.vetting import single_event
 
     from .vet import candidate_dicts
@@ -234,19 +236,24 @@ def single_event_count(ctx_row, lc_dir, external, rec, contamination=None):
         q["blend_tess_contamination"] = contamination.get(sid, np.nan)
     c = candidate_dicts(q, None, lc_dir, q, {sid: rec}, ext)
     if not c:
-        return 0, 0
+        return 0, False
     cand = Candidate.from_dict(c[0])
     ep = single_event._band_epochs(visible(cand))
     if ep is None:
-        return 0, 0
+        return 0, False
     ev, n = single_event._event(ep)
-    return n, (len(ev["idx"]) if ev else 0)
+    if ev is None:
+        return n, False
+    n_in = len(ev["idx"])
+    return n, bool(n_in >= single_event.MIN_IN_DIP and "G" in set(ep["band"][ev["idx"]].tolist())
+                   and (ev["t_b"] - ev["t_a"] > single_event.ONE_LOOK_DAYS or n_in >= 3)
+                   and np.isfinite(ev["t_before"]) and np.isfinite(ev["t_after"]))
 
 
-def plan5(host_ctx, lc_dir, external, rng, counts=COUNTS5, min_in_dip=1, half="batch5", contamination=None):
+def plan5(host_ctx, lc_dir, external, rng, counts=COUNTS5, half="batch5", contamination=None):
     """Sealed-plan records for batch 5: single-event families on hosts with external data, each redrawn until a
-    visible G epoch moves by >= MIN_SIGMA and the packet's epochs show exactly one dip event on at least
-    min_in_dip epochs (dust dips: visibility only)."""
+    visible G epoch moves by >= MIN_SIGMA and the packet's epochs show exactly one dip event that is testable
+    (single_event_count; dust dips: visibility only)."""
     from .decoys import MIN_EXTERNAL, _visible_g
     from .rank import _blend_map, read_lightcurves
 
@@ -276,8 +283,8 @@ def plan5(host_ctx, lc_dir, external, rng, counts=COUNTS5, min_in_dip=1, half="b
                 rec = {"source_id": sid, "family": fam, "half": half, "bands": None, "bp_rp_dilution": r,
                        "seed": int(rng.integers(2**62)), "signal": lcinj.truth(sig)}
                 if fam in SINGLE_FAMILIES:
-                    n, n_in = single_event_count(row, lc_dir, external, rec, contamination)
-                    if n != 1 or n_in < min_in_dip:
+                    n, ok = single_event_count(row, lc_dir, external, rec, contamination)
+                    if n != 1 or not ok:
                         continue
                 out.append(rec)
                 break
@@ -285,6 +292,18 @@ def plan5(host_ctx, lc_dir, external, rng, counts=COUNTS5, min_in_dip=1, half="b
                 continue
             break
     return out
+
+
+def reference(features_dir, n, rng, extra=None):
+    """A stand-in for the rehearsal's ranked list in the coincidence test (batch 5 has no G3 run): n random DR3
+    sources whose deepest G epoch is at least 5 robust sigma low, with that epoch's time, plus the extra ids'."""
+    d = ds.dataset(features_dir)
+    f = d.to_table(columns=["source_id", "t_min", "min_z_rob"], filter=ds.field("min_z_rob") <= -5).to_pandas()
+    out = f.sample(min(n, len(f)), random_state=rng.integers(2**31))
+    if extra is not None:
+        ids = set(pd.Series(extra).astype("int64"))
+        out = pd.concat([out, f[f["source_id"].isin(ids)]]).drop_duplicates("source_id")
+    return out.rename(columns={"t_min": "t_deepest"})[["source_id", "t_deepest"]].reset_index(drop=True)
 
 
 def summary(res, b_min=2.5):
@@ -324,8 +343,25 @@ def main(argv=None):
     j.add_argument("--n", type=int)
     j.add_argument("--shard", default="0/1")
     j.add_argument("--out", required=True)
+    p5 = sub.add_parser("plan5", help="batch 5's sealed single-event decoy plan (docs/dayone.md, rule v4)")
+    p5.add_argument("--hosts", required=True, help="context parquet of the candidate hosts")
+    p5.add_argument("--lightcurves", required=True)
+    p5.add_argument("--external", required=True)
+    p5.add_argument("--out", required=True)
+    p5.add_argument("--recipient-file", action="append", required=True)
     a = ap.parse_args(argv)
-    rng = np.random.default_rng(int.from_bytes(os.urandom(16), "little"))
+    rng = np.random.default_rng(int.from_bytes(os.urandom(32), "little"))
+    if a.cmd == "plan5":
+        from cosmos_search.inject.sealed import write_sealed
+
+        h = pd.read_parquet(a.hosts)
+        contamination = (dict(zip(h["source_id"].astype("int64"), h["blend_tess_contamination"]))
+                         if "blend_tess_contamination" in h else None)
+        records = plan5(h, a.lightcurves, pd.read_parquet(a.external), rng, contamination=contamination)
+        digest = write_sealed(records, a.out, a.recipient_file)
+        # Counts only. Never print anything derived from the plan beyond its size.
+        print(f"sealed {len(records)} decoys to {a.out} (sha256 {digest})")
+        return 0
     if a.cmd == "sample":
         from cosmos_search.gaia.archive import tap
 

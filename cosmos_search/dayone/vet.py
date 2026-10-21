@@ -191,8 +191,9 @@ def build(queue, ranked, lc_dir, out, wide=None, rng=None, sso_check=True, plan_
     cands = candidate_dicts(queue, ranked, lc_dir, wide, plan_map, external)
     _, flagged = coincidence_tests(ranked)
     cands = add_tests(cands, coincidence_at(ranked), sso_check)
-    entries = [(c, {"kind": "control" if c["role"] == "control" else "real", "role_in_queue": c["role"],
-                    **(_control_label(c) if c["role"] == "control" else {})})
+    # Roles starting "control" are known-answer controls (batch 5 adds "control_single_eb").
+    entries = [(c, {"kind": "control" if c["role"].startswith("control") else "real", "role_in_queue": c["role"],
+                    **(_control_label(c) if c["role"].startswith("control") else {})})
                for c in cands]
     # The batch detector, as a hook: with no hook, build_batch also clears the tests and scores.
     packets, keys = build_batch(entries, rng, holdout=("tail",), detect=lambda c: setattr(c, "dips", simple_dips(c)))
@@ -244,6 +245,18 @@ def score_batch(out, batch, plan=None):
     rep["v3"] = {"v3a": score_v1(table, targets=TRAIN_FAMILIES),
                  "v3b": score_v1(table, flag="aperiodic", targets=TRAIN_FAMILIES),
                  "single_events_v3b": score_v1(table, flag="aperiodic", targets=SINGLE_FAMILIES)["target_decoy_recall"]}
+    # Rule v4 (docs/dayone.md, batch 5): v3b or the single-event test's flag; recall on single-event decoys, and
+    # controls flagged separately for batch 3's controls and the single-eclipse EB controls.
+    single = {p["packet_id"]: bool(p["tests"].get("single_event", {}).get("single_dip_flag", False)) for p in packets}
+    table["single_dip"] = table.packet_id.map(single).fillna(False)
+    table["v4"] = table["aperiodic"] | table["single_dip"]
+    rep["v4"] = {"single_events_v4": score_v1(table, flag="v4", targets=SINGLE_FAMILIES),
+                 "single_events_v3b": score_v1(table, flag="aperiodic", targets=SINGLE_FAMILIES),
+                 "flag_alone_single_events": score_v1(table, threshold=float("inf"), flag="single_dip",
+                                                      targets=SINGLE_FAMILIES)}
+    for role in sorted(set(table.role_in_queue.dropna()) & {"control", "control_single_eb"}):
+        sub = table[(table.kind != "control") | (table.role_in_queue == role)]
+        rep["v4"][f"{role}_flagged"] = score_v1(sub, flag="v4")["controls_flagged"]
     table.to_csv(out / "verdicts_table.csv", index=False)
     (out / "report.json").write_text(json.dumps(rep, indent=2, sort_keys=True, default=str))
     return rep, table

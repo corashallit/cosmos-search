@@ -78,6 +78,7 @@ N_DRAWS = 40000
 COLOUR_EXCLUDE_SIGMA = 3.0                   # BP and RP moving opposite ways, each this significant
 B_SHORTLIST = 2.5                            # single-dip flag: log10(one-off / eclipse) at least this (rule v4)
 MIN_IN_DIP = 2                               # and the event on at least two epochs, at least one of them Gaia G,
+ONE_LOOK_DAYS = 0.08                         # one Gaia transit pair (two fields of view, 106.5 min apart)
 QUIET_MAX = 3.0                              # on a star whose other G epochs scatter <= this x their errors,
                                              # with normal-brightness epochs on both sides of the event
 CHUNK = 2000
@@ -465,9 +466,14 @@ def test(lcs, source=None, context=None, n_draws=N_DRAWS, rng=None):
     bf = out.get("log10_oneoff_vs_eb")
     q = out["quiet_ratio_g"]
     out["colour_excludes_occultation"] = colour_excludes_occultation(lcs, event["t_a"], event["t_b"])
+    # One transit pair is one look: its duration bound is the pair's 106.5 min, which an eclipse of almost any
+    # period meets, and one bad transit can fake both the dip and its colour. Calibration: on single-pair events
+    # the likelihood ratio of injected dips and of eclipsing binaries overlap (docs/dayone.md, rule v4).
+    out["beyond_one_transit"] = bool(event["t_b"] - event["t_a"] > ONE_LOOK_DAYS or n_in >= 3)
     out["single_dip_flag"] = bool(((bf is not None and bf >= B_SHORTLIST) or out["colour_excludes_occultation"])
                                   and n_in >= MIN_IN_DIP and "G" in out["bands_in_dip"].split(",")
-                                  and out["bracketed"] and q is not None and q <= QUIET_MAX)
+                                  and out["beyond_one_transit"] and out["bracketed"]
+                                  and q is not None and q <= QUIET_MAX)
     out["description"] = (
         "Single-event test, for stars whose epochs in all surveys show exactly one dip event. An eclipse of the "
         "observed duration on this star implies an orbital period (Kepler), and that period predicts more eclipses. "
@@ -488,8 +494,9 @@ def test(lcs, source=None, context=None, n_draws=N_DRAWS, rng=None):
         "oneoff_vs_eb_is_lower_bound: too few eclipse draws fit at all, so the value is a lower bound). "
         "quiet_ratio_g: scatter of the other G epochs over their errors (the test has no model of the star's own "
         "variability, so on a variable star a low state can pass for a one-off dip). bracketed: normal-brightness "
-        "epochs on both sides of the event. single_dip_flag: log10_oneoff_vs_eb >= 2.5 or "
-        "colour_excludes_occultation, with at least two in-dip epochs, at least one of them in Gaia G, bracketed, "
-        "and quiet_ratio_g <= 3.")
+        "epochs on both sides of the event. beyond_one_transit: the in-dip epochs span more than one Gaia transit pair "
+        "(106.5 min), or there are three or more of them. single_dip_flag: log10_oneoff_vs_eb >= 2.5 or "
+        "colour_excludes_occultation, with at least two in-dip epochs, at least one of them in Gaia G, "
+        "beyond_one_transit, bracketed, and quiet_ratio_g <= 3.")
     out["visible_only"] = True
     return out
