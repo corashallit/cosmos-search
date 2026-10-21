@@ -1,0 +1,82 @@
+# Plan
+
+## Guiding principles
+
+These apply to every arm and every thread.
+
+1. **Reason from first principles, not from astronomy habit.** Standard astronomical practice encodes
+   decades of human assumptions about what is worth looking for. Use it as evidence, not as a template.
+   Ask what physics, information theory, statistics and engineering say an anomaly would look like,
+   and what the data can and cannot distinguish. Cross-pollinate: astroengineering (energy budgets,
+   occulter geometry, propulsion), statistics (calibrated tails, permutation nulls, multiple testing),
+   data science (representation learning, active learning), and maths.
+2. **Recalibrate as results come in.** Every detector, threshold and ranking is provisional. Injection
+   recovery, random audits and vetting outcomes feed back into what we look for. Write down what changed
+   and why in the arm doc.
+3. **Hypothesis-driven and hypothesis-free, side by side.** Physically motivated detectors (grey dips,
+   energy-budget tension, non-gravitational motion) run alongside detectors that only ask "how surprising
+   is this, given everything like it?". Injections span families neither kind was designed for, so we
+   measure how agnostic each really is.
+4. **The instrument is the main source of anomalies.** In a survey of 1.8 × 10⁹ sources, the weirdest
+   object is almost always a calibration, crowding or scanning artefact. Gaia's redundancy (9 CCDs per
+   transit, two fields of view 106.5 min apart, simultaneous G/BP/RP, a known scanning law) is the
+   strongest tool we have against that, and it beats any prior about what aliens build.
+5. **Rank by value, not by weirdness.** A candidate is worth a vetting slot in proportion to
+   P(real and unexplained) × how cheaply it can be verified (brightness, observability, recurrence).
+   The vetting budget is ~10³ candidates, with ~10⁴ as the outer limit.
+6. **Measure ourselves.** Injection-recovery and blinded decoys run throughout (blinding.md). A shortlist
+   is only credible with its measured recall and false-positive rate attached.
+7. **No invented schedules.** Milestones are ordered by dependency. The only dates are external.
+
+## External dates
+
+| Date | Event |
+|---|---|
+| June 2026 (done) | Gaia DR4 pre-release: epoch astrometry for 12 sources, draft DR4 data model, "Gaia source update" tool |
+| **2 December 2026** | **Gaia DR4** (66 months, ~400 TB). Remaining DPAC tools released the same day |
+| early 2027 | DESI DR2 |
+
+## Milestones
+
+| # | Milestone | Depends on | Owner |
+|---|---|---|---|
+| **Infrastructure** | | | |
+| I1 | Shared HTTP/TAP client with per-host policies and cache | — | Archive thread |
+| I2 | Gaia DR3 epoch photometry streamed to per-source features (bulk CDN files and DataLink) | I1 | Archive thread |
+| I3 | Versioned target queries with a freeze manifest | I1 | Archive thread |
+| I4 | Durable store | Cora | Cora |
+| I5 | Proper-motion-aware cross-match to WISE family, 2MASS, SIMBAD/VSX | I1 | unassigned |
+| **Gaia dimmers (main)** | | | |
+| G1 | DR3 rehearsal sample: full DR3 epoch photometry (11.75 M) plus random controls | I2 | unassigned |
+| G2 | Detectors v0: invariance tests (FoV pairs, bands), dip colour, secular trend, surprisal score | G1 | unassigned |
+| G3 | Empirical nulls (brightening mirror, stratified permutation) and calibrated false-alarm rates | G2 | unassigned |
+| G4 | Injection families and recovery maps on DR3 | G2, inject core ✓ | unassigned |
+| G5 | Energy-budget test against WISE | I5, G2 | unassigned |
+| G6 | Ranking with value term, plus a random-audit stream below threshold | G3, G4, G5 | unassigned |
+| G7 | DR4 adapters from the draft data model (per-CCD G, new vari tables) | I3 | Archive thread |
+| **TESS dimmers (side)** | | | |
+| T1–T4 | FFI access, detector in `dimming/`, injections, 10⁴-target comparison run | I1 | TESS thread |
+| T5 | TESS cross-check of Gaia candidates | T1, G6 | TESS thread |
+| **Astrometry (secondary)** | | | |
+| A1 | Reproduce the 12 pre-release sources with the source-update tool | I1 | unassigned |
+| A2 | Nested model fits (single, acceleration, 1–2 Keplerians) plus VIM and scan-angle terms | A1 | unassigned |
+| A3 | Injections of non-gravitational motion into real residuals | A2 | unassigned |
+| **Vetting** | | | |
+| V1 | Packet builder and anonymiser | G6 | unassigned |
+| V2 | Stage A / Stage B agents, decoys and known-answer controls (KIC 8462852 and other known dippers) | V1, truth repo ✓ | unassigned |
+| V3 | Vetting rehearsal on DR3 candidates; measure confabulation and calibration | V2, I4 | unassigned |
+| **Decision and freeze** | | | |
+| D1 | Compare arms on equal footing: recovery on injections and vetting cost per surviving candidate; reallocate effort | G4, T4, A3, V3 | DR4 plan thread → Cora |
+| D2 | Freeze `dr4-day-one`: queries, thresholds, code, pre-registered analysis | D1, G7; before DR4 | DR4 plan thread |
+| D3 | DR4 day one: TAP prefilter → DataLink pull → detectors → ranking → vetting | D2, DR4 release | all |
+| D4 | Shortlist with measured recall and false-positive rate; decide on outreach to technosignature groups | D3 | Cora |
+
+## Open decisions
+
+| Item | Status |
+|---|---|
+| Durable store | Deferred; ~50–100 GB is enough for this track (storage.md) |
+| Vetting budget | ~10³, ~10⁴ outer limit (decided) |
+| Collaborators for follow-up | After D4. Candidates: Wright group (Penn State), Project Hephaistos (Uppsala), Boyajian (LSU) |
+| AAVSO account for ground follow-up | When we have a bright candidate |
+| WISE moving-object search, POSS-I plates | Parked |
