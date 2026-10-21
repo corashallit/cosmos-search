@@ -70,6 +70,7 @@ Signals are drawn over DR3's whole span, so most dips fall between epochs, as re
 | Prefilter (α = 10⁻⁴) | 18 | |
 | G3 selected (q ≤ 0.1, `single` or `fov`) | 54 | ~10 expected by chance from host variability (background rate 0.17%) |
 | of which a dip was sampled | 24 | the other 30 have no epoch inside the injected signal: selected for the host's own variability |
+| selected because of the injection | 21 | checked by pulling all 54 hosts again through DataLink without the injection: the 30 with no sampled dip and 3 of the 24 pass G3 on their own |
 | Ranked tier 3 (explained as an EB eclipse) | 27 of 54 | 22 of these have no injected dip above 3σ at any sampled epoch: real EB hosts, correctly explained |
 | Queued for vetting | 5 | 4 with a sampled dip (depth 19–26%, SNR 220–720), 1 without |
 | Vetted unexplained (P(u) ≥ 0.25) | 0 | |
