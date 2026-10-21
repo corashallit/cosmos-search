@@ -361,3 +361,11 @@ def test_anomaly_probe_decoys_pass_the_identifiability_check():
     host = gaia_like(seed=11, n=150)
     cand, extra, truth = make_decoy(host, "grey_primes", np.random.default_rng(5))
     assert extra["role"] == "anomaly_probe" and truth["visibility"]["n_events"] >= 3
+
+
+def test_random_packet_ids_never_trip_the_leak_scan():
+    cand = gaia_like()
+    for _ in range(300):
+        packet, _ = build(cand)
+        assert leak_scan(packet["text"]) == []
+    assert leak_scan("source 4567890123456789") == ["long_integer"]

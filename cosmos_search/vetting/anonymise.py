@@ -22,7 +22,8 @@ LEAK_PATTERNS = {
     "gaia_id": re.compile(r"\bGaia\s*(E?DR\d)?\s*\d{6,}", re.I),
     "alert_name": re.compile(r"\b(Gaia|ZTF|ASASSN|ASAS-SN|ATLAS|AT|SN)[ -]?\d{2}[a-z]{2,4}\b", re.I),
     "jname": re.compile(r"\bJ\d{4,6}(\.\d+)?[+-]\d{4,6}"),
-    "long_integer": re.compile(r"(?<![\d.])\d{7,}(?![\d.])"),
+    # Digit runs inside a word (hex ids, hashes) are not identifiers; standalone runs of 7+ digits may be.
+    "long_integer": re.compile(r"(?<![\w.])\d{7,}(?![\w.])"),
     "julian_date": re.compile(r"\b24[3-6]\d{4}(\.\d+)?\b"),
     "sexagesimal": re.compile(r"\b\d{1,2}[h:]\s?\d{2}[m:]\s?\d{2}(\.\d+)?s?\b"),
     "coordinate_label": re.compile(r"\b(ra|dec|r\.a\.|decl)\s*[=:]", re.I),

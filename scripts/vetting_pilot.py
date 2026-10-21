@@ -24,19 +24,21 @@ CONTROLS = {
     "RCB": ("rcrb_dust", ["astrophysical"], 2),
     "LPV": ("pulsation_or_irregular", ["astrophysical"], 2),
     "RS": ("rotation_or_spots", ["astrophysical"], 2),
+    "SOLAR_LIKE": ("rotation_or_spots", ["astrophysical"], 2),
     "AGN": ("extragalactic", ["astrophysical"], 2),
 }
-N_HOSTS = 6
-DECOYS = {"grey_primes": 3, "grey_geometric": 1, "chromatic_flip": 2, "single_band_dip": 2, "dust_dip": 2,
-          "step": 1, "periodic_grey": 1}
+HOST_CLASSES = {"SOLAR_LIKE": 6, "RS": 6}
+DECOYS = {"grey_primes": 2, "grey_geometric": 2, "chromatic_flip": 2, "single_band_dip": 2, "dust_dip": 2,
+          "periodic_grey": 2}
 SOURCE_COLS = "s.source_id, s.ra, s.dec, s.phot_g_mean_mag, s.bp_rp, s.parallax, s.parallax_error, s.ruwe, " \
               "s.ipd_frac_multi_peak, s.phot_bp_rp_excess_factor"
 
 
-def select(cls, n, extra=""):
+def select(cls, n, extra="", after=0):
+    """n sources of a DPAC class in random_index order; `after` skips earlier pilots' sources."""
     q = f"""SELECT TOP {n} {SOURCE_COLS} FROM gaiadr3.vari_classifier_result c
             JOIN gaiadr3.gaia_source s USING (source_id)
-            WHERE c.best_class_name = '{cls}' AND c.best_class_score > 0.9 {extra}
+            WHERE c.best_class_name = '{cls}' AND c.best_class_score > 0.9 AND s.random_index > {int(after)} {extra}
             ORDER BY s.random_index"""
     return tap().query(q)
 
@@ -61,16 +63,19 @@ def candidates(rows, lc):
     return out
 
 
-def fetch(out):
+def fetch(out, after=0):
     out.mkdir(parents=True, exist_ok=True)
     controls = []
     for cls, (label, acceptable, n) in CONTROLS.items():
-        rows = select(cls, n + 2)
+        rows = select(cls, n + 2, after=after)
         lc = datalink_epoch_photometry([int(s) for s in rows["source_id"]])
         for c in candidates(rows, lc)[:n]:
             controls.append({**c, "label": label, "acceptable": acceptable, "aliases": [], "dpac_class": cls})
-    rows = select("SOLAR_LIKE", N_HOSTS + 4, "AND s.phot_g_mean_mag BETWEEN 12 AND 16")
-    hosts = candidates(rows, datalink_epoch_photometry([int(s) for s in rows["source_id"]]))[:N_HOSTS]
+    # Hosts from classes that also appear among the controls, so planted packets are not a separate population.
+    hosts = []
+    for cls, n in HOST_CLASSES.items():
+        rows = select(cls, n + 3, "AND s.phot_g_mean_mag BETWEEN 12 AND 17", after=after)
+        hosts += candidates(rows, datalink_epoch_photometry([int(s) for s in rows["source_id"]]))[:n]
     (out / "controls.jsonl").write_text("\n".join(json.dumps(c) for c in controls))
     (out / "hosts.jsonl").write_text("\n".join(json.dumps(h) for h in hosts))
     print(f"{len(controls)} controls, {len(hosts)} hosts")
@@ -92,5 +97,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("step", choices=["fetch", "build"])
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--after", type=int, default=0, help="random_index to start after (fresh sources per pilot)")
     a = ap.parse_args()
-    {"fetch": fetch, "build": build}[a.step](a.out)
+    fetch(a.out, a.after) if a.step == "fetch" else build(a.out)
