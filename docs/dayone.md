@@ -353,6 +353,42 @@ learn whether the agents act on the test.
 the 2 strict-period trains are in; the dust dip and the step are not, because the 40 unused hosts ran out
 (conditioned trains reject many hosts). Batch 4 has 48 packets.
 
+### Batch 4 result: v3b adopted
+
+48 packets (12 trains, 4 single events, 2 strict-period trains, 16 real, 14 controls), one blind subagent each.
+All 48 transcripts show one Read of the prompt and one Write of the reply (plus the harness's hand-back); verdicts
+committed at 2d15944 before the reveal. 43 packets carry the recurrence test; 35 are testable.
+
+| measure | v3a (S ≥ 0.35) | v3b (S ≥ 0.35 or aperiodic) | criterion |
+|---|---|---|---|
+| train recall | 7/12 (95% CI 0.32–0.81) | 8/12 (0.39–0.86) | ≥ 0.5: passes |
+| controls flagged | 0/14 (0–0.22) | 1/14 (0.01–0.31) | ≤ 1: passes |
+| single-event recall | 0/4 | 0/4 | |
+| other decoys flagged | 2/2 (both strict-period trains) | 2/2 | |
+| real packets flagged | 1/16 (3047786003881272448) | 1/16 (the same) | |
+| AUC, trains vs controls | S 0.79, P(u) 0.80 | | |
+
+By the pre-registered decision, v3b goes into the D2 freeze. v3a passes too, because the agents use the test: the
+pipeline flagged 7 of the 12 trains (calibration: about half), and the agents gave S ≥ 0.35 to 6 of those 7,
+mostly as "unexplained". The seventh (a prime train the agent read as instrumental, S 0.23) is the one the flag
+adds. Of the 5 trains the flag missed, the agents called 4 eclipsing binaries (S ≤ 0.08) and one a debris
+transit (S 0.66). So recall here is mostly the flag's, and the agent adds about one train in twelve on top.
+
+- **This is conditional recall.** Every train was drawn to leave ≥ 4 dip events in the external epochs. Under the
+  injection priors, unconditioned, 0–10% of trains do (calibration above), so on DR4 the gain applies only to the
+  candidates with enough ZTF or TESS coverage of their dips. More overlap (ATLAS, ASAS-SN, DR4's own longer
+  baseline) widens it.
+- **The flagged control** is a star the agent read as an irregular pulsator (S 0.12): irregular variability dips
+  without a period, which the flag cannot tell from an occulter. This is the flag's expected false-positive class.
+- **Real packets.** 13 of 16 are testable. Only 3047786003881272448 is flagged (aperiodic, S 0.43 → 0.51, disk
+  occultation), the same star as batches 2 and 3. Paired S change from batch 3, median −0.01 for real and controls.
+- **Gaia EBs out of sample.** 113 more of the EB sample arrived after the rule was written: 39 testable, 3 flagged
+  aperiodic (DPAC periods 0.69, 1.17 and 1.30 d; ZTF's nightly cadence aliases near 1 d). With the 32 in sample,
+  4 of 71 testable EBs (6%). Real dippers on DR4 will be mostly EBs, so expect about this share of testable EBs on
+  the shortlist; it is a cost on the expert queue, not a reason to change the rule now.
+- **Single events** (grey, blue, chromatic) got 0/4: by design recurrence cannot help them, and the agents
+  called them EBs, spots or detector defects. They remain the gap the D2 rule does not close.
+
 ## Keep rule v2 (after the rehearsal)
 
 The stream keeps a light curve when the source's G3 `single` or `fov` |W| reaches 0.6 × the |W| at which G3
