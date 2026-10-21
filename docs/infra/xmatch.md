@@ -108,7 +108,7 @@ measures well is the version that survived.
 | name | source | epoch | notes |
 |---|---|---|---|
 | `2mass` | HATS `two_mass` | per row (JD) | parallax exact; FWHM 2.5″ |
-| `allwise` | HATS `allwise` | 2010.55 ± 0.6 fixed | **HATS copy column-shifted from `ngrp` on**, see data-sources.md; only columns before it are read |
+| `allwise` | HATS `allwise` | 2010.55 ± 0.6 fixed | **HATS copy column-shifted from `use_src` on**, see data-sources.md; only columns before it are read |
 | `catwise2020` | IRSA TAP `catwise_2020` | `ra_pm/dec_pm` at 2015.4 | WISE beam 6.1″; positions from CatWISE's own motion fit |
 | `unwise` | IRSA TAP | 2010–2017 coadds | crowded-field forced photometry; `fracflux` is unWISE's own blending measure |
 | `neowise` | HATS | per detection (MJD) | one match per frame (`FRAME_NUM`, `SCAN_ID` groups): an IR light curve per star |
@@ -229,8 +229,8 @@ default) so a target list costs one fetch per pixel. TAP surveys use the shared 
 - ZTF groups use `objectid // 10⁷` (field, readout channel, filter), from the documented id layout; not
   yet checked against the HATS columns.
 - AllWISE through HATS gives positions and profile-fit magnitudes only (the copy is column-shifted from
-  `ngrp` on, data-sources.md). Fluxes and other columns need IRSA TAP.
+  `use_src` on, data-sources.md). Fluxes and other columns need IRSA TAP.
 - ASAS-SN variables mix epochs (mean epoch 2001.5 ± 4 assumed); its own Gaia DR3 ids are a cross-check.
 - Not done: Pan-STARRS/SkyMapper (for the optical SED), DECaLS, Spitzer, GALEX. The survey spec is a
   dataclass in `surveys.py`; adding one is a few lines plus a validation field.
-- Upstream: the AllWISE HATS column shift should be reported to the LSDB maintainers (drafted, not filed).
+- Upstream: the AllWISE HATS column shift is to be reported to the LSDB maintainers (Cora is checking it and will file it herself).
