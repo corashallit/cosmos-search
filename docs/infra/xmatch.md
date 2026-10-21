@@ -193,8 +193,8 @@ counterpart it is the same one (2MASS 377/377, 1,153/1,153, 240/240; AllWISE 570
   one 2MASS source; we give it to the star its position points at, which is the safer choice for IR
   photometry.
 
-The full report (per G bin priors, per-threshold accounting) is on the project share at
-`/mnt/project-files/xmatch/validation-2026-10-21.json`.
+The full report (per G bin priors, per-threshold accounting) is `xmatch-validation-2026-10-21.json` next to
+this file.
 
 ## Output columns
 
