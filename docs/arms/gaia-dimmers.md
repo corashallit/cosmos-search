@@ -163,3 +163,9 @@ Record changes of approach here, with the evidence that prompted them.
     faintest and brightest transits.
   - **The floor binds.** At q ≤ 0.01 each G bin needs 100 discoveries, so `fov` reports none. Lists for
     vetting use q ≤ 0.1.
+- **2026-10-21.** Day-one dress rehearsal on DR3 (docs/dayone.md). Of 6,000 sealed injections, G3 selected 24 whose
+  dip landed on an epoch, 21 of them from the 56 sampled at > 100σ. Sampling and a ~100σ threshold set the recall;
+  the `|z| ≥ 8` keep rule keeps 9% of sources and does not prefer injections, so it is replaced before D2. The
+  `grey` flag outside tier 3 picked out 17 injections and 3 real sources (two VSX EBs), so ranking v1 sorts on it.
+  Stage A called 0 of 5 queued injections unexplained (they read as ε Aur-like or EB), so the shortlist rule
+  needs to count rare astrophysical classes as interesting.

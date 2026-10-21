@@ -1,6 +1,8 @@
 """G3 on the DR3 rehearsal: mirror-null symmetry, per-source competition q-values, first ranked list.
 
-    python scripts/dr3_g3.py FEATURES_DIR AUX_PARQUET OUT_DIR
+    python scripts/dr3_g3.py FEATURES_DIR AUX_PARQUET OUT_DIR [MIN_ABS_W]
+
+MIN_ABS_W is the |z| of the symmetric cut the features were stored with, if any (see run()).
 
 Reads the per-source features of the DR3 epoch-photometry pass (docs/infra/gaia-epoch.md) and writes:
 
@@ -102,11 +104,18 @@ def _label(code):
     return f"G={code // len(N_EDGES)}|n>={N_EDGES[code % len(N_EDGES)]}"
 
 
-def run(f):
+def run(f, min_abs_w=0.0):
+    """min_abs_w: the |z| level of a symmetric feature cut the features were stored with (DR4 cannot keep every
+    row). Each statistic is then only defined where its own |W| = max(dim, bright) reaches that level. A cut made
+    on the `single` extremes is not symmetric for `fov` below it (deep EB dips keep more dim than bright rows), and
+    on DR3 at a cut of 12 it added 247 spurious `fov` selections; masking each statistic at the cut restores the
+    full-data selections exactly."""
     g_bin, codes, g = strata(f)
     sym, q_cols = [], {"source_id": f["source_id"].to_numpy()}
     for name, dim, bright in statistics(f):
         fin = np.isfinite(dim) & np.isfinite(bright)
+        if min_abs_w > 0:
+            fin &= np.fmax(dim, bright) >= min_abs_w
         for row in tail_ratio(dim[fin], bright[fin], codes[fin], THRESHOLDS):
             sym.append({"statistic": name, **row, "stratum": _label(int(row["stratum"]))})
         w = np.where(fin, np.where(dim > bright, dim, np.where(bright > dim, -bright, 0.0)), np.nan)
@@ -169,10 +178,11 @@ def summary(sym, q, f, aux_path=None):
 def main(argv=None):
     argv = argv or sys.argv[1:]
     features_dir, aux_path, out_dir = argv[:3]
+    min_abs_w = float(argv[3]) if len(argv) > 3 else 0.0
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     f = load(features_dir)
-    sym, q = run(f)
+    sym, q = run(f, min_abs_w)
     sym.to_csv(out / "symmetry.csv", index=False)
     q.to_parquet(out / "q.parquet", index=False)
     (out / "summary.md").write_text(summary(sym, q, f, aux_path))

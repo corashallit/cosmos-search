@@ -213,11 +213,12 @@ def build(candidate, holdout=(), packet_id=None):
         "bands": [lc.band for lc in lcs],
         "summaries": {lc.band: band_summary(lc) for lc in lcs},
         "dips": dips,
-        # Detector outputs were computed on the full light curve, so a tail holdout would leak through them.
-        "tests": {} if t_cut is not None else
-                 {k: {kk: (sig(vv, 3) if isinstance(vv, (int, float)) else vv) for kk, vv in v.items()
-                      if isinstance(vv, (int, float)) or (kk == "description" and isinstance(vv, str))}
-                  for k, v in cand.tests.items()},
+        # Detector outputs computed on the full light curve would leak a tail holdout, so only tests marked
+        # visible_only (computed on epochs before the cut) survive one.
+        "tests": {k: {kk: (sig(vv, 3) if isinstance(vv, (int, float)) else vv) for kk, vv in v.items()
+                      if (isinstance(vv, (int, float)) and not isinstance(vv, bool))
+                      or (kk == "description" and isinstance(vv, str))}
+                  for k, v in cand.tests.items() if t_cut is None or v.get("visible_only")},
         "scores": {} if t_cut is not None else
                   {k: sig(v, 3) for k, v in cand.scores.items() if isinstance(v, (int, float))},
         "context": {k: (sig(v, 3) if isinstance(v, (int, float)) else v) for k, v in cand.context.items()

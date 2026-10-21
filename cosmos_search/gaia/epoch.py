@@ -162,7 +162,9 @@ def _parse_arrays(cells, dtype, n):
 
 def _parse_bools(cells, n):
     body = ",".join(c.strip()[1:-1] for c in cells).replace('"', "")
-    out = np.array([v == "True" for v in body.split(",")], dtype=bool) if body else np.empty(0, bool)
+    # Bulk files write True/False in brackets; DataLink (DATAMODEL_GAIA csv) writes "(true, false, ...)". An exact
+    # "True" match read every DataLink flag as False, so DataLink light curves carried no DPAC rejections.
+    out = np.array([v.strip().lower() == "true" for v in body.split(",")], dtype=bool) if body else np.empty(0, bool)
     if out.size != n.sum():
         raise ValueError("flag array length mismatch")
     return out

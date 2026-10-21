@@ -70,6 +70,7 @@ These apply to every arm and every thread.
 | D2 | Freeze `dr4-day-one`: queries, thresholds, code, pre-registered analysis | D1, G7; before DR4 | DR4 plan thread |
 | D3 | DR4 day one: TAP prefilter → DataLink pull of the top ~10⁴; full bulk stream of epoch photometry with detectors per file (falls back to a random DataLink channel if there are no bulk files); for G ≥ 16, a per-CCD DataLink pull of the top ~10⁴ by \|W\| per G bin (sign-blind, so competition stays valid; `gaia.dr4.ccd_at_extremes`, docs/infra/targets.md) → ranking → vetting | D2, DR4 release | all |
 | D4 | Shortlist with measured recall and false-positive rate; decide on outreach to technosignature groups | D3 | Cora |
+| D0 | Day-one dress rehearsal on DR3 ✓ (docs/dayone.md, `dayone/`): whole chain with 6,000 sealed injections. Fixed the DataLink flag parser and the `fov` cut asymmetry; recall is set by sampling and a ~100σ G3 threshold; pre-registered shortlist empty, 0/5 injections called unexplained. Changes for D2 listed there | G3, I5, V2 | DR4 day-one rehearsal thread |
 
 ## Open decisions
 
