@@ -17,7 +17,7 @@ than a survey team, in exactly the kind of search where volunteers historically 
 | **Non-Keplerian astrometry** (narrow, secondary) | Gaia DR4 epoch astrometry; DR4 pre-release sample | Designing | [docs/arms/astrometry.md](docs/arms/astrometry.md) |
 
 Shared infrastructure: archive client and Gaia access ([docs/infra/](docs/infra/)), injection and blinding
-([docs/blinding.md](docs/blinding.md)), statistics ([docs/statistics.md](docs/statistics.md)), vetting.
+([docs/blinding.md](docs/blinding.md)), statistics ([docs/statistics.md](docs/statistics.md)), vetting ([docs/vetting.md](docs/vetting.md)).
 
 ## Start here
 

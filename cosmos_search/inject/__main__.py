@@ -5,8 +5,8 @@
         --recipient-file keys/cora.age.pub \
         [--reveal-out out/reveal.json.age --reveal-recipient-file keys/reveal.age.pub]
 
-Only the smoke class exists so far; it exercises the sealing path end to end
-without touching real data.
+The smoke class exercises the sealing path end to end without real data;
+vetting_batch builds blind vetting packets (cosmos_search/inject/classes/vetting_decoys.py).
 """
 
 import argparse
@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from .classes.vetting_decoys import vetting_batch
 from .sealed import sha256, write_sealed
 
 
@@ -40,7 +41,7 @@ def smoke(cfg, rng):
     return products, truth, reveal
 
 
-GENERATORS = {"smoke": smoke}
+GENERATORS = {"smoke": smoke, "vetting_batch": vetting_batch}
 
 
 def main(argv=None):
