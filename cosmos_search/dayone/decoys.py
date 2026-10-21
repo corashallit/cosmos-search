@@ -40,6 +40,9 @@ COUNTS = {"dip_train_poisson": 3, "dip_train_primes": 3, "dip_train_geometric": 
 MIN_SIGMA = 5.0
 MAX_DRAWS = 200
 MIN_EXTERNAL = 100          # epochs in at least one external band
+# Batch 4: a dip train must also leave this many distinct dip events in the external epochs, so the recurrence
+# test (vetting.recurrence) has something to test. Single dips, fades and steps are not held to it.
+TRAINS = ("dip_train_poisson", "dip_train_primes", "dip_train_geometric", "dip_train_periodic")
 G_MATCH = 0.25              # mag: hosts are matched in G to the batch's real candidates
 
 
@@ -90,8 +93,23 @@ def _visible_g(lc, sid, blend):
     return vis["t"].to_numpy(), f, robust_sigma(f), (t0, t1)
 
 
-def plan(host_ctx, lc_dir, external, rng, counts=COUNTS):
-    """One sealed-plan record per decoy, in gaia_stream's format, with signals that continue past DR3."""
+def _external_events(ext_star, rec, contamination):
+    """Distinct dip events the recurrence test would find in one star's external epochs with this signal."""
+    from cosmos_search.vetting import recurrence
+    from cosmos_search.vetting.candidate import LightCurve
+
+    from .external import apply
+
+    inj = apply(ext_star, {int(ext_star["source_id"].iloc[0]): rec}, contamination)
+    lcs = [LightCurve(b, g["t"].to_numpy(), g["flux"].to_numpy(), g["err"].to_numpy()) for b, g in inj.groupby("band")]
+    return len(recurrence.events(*recurrence.epochs(lcs)))
+
+
+def plan(host_ctx, lc_dir, external, rng, counts=COUNTS, min_external_events=0, half="batch3", contamination=None):
+    """One sealed-plan record per decoy, in gaia_stream's format, with signals that continue past DR3.
+
+    min_external_events > 0 also requires dip trains (TRAINS) to leave that many dip events in the external
+    epochs, redrawing the signal as for Gaia visibility."""
     from .rank import _blend_map, read_lightcurves
 
     n_ext = external.groupby(["source_id", "band"]).size().unstack(fill_value=0)
@@ -112,15 +130,20 @@ def plan(host_ctx, lc_dir, external, rng, counts=COUNTS):
             if vis is None:
                 continue
             t, _, s, span = vis
+            ext_star = external[external["source_id"] == sid]
             for _ in range(MAX_DRAWS):
                 sig = lcinj.sample(rng, fam, *gaia_stream.DR3_SPAN, t_ext=t_ext)
-                if np.max(np.abs(1 - sig.factor(t, "G"))) >= MIN_SIGMA * s:
-                    break
+                if np.max(np.abs(1 - sig.factor(t, "G"))) < MIN_SIGMA * s:
+                    continue
+                if min_external_events and fam in TRAINS and _external_events(
+                        ext_star, {"signal": lcinj.truth(sig), "bands": None}, contamination) < min_external_events:
+                    continue
+                break
             else:
                 continue
             frac = blend.get(sid)
             r = float(rng.uniform(0.2, 1.0)) if frac is not None and frac >= gaia_stream.BLEND_MAX else 1.0
-            out.append({"source_id": sid, "family": fam, "half": "batch3", "bands": None, "bp_rp_dilution": r,
+            out.append({"source_id": sid, "family": fam, "half": half, "bands": None, "bp_rp_dilution": r,
                         "seed": int(rng.integers(2**62)), "signal": lcinj.truth(sig)})
             break
     return out
@@ -143,6 +166,9 @@ def main(argv=None):
     p.add_argument("--external", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--recipient-file", action="append", required=True)
+    p.add_argument("--min-external-events", type=int, default=0, help="dip trains must leave this many external dip events")
+    p.add_argument("--half", default="batch3", help="label stored in each plan record")
+    p.add_argument("--context", help="parquet with source_id, blend_tess_contamination (TESS dilution)")
     a = ap.parse_args(argv)
     rng = np.random.default_rng(int.from_bytes(os.urandom(32), "little"))
     if a.cmd == "hosts":
@@ -160,7 +186,12 @@ def main(argv=None):
         out.to_parquet(a.out)
         print(f"{len(out)} hosts -> {a.out}")
     else:
-        records = plan(pd.read_parquet(a.hosts), a.lightcurves, pd.read_parquet(a.external), rng)
+        contamination = None
+        if a.context:
+            ctx = pd.read_parquet(a.context, columns=["source_id", "blend_tess_contamination"])
+            contamination = dict(zip(ctx["source_id"].astype("int64"), ctx["blend_tess_contamination"]))
+        records = plan(pd.read_parquet(a.hosts), a.lightcurves, pd.read_parquet(a.external), rng,
+                       min_external_events=a.min_external_events, half=a.half, contamination=contamination)
         digest = write_sealed(records, a.out, a.recipient_file)
         # Counts only. Never print anything derived from the plan beyond its size.
         print(f"sealed {len(records)} decoys to {a.out} (sha256 {digest})")

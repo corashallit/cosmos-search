@@ -17,7 +17,7 @@ import secrets
 
 import numpy as np
 
-from . import taxonomy
+from . import recurrence, taxonomy
 from .anonymise import leak_scan, scrub_source, sig
 from .candidate import Candidate, LightCurve
 
@@ -243,6 +243,12 @@ def build(candidate, holdout=(), packet_id=None):
                      "after_t": None if t_cut is None else sig(t_cut - t0, 5),
                      **({"until_t": sig(t1 - t0, 5)} if t_cut is not None and len(visible.primary()) < len(lcs) else {})},
     }
+    # Computed here, on the visible epochs of every survey, so it respects the holdout by construction. With one
+    # dip event there is nothing to recur, and the light curve already says so.
+    rec = recurrence.test(lcs)
+    if rec.get("n_events", 0) >= 2:
+        packet["tests"]["recurrence"] = {k: (sig(v, 4) if isinstance(v, float) else v)
+                                         for k, v in rec.items() if k != "visible_only"}
     packet["text"] = render(packet, lcs)
     # Random hex ids can contain long digit runs; they are ours, so take them out before scanning.
     leaks = leak_scan((json.dumps({k: v for k, v in packet.items() if k != "text"}) + packet["text"]).replace(packet_id, ""))

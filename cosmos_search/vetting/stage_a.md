@@ -30,7 +30,11 @@ those can appear as steps. Band TESS is aperture photometry in 21 arcsec pixels,
 per ~27 d sector; a change on the star is diluted by any neighbours in the aperture (context tess_contamination is
 their flux relative to the star's), and slow trends within a sector are not reliable. These epochs come from
 other years than Gaia's, on the same clock; use them to test what an explanation predicts, for example whether an
-eclipse recurs at a fixed period and depth.
+eclipse recurs at a fixed period and depth. The test "recurrence" has done the period search you cannot do by eye:
+it merges dip epochs from every survey into events and finds the strict period that puts the most events into one
+or two phase windows that hold only dip epochs. An eclipsing binary gives aligned_fraction near 1; a small
+aligned_fraction with testable true means no single period explains the dips, which eclipses alone do not
+produce (other variability of the star can still add dips that do not recur).
 
 Detector scores and false-positive tests in the packet are computed by the pipeline. A test's p-value is for the
 null "this false-positive class does not explain the signal": a small p supports that class.
