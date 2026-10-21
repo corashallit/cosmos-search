@@ -286,7 +286,15 @@ def _committed(path):
         clean = subprocess.run(["git", "-C", str(REPO), "diff", "--quiet", "HEAD", "--", str(p)]).returncode == 0
     except FileNotFoundError:
         return False
-    return tracked and clean
+    if not (tracked and clean):
+        return False
+    # The commit that last changed the file must be on a remote branch, so the freeze is checkable from outside
+    # (red-team review R2): a local-only commit could be rewritten before anyone saw it.
+    last = subprocess.run(["git", "-C", str(REPO), "log", "-1", "--format=%H", "--", str(p)],
+                          capture_output=True, text=True).stdout.strip()
+    remote = subprocess.run(["git", "-C", str(REPO), "branch", "-r", "--contains", last],
+                            capture_output=True, text=True).stdout.strip()
+    return bool(last and remote)
 
 
 def cmd_assemble(a):
