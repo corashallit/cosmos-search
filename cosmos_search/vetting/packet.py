@@ -17,7 +17,7 @@ import secrets
 
 import numpy as np
 
-from . import recurrence, taxonomy
+from . import recurrence, single_event, taxonomy
 from .anonymise import leak_scan, scrub_source, sig
 from .candidate import Candidate, LightCurve
 
@@ -249,6 +249,13 @@ def build(candidate, holdout=(), packet_id=None):
     if rec.get("n_events", 0) >= 2:
         packet["tests"]["recurrence"] = {k: (sig(v, 4) if isinstance(v, float) else v)
                                          for k, v in rec.items() if k != "visible_only"}
+    # With exactly one event there is nothing to recur, but an eclipse would have: the single-event test says
+    # whether any mundane eclipsing companion fits the event without having been seen again.
+    one = single_event.test(lcs, cand.source, cand.context)
+    if one is not None:
+        packet["tests"]["single_event"] = {
+            k: (sig(v, 4) if isinstance(v, float) else "-".join(f"{x:.4g}" for x in v) if isinstance(v, list) else v)
+            for k, v in one.items() if k != "visible_only"}
     packet["text"] = render(packet, lcs)
     # Random hex ids can contain long digit runs; they are ours, so take them out before scanning.
     leaks = leak_scan((json.dumps({k: v for k, v in packet.items() if k != "text"}) + packet["text"]).replace(packet_id, ""))

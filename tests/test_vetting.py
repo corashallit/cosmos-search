@@ -93,7 +93,10 @@ def test_holdouts_withhold_data_and_record_truth():
     assert packet["bands"] == ["G"]
     assert {t["id"] for t in packet["targets"]} == {"tail_dip", "tail_min_flux", "dip_colour_ratio", "ir_excess"}
     assert "ir_excess_sigma" not in packet["context"]
-    assert packet["scores"] == {} and packet["tests"] == {}
+    # Only tests computed on the visible epochs survive; the single-event test is one, and with BP and RP
+    # withheld it carries no colour.
+    assert packet["scores"] == {} and set(packet["tests"]) <= {"single_event"}
+    assert "colour_ratio_rp_bp" not in packet["tests"].get("single_event", {})
     assert key["truths"]["ir_excess"] is False
     assert key["truths"]["dip_colour_ratio"] == pytest.approx(1, abs=0.2)  # injected grey dip
     assert packet["summaries"]["G"]["span_days"] < 0.85 * 1000
