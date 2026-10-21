@@ -1,0 +1,18 @@
+{
+  "frozen": "2026-10-21T03:15:04Z",
+  "git_commit": "562b86e0cac7a444679abc5e3fb50714b7d1156d",
+  "rule": {
+    "alpha": 0.0012,
+    "control_modulus": 4093,
+    "d_step": 0.25,
+    "mag_bin": 0.5,
+    "min_count": 2000,
+    "min_transits": 10,
+    "version": 1
+  },
+  "tag": "dr3-rehearsal",
+  "templates_sha256": {
+    "dimmer_prefilter": "3e122c6503c7be8abe14198e50c4551c27aa10b6e72f79de9ac576177da86211",
+    "dimmer_tail_histogram": "b1cbc8af64a3a048e084df9a0b4f462ff0382fb2358dc6f0bdf33f06b57e0cdb"
+  }
+}
