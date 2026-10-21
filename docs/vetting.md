@@ -410,9 +410,11 @@ The fix gives up about half that recall to keep real dips on blended and on quie
 none of the 6,800 diluted injections. A veto that removes a real signal costs more than one that lets an artefact
 through to Stage A. Recall on the 22 blended stars is about 0: untested, as designed. Known answers kept: the two
 LMC eclipses above keep their deepest points (76% and 68%), and so does the third source the DR4 thread flagged
-(4659940667527443712, 22%), whose deep G point is now corroborated by BP. The archive thread's DR3 chunk with the
-first version removed 29 of 160 bright spikes at ≥ 8σ but only 6 of 381 dips. G faults lean bright. The test is
-symmetric in its residual and in the attribution, so the mirror null stays valid; the asymmetry is in the faults.
+(4659940667527443712, 22%), whose deep G point is now corroborated by BP. On a 2,000-source DR3 chunk with blend
+fractions, the archive thread found the same: all three keep their deep points, and cleaning now only moves
+threshold-straddlers, 4 of 381 dips and 6 of 160 bright spikes at ≥ 8σ, each by a few tenths of a σ. The first
+version had removed 29 of the 160 spikes and 6 of the dips. The test is symmetric in its residual and in the fault
+attribution, so the mirror null stays valid.
 
 **On the pilot-3 controls**, Stage 0 removes the dips behind two of the four instrumental readings: G errors 27 and
 21 times the median, with BP and RP flat at that transit. The other two, a 5% G dip and a 4% G dip with BP and RP
