@@ -130,6 +130,10 @@ Record changes of approach here, with the evidence that prompted them.
   removed at ≥ 8σ belong to DPAC eclipsing binaries (P = 14.3 d and 60.8 d), and both have BP and RP blended
   in every transit. Blending dilutes the dip in BP and RP, so a real G dip falls outside the mixing interval and
   reads as a G fault. Error inflation at the deepest point removed the other one. The injection test missed
-  this because it injects undiluted changes. The fix (dilution-aware band test, corroborated epochs never
-  dropped, diluted injections, EB known-answer controls) is with the vetting thread. Until it lands, G3 is
-  reported on both the raw and the cleaned extremes (`single_raw` vs `single`).
+  this because it injects undiluted changes. Fixed in vetting PR #30 (docs/vetting.md §12). The allowed G
+  change now accounts for a measured per-source dilution. An inflated-error epoch is dropped only when neither
+  BP, RP nor the partner transit corroborates it. Diluted injections are part of the test, and none of 6,800 is
+  vetoed. The three LMC sources keep their deep points. The cost is G-only fault recall: 41–45% at ≥ 10σ
+  (59–66% on unblended stars), and blended stars are effectively untested. We accept that, because a mask that
+  removes real dips does more harm than faults that reach vetting. G3 still reports both the raw and the
+  cleaned extremes (`single_raw` vs `single`).
