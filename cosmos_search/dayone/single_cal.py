@@ -359,6 +359,8 @@ def main(argv=None):
                          if "blend_tess_contamination" in h else None)
         records = plan5(h, a.lightcurves, pd.read_parquet(a.external), rng, contamination=contamination)
         digest = write_sealed(records, a.out, a.recipient_file)
+        # The hosts used, for the queue (as batch 4's hosts file); which family went where stays sealed.
+        pd.DataFrame({"source_id": sorted(r["source_id"] for r in records)}).to_parquet(Path(a.out).with_suffix(".hosts.parquet"))
         # Counts only. Never print anything derived from the plan beyond its size.
         print(f"sealed {len(records)} decoys to {a.out} (sha256 {digest})")
         return 0

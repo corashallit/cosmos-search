@@ -186,7 +186,8 @@ def apply(ext, plan_map, contamination=None):
     """Inject the sealed plan's signals into external epochs, as `gaia_stream.apply` does for Gaia's.
 
     TESS pixels are 21": a change on the target is diluted by the flux of its neighbours, so the TESS factor is
-    1 - (1 - c) (1 - k) with c the target's TESS contamination ratio (xmatch blend context). ZTF is PSF photometry
+    1 - (1 - k) / (1 + c) with c the target's TESS contamination ratio, neighbour flux over target flux (xmatch
+    blend context), so the target supplies 1 / (1 + c) of the aperture's light. ZTF is PSF photometry
     at ~2" and is not diluted. A g_only plan (an instrument fault in Gaia's G) leaves other surveys alone.
     Noise is scaled with the factor as for Gaia; the extra photon-noise draw is left out because external errors
     are scatter estimates, not photon counts.
@@ -206,7 +207,7 @@ def apply(ext, plan_map, contamination=None):
             k = sig.factor(ext.loc[idx, "t"].to_numpy(), band)
             if band == "TESS":
                 c = contamination.get(int(sid), 0.0)
-                k = 1 - (1 - (c if np.isfinite(c) else 0.0)) * (1 - k)
+                k = 1 - (1 - k) / (1 + (c if np.isfinite(c) and c >= 0 else 0.0))
             k = np.clip(k, 0, None)
             ext.loc[idx, "flux"] = ext.loc[idx, "flux"].to_numpy() * k
             ext.loc[idx, "err"] = ext.loc[idx, "err"].to_numpy() * np.sqrt(k)

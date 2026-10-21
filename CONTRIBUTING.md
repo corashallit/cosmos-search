@@ -23,6 +23,7 @@ Several Claude threads work in this repo at once. These rules keep them out of e
 | `cosmos_search/vetting/`, `.claude/agents/` | Candidate vetting | Packets, anonymiser, Stage 0 tests, expert agents, commit/reveal, calibration (V1–V3) |
 | `cosmos_search/xmatch/` | Multi-survey cross-match | Proper-motion-aware matching (I5) |
 | `cosmos_search/dayone/` | DR4 day-one dress rehearsal | Glue for the day-one chain: DataLink pull order, ranking v0, packet building and scoring (docs/dayone.md) |
+| `cosmos_search/ebfilter/`, `inject/classes/eclipsing_binary.py` | Eclipsing-binary filter for DR4 | Dip-level EB test (compression over periods), its decision layer and calibration (docs/arms/eb-filter.md) |
 | `cosmos_search/astrometry/` | unassigned | Non-Keplerian arm (A1–A3) |
 | `docs/` | DR4 plan and repo layout | Arms own their page under `docs/arms/` and `docs/infra/` |
 

@@ -78,6 +78,10 @@ N_DRAWS = 40000
 COLOUR_EXCLUDE_SIGMA = 3.0                   # BP and RP moving opposite ways, each this significant
 B_SHORTLIST = 2.5                            # single-dip flag: log10(one-off / eclipse) at least this (rule v4)
 MIN_IN_DIP = 2                               # and the event on at least two epochs, at least one of them Gaia G,
+# Kept out of the packet: the one-off rate behind the likelihood ratio is assumed, not measured, so the ratio and
+# the absolute eclipse rate have an arbitrary scale. Shown, they read as odds (red-team review R6); the flag
+# carries the calibrated cut instead.
+PIPELINE_ONLY = ("log10_oneoff_vs_eb", "oneoff_vs_eb_is_lower_bound", "eb_rate")
 ONE_LOOK_DAYS = 0.08                         # one Gaia transit pair (two fields of view, 106.5 min apart)
 QUIET_MAX = 3.0                              # on a star whose other G epochs scatter <= this x their errors,
                                              # with normal-brightness epochs on both sides of the event
@@ -438,7 +442,10 @@ def test(lcs, source=None, context=None, n_draws=N_DRAWS, rng=None):
     # TESS's 21" pixels dilute a change on the target by the neighbours' share of the aperture; without the
     # contamination ratio, assume a sizeable one, which can only make repeats harder to see (conservative).
     c = (context or {}).get("tess_contamination")
-    dil = {"TESS": float(c) if c is not None and np.isfinite(float(c)) else TESS_DILUTION_UNKNOWN}
+    # The contamination is a flux ratio (neighbours / target, xmatch.blend), so the share of the aperture's light
+    # that is not the target's is c / (1 + c).
+    dil = {"TESS": float(c) / (1 + float(c)) if c is not None and np.isfinite(float(c)) and float(c) >= 0
+           else TESS_DILUTION_UNKNOWN}
     ep = _band_epochs(lcs, dil)
     if ep is None:
         return None
@@ -487,16 +494,14 @@ def test(lcs, source=None, context=None, n_draws=N_DRAWS, rng=None):
         "speed the fastest flux change needs; v_escape_km_s: the host's surface escape speed, which no bound occulter "
         "exceeds. colour_excludes_occultation: one of BP and RP dimmed and the other brightened, each at >= 3 sigma, "
         "which no occulting body can do (a temperature change of the star, or an instrumental colour error, can). "
-        "log10_oneoff_vs_eb: log10 of how much better a one-off occulter of unknown duration, depth and "
-        "ingress (log-uniform priors) explains the event and the absence of repeats than the eclipsing-companion "
-        "population does (large: an eclipse is a poor explanation, because eclipses that fit are rarely caught "
-        "once and never again; it says nothing about which non-eclipse cause, astrophysical or instrumental; "
-        "oneoff_vs_eb_is_lower_bound: too few eclipse draws fit at all, so the value is a lower bound). "
         "quiet_ratio_g: scatter of the other G epochs over their errors (the test has no model of the star's own "
         "variability, so on a variable star a low state can pass for a one-off dip). bracketed: normal-brightness "
         "epochs on both sides of the event. beyond_one_transit: the in-dip epochs span more than one Gaia transit pair "
-        "(106.5 min), or there are three or more of them. single_dip_flag: log10_oneoff_vs_eb >= 2.5 or "
-        "colour_excludes_occultation, with at least two in-dip epochs, at least one of them in Gaia G, "
-        "beyond_one_transit, bracketed, and quiet_ratio_g <= 3.")
+        "(106.5 min), or there are three or more of them. single_dip_flag: the pipeline's flag, set when the event "
+        "has at least two in-dip epochs (one in Gaia G), beyond_one_transit, bracketed and quiet_ratio_g <= 3, and "
+        "either colour_excludes_occultation or eclipses fit the event poorly by a likelihood-ratio score cut where "
+        "calibration put it. The score's scale rests on an assumed rate of one-off occultations, so it is a ranking, "
+        "not odds, and the packet does not show it. The flag says an eclipse is a poor explanation; it does not say "
+        "which other cause, astrophysical or instrumental, is right.")
     out["visible_only"] = True
     return out

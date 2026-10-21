@@ -183,8 +183,11 @@ HOLDOUTS = ("tail", "colour", "ir")
 # --- Building --------------------------------------------------------------
 
 
-def build(candidate, holdout=(), packet_id=None):
-    """Return (packet, key). `holdout` is a subset of HOLDOUTS; the targets that apply are added."""
+def build(candidate, holdout=(), packet_id=None, pipeline_flags=True):
+    """Return (packet, key). `holdout` is a subset of HOLDOUTS; the targets that apply are added.
+
+    The pipeline's own tests (recurrence) always go into the key under "pipeline", so a rule that uses them can be
+    scored. pipeline_flags=False leaves them out of the packet, to measure what the vetter adds without them."""
     cand = candidate if isinstance(candidate, Candidate) else Candidate.from_dict(candidate)
     packet_id = packet_id or new_packet_id()
     t0, t1 = cand.time_span()
@@ -245,23 +248,27 @@ def build(candidate, holdout=(), packet_id=None):
     }
     # Computed here, on the visible epochs of every survey, so it respects the holdout by construction. With one
     # dip event there is nothing to recur, and the light curve already says so.
+    pipeline = {}
     rec = recurrence.test(lcs)
     if rec.get("n_events", 0) >= 2:
-        packet["tests"]["recurrence"] = {k: (sig(v, 4) if isinstance(v, float) else v)
-                                         for k, v in rec.items() if k != "visible_only"}
+        pipeline["recurrence"] = {k: (sig(v, 4) if isinstance(v, float) else v)
+                                  for k, v in rec.items() if k != "visible_only"}
     # With exactly one event there is nothing to recur, but an eclipse would have: the single-event test says
     # whether any mundane eclipsing companion fits the event without having been seen again.
     one = single_event.test(lcs, cand.source, cand.context)
     if one is not None:
-        packet["tests"]["single_event"] = {
+        pipeline["single_event"] = {
             k: (sig(v, 4) if isinstance(v, float) else "-".join(f"{x:.4g}" for x in v) if isinstance(v, list) else v)
-            for k, v in one.items() if k != "visible_only"}
+            for k, v in one.items() if k != "visible_only" and k not in single_event.PIPELINE_ONLY}
+    if pipeline_flags:
+        packet["tests"].update(pipeline)
     packet["text"] = render(packet, lcs)
     # Random hex ids can contain long digit runs; they are ours, so take them out before scanning.
     leaks = leak_scan((json.dumps({k: v for k, v in packet.items() if k != "text"}) + packet["text"]).replace(packet_id, ""))
     if leaks:
         raise LeakError(f"packet {packet_id}: identifier-like content {leaks}")
-    key = {"packet_id": packet_id, "candidate_id": cand.candidate_id, "arm": cand.arm, "truths": truths}
+    key = {"packet_id": packet_id, "candidate_id": cand.candidate_id, "arm": cand.arm, "truths": truths,
+           "pipeline": pipeline, "pipeline_shown": bool(pipeline_flags)}
     return packet, key
 
 

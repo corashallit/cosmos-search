@@ -181,8 +181,9 @@ numbers that suggested it do not count as its test.
 ### Batch 2 result: v1 rejected
 
 47 packets (11 target-family decoys, 6 other decoys, 16 real, 14 controls), one blind subagent each. Every
-transcript shows exactly one Read of its prompt and one Write of its reply; verdicts committed at 830f1aa before
-the reveal.
+transcript shows exactly one Read of its prompt and one Write of its reply; verdicts committed locally before
+the reveal, with the code at 830f1aa (kept in `refs/pull/41/head`). The verdict file was archived in
+`prereg/verdicts/dayone-batch2` only after the reveal, so that order is not verifiable (`prereg/README.md`).
 
 | measure | result | criterion |
 |---|---|---|
@@ -249,7 +250,8 @@ test isolates what the extra light curves do.
 ### Batch 3 result: v2 not adopted
 
 50 packets (16 target decoys, 4 other decoys, 16 real, 14 controls), one blind subagent each. All 50 transcripts
-show exactly one Read of the prompt and one Write of the reply; verdicts committed at 0a3882c before the reveal.
+show exactly one Read of the prompt and one Write of the reply; verdicts committed locally before the reveal, with the
+code at 0a3882c (`refs/pull/43/head`; archived after the fact in `prereg/verdicts/dayone-batch3`, not verifiable).
 SkyBoT is unreachable from the cloud container, so the solar-system check did not run for this batch.
 
 | measure | result | criterion |
@@ -357,7 +359,8 @@ the 2 strict-period trains are in; the dust dip and the step are not, because th
 
 48 packets (12 trains, 4 single events, 2 strict-period trains, 16 real, 14 controls), one blind subagent each.
 All 48 transcripts show one Read of the prompt and one Write of the reply (plus the harness's hand-back); verdicts
-committed at 2d15944 before the reveal. 43 packets carry the recurrence test; 35 are testable.
+committed locally before the reveal, with the code at 2d15944 (`refs/pull/44/head`; archived after the fact in
+`prereg/verdicts/dayone-batch4`, not verifiable). 43 packets carry the recurrence test; 35 are testable.
 
 | measure | v3a (S ≥ 0.35) | v3b (S ≥ 0.35 or aperiodic) | criterion |
 |---|---|---|---|
@@ -540,6 +543,49 @@ inside the D2 freeze.
 - **Calibration overlap.** The tier-1 stars and the batch 4 controls were in the calibration, and none of them
   was flagged there.
 
+*Changes before the build, after the red-team review (recorded 2026-10-21, after the plan was sealed and before
+any packet existed):*
+
+- **R6: the ratio leaves the packet.** `log10_oneoff_vs_eb` has an arbitrary scale: it rests on an assumed
+  one-off rate of 1e-3 per day per star. Shown to a vetter, it reads as odds. It, its lower-bound marker and
+  `eb_rate` are now pipeline-only (`single_event.PIPELINE_ONLY`). The packet and the Stage A text describe the
+  flag and `p_eb`, `expected_repeat_epochs` and the surviving periods, which have physical meaning. The flag
+  itself is unchanged, so rule v4 is unchanged.
+- **Plan draw without TESS contamination.** The cross-match over all 459 candidate stars was too slow (one
+  cone per star, survey and shift), so the decoy draw and the EB-control selection used the default TESS
+  dilution (0.3). The cross-match then ran on the 64 batch stars only. It crashed once on a pandas 3 bug
+  (exactly two int64 Gaia ids become an overflowing RangeIndex in `set_index`), which is fixed in
+  `xmatch.context` with a test.
+- **R2: the record.** This section was committed at c86751b on the branch before the plan was sealed. The repo
+  does not accept tag pushes from here, so PR #46 will be merged with a merge commit, not a squash, which keeps
+  c86751b and the verdict commit in main's history. Before the reveal, the SHA-256 of the committed verdict file
+  is committed and pushed.
+- **R3: what is in-sample.** Only the 18 decoys and the 8 single-eclipse EB controls are new to this work. The
+  14 old controls, the 16 old real packets and the 8 tier-1 stars were in the calibration. None of the old
+  controls or old real packets was testable there, so for the single-dip flag the "≤ 1 of 14 old controls"
+  criterion is close to met by construction; only v3b's flag can fail it.
+- **R4: what this batch can measure.** Single-event recall is the measured quantity. "≥ 12 of 16" passes with
+  probability 0.98 at a true recall of 0.9, 0.63 at 0.75 and 0.17 at 0.6. Only 1 of the 8 single-eclipse EB
+  controls is testable, so the EB-control criterion says almost nothing. The flag's false-positive rate comes
+  from the calibration, with intervals:
+  - 0 of 15 testable physical-EB injections (95% 0–0.20);
+  - 0 of 2 testable DPAC EBs;
+  - 1 of 3 testable, quiet non-EB variables in the joint set (0.06–0.79), the SOLAR_LIKE star.
+
+  By class, the joint set has 7,564 stars, of which 1,161 show one event and 5 are testable and quiet: ECL 2,
+  SOLAR_LIKE 1, DSCT 1, no class 1. Unlike v3b's `aperiodic` flag (red-team R1), this flag rarely gets the
+  chance to fire on active stars, because testable single events on quiet stars are rare. When it does, activity
+  is its main false-positive class, and nothing here measures that rate well. Batch 5 cannot fix this; a
+  confirmatory set of active-star controls would.
+- **TESS contamination is a flux ratio.** `xmatch.blend` reports neighbour flux over target flux, and in this
+  batch it reaches 75. `single_event` and `external.apply` had used it as the diluted fraction, so a ratio above
+  1 turned an injected TESS dip into a brightening. Both now use the target's share, 1 / (1 + c). This cannot
+  change batch 5's decoys, whose single dips fall before TESS began. It changes the single-event test only
+  through how strongly TESS epochs refute repeats.
+- **Secondary measure (reported, not used for the decision):** v4g = v3b or (`single_dip_flag` and the vetter
+  puts < 0.5 on eclipsing_binary + rotation_or_spots + pulsation_or_irregular + extragalactic). This is
+  red-team R1's gating applied to the single-dip flag.
+
 ### Step back: what limits single dips, and what to build for DR4 (written while batch 5 was being fetched)
 
 Cora asked to re-check the assumptions one or two levels up. Only 19% of injected single dips were testable, so
@@ -567,10 +613,16 @@ the rule.
      with ZTF in that window, a dip of 1, 5 or 10 d gets ≥ 2 ZTF epochs inside it 10%, 26% and 33% of the time.
    - **TESS.** It covers most stars for one or two 27-d sectors between July 2018 and January 2020 and resolves
      any dip longer than an hour when it overlaps. In the calibration fetch, though, TESS epochs inside that
-     window are almost absent (about 1 per star), because the fetch keeps the first sectors TGLC returns.
-   - **Before DR4:** the external fetch should take the TESS sectors and ZTF epochs that overlap Gaia's span
-     first, and TGLC's coverage of sectors 1–20 needs checking. The per-star test already uses concurrent epochs
-     as in-dip or refuting evidence.
+     window are almost absent (about 1 per star). The "Concurrent ZTF and TESS coverage" thread found the cause:
+     `dayone.external._bin` drops 30-min bins with fewer than 2 points, which removes every epoch of the
+     30-min FFI sectors 1–26. Its branch fixes the binning and ranks sectors by closeness to the dip. Batch 5 is
+     built with the fetch as pre-registered; for DR3 this only loses refutation epochs, since TESS starts after
+     DR3 ends.
+   - **The event rule also needs revisiting for concurrent data.** `single_event` splits in-dip epochs from
+     different surveys more than 1 d apart into separate events. That stops lone ZTF outliers merging with a
+     Gaia dip, but a multi-day dip seen by Gaia and by ZTF 2 d later would split and drop out of the test. The
+     rule cannot bite on DR3 (no concurrent epochs); for DR4 it should join across surveys when no informative
+     normal epoch lies between. The change comes after batch 5, so the batch tests the rule as registered.
 2. **Population statistics for the one-look dips.** Most single dips will be one-look dips that no single star
    can argue. Their rate can still be tested.
    - **The EB expectation.** The single-event test already computes `eb_rate`, a per-star probability that a
