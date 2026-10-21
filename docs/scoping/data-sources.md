@@ -1,6 +1,6 @@
 # Data sources
 
-Checked 2026-10-21. Rate limits are what each service documents; where nothing is documented, we follow
+The current target list. Checked 2026-10-21. Rate limits are what each service documents; where nothing is documented, we follow
 the polite-client defaults at the bottom. Items marked *(verify)* came from secondary or older pages.
 
 ## Contact email
@@ -42,16 +42,16 @@ never into the repo.
 | **VizieR** | live | Published catalogues | — | TAPVizieR, X-Match | none | same CDS policy |
 | **ADS** | live | Literature record per object | — | ADS API | **API token (account, Cora's email)** | 5,000 search queries/day per token, resets 00:00 UTC; limits in response headers |
 
-## Recommended additions
+## Supporting sources
 
-| Source | Why |
-|---|---|
-| GALEX GR6/7 (MAST) | UV is the cleanest discriminator for white dwarfs, WD+M pairs and chromospheric activity |
-| Pan-STARRS1 DR2 (MAST), SkyMapper DR4 (HATS) | Optical SED points between Gaia and 2MASS; resolve some close pairs Gaia merges |
-| NASA Exoplanet Archive (TAP) | Known planets are an explanation for TESS/RV/astrometric signals |
-| UltracoolSheet, MWDD | Curated brown dwarf and white dwarf lists, beyond what SIMBAD types capture |
-| 4XMM-DR14, Chandra CSC 2.1 (HEASARC) | Deeper pointed X-ray for the stars that have it |
-| AAVSO VSX (HATS `vsx`) | Known variable classifications as priors |
+| Source | Role | Access |
+|---|---|---|
+| GALEX GR6/7 | UV: separates white dwarfs and WD+M pairs, measures chromospheric activity | MAST TAP / `astroquery.mast` |
+| Pan-STARRS1 DR2, SkyMapper DR4 | Optical SED points between Gaia and 2MASS; some close pairs Gaia merges | MAST (PS1), HATS `skymapper_dr4` |
+| 4XMM-DR14, Chandra CSC 2.1 | Deeper pointed X-ray where it exists | HEASARC TAP |
+| NASA Exoplanet Archive | Known planets explain TESS / RV / astrometric signals | Exoplanet Archive TAP |
+| UltracoolSheet, Montreal White Dwarf Database | Curated brown dwarf and white dwarf lists | static downloads |
+| AAVSO VSX | Known variable classifications as priors | HATS `vsx` |
 
 ## Rate-limit summary and client defaults
 

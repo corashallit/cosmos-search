@@ -31,50 +31,40 @@ the brightest naked-eye stars). Counts are from live archive queries; see `scrip
 | ϖ > 10 mas with a non-single-star solution | 10,236 |
 | GCNS main table | 331,312 |
 
-**Corrections to the initial source list.**
-- eROSITA-DE **DR2** (eRASS:3, released 31 July 2026) supersedes DR1. It still covers only the western
-  Galactic hemisphere (180° < l < 360°), so X-ray coverage is half-sky; add ROSAT 2RXS for the other half.
-- SDSS is at **DR20** (30 July 2026), which carries SDSS-V Milky Way Mapper spectra of many nearby M dwarfs
-  and white dwarfs. LAMOST is at DR11 v2 (international) / DR12 v1.1. DESI DR1 is public; DR2 is expected
-  early 2027, after DR4.
-- ZTF is at DR24 (2026-01-22). It saturates around G ≈ 12.5–13, so ASAS-SN and TESS carry the bright end.
-- Worth adding: Hipparcos (stars too bright for good Gaia astrometry), GALEX (UV, essential for white dwarfs
-  and chromospheric activity), Pan-STARRS1 / SkyMapper (optical SED fill-in), CatWISE2020 motions for
-  objects Gaia misses, NASA Exoplanet Archive, UltracoolSheet, and the Montreal White Dwarf Database.
+**Data sources.** The current target list, with releases, coverage, access and rate policies, is in
+[data-sources.md](data-sources.md). It is the single source of truth for what the pipeline ingests.
 
 **Storage.** The DR3 rehearsal fits in the ~30 GB of local disk if we stream light curves and keep only
-features (≈15–25 GB durable). DR4 epoch data for 100 pc is ~150–180 GB if pulled whole (~100 GB without epoch XP spectra). The local disk is
-ephemeral and the repo cannot hold data, so we need a durable store before 2 December. Details and the ask
-are in [storage.md](storage.md).
+features (≈15–25 GB durable). DR4 for 100 pc is ~150–180 GB if pulled whole (~100 GB without epoch XP
+spectra). Provisioning is deferred until closer to December; until then, nothing durable is written beyond
+the repo. See [storage.md](storage.md).
 
-**Blinding.** A single repo plus a shared container cannot blind a determined reader, but it can be made
-blind by construction against the realistic leaks: truth tables are encrypted to a key only Cora holds,
-injections are drawn from unlogged randomness, and expert subagents work in two stages, a blind stage on
-anonymised packets with no tools and no network, then an unblinded literature stage that never sees decoys.
-The one leak this does not close is an agent comparing injected data against the live archive, which is why
-blind runs read from a frozen snapshot. If Cora wants stronger guarantees, move injection to a GitHub
-Actions job in a second private repo. See [blinding.md](blinding.md).
+**Blinding.** Truth and its randomness live in a second private repo that no Claude session can
+reach, because the Claude GitHub App is not installed on it. A GitHub Actions job there generates
+injections and decoys and publishes only the injected products plus truth encrypted to Cora's key. Inside
+this repo, blind runs read a frozen snapshot with the network off, and expert subagents work in two stages:
+a blind stage on anonymised packets with no tools, then an unblinded literature stage that never sees
+decoys. See [blinding.md](blinding.md).
 
-## Decisions needed from Cora
+## Open items
 
-1. **Durable storage**: approve ~250 GB of durable storage (options in storage.md).
-2. **Accounts**: register a Gaia Archive account and an ADS API token with cora.shallit@gmail.com, and store
-   the credentials as environment secrets (never in the repo). Optional: LAMOST, SDSS CasJobs.
-3. **Blinding key**: generate an `age` key pair locally and commit only the public key.
-4. **Expert budget**: the size of the expert queue is the main cost driver (statistics.md §6). A queue of
-   ~10³ objects is plausible; ~10⁴ is expensive.
-5. **Scope of "everything"**: proposal is compact objects, stars, brown dwarfs and their companions/disks.
-   Solar-system bodies are technically within 100 pc but are treated as contaminants to model, not targets;
-   the ISM and the Local Bubble are context, not census entries.
+| Item | Status |
+|---|---|
+| Gaia Archive account and ADS API token (cora.shallit@gmail.com), stored as environment secrets | Cora, in progress |
+| Durable storage, ~250 GB (options in storage.md) | Deferred to late November |
+| Truth repo with the Claude GitHub App *not* installed (blinding.md §1) | Cora |
+| `age` key pair; public key committed to `keys/` | Cora |
+| Expert budget: queue of ~10³ objects is plausible, ~10⁴ is expensive (statistics.md §6) | Open |
+| Scope of "everything": stars, brown dwarfs, compact objects and their companions/disks. Solar-system bodies are modelled as contaminants; the ISM and the Local Bubble are context | Proposed |
 
 ## Six-week plan to DR4
 
 | Week (Mon) | Milestone |
 |---|---|
-| 26 Oct | Polite archive client, sample selection v0 on DR3, durable store in place |
+| 26 Oct | Polite archive client, sample selection v0 on DR3 |
 | 2 Nov | Proper-motion-aware cross-match to 2MASS / WISE / CatWISE / eROSITA / VLASS / RACS |
 | 9 Nov | Classical model tier v0: SED + CMD + astrometric + variability residuals |
 | 16 Nov | Injection harness and sealed-truth tooling; first completeness maps |
-| 23 Nov | Expert-stage rehearsal with decoys and known-answer controls on DR3 |
+| 23 Nov | Durable store in place; expert-stage rehearsal with decoys and known-answer controls on DR3 |
 | 30 Nov | Freeze code and thresholds (`dr3-frozen` tag), pre-register the DR4 analysis |
 | 2 Dec | DR4: rerun mean-product tiers blind; epoch products follow |
