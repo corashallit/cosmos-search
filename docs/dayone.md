@@ -670,7 +670,7 @@ grey dips, 0 of 4 blue dips and 1 of 4 flips (batch 4: 0 of 4 single events). Th
 packet moved them on the deep grey dips. v4 adds one grey dip over v3b (S 0.26, flag set).
 
 **Why blue dips and flips fail.** They are shallow in G. Their depths are 0.9–5.5%; the grey dips' are 2–39%,
-mostly above 6%. Seven of the nine misses are two-epoch events on two transit pairs (0.18 d). For two-epoch events
+6 of 8 above 6%. Four of the flag's seven misses are two-epoch events on two transit pairs (0.18 d). For two-epoch events
 in the calibration, the ratio rises with depth (correlation 0.59 with log depth), and the testable two-epoch blue
 dips there sat at median 2.8, only just above the 2.5 threshold. Batch 5's blue dips gave 1.2–2.3 (p_eb 0.12–0.84).
 So the threshold was set in-sample (red-team R3) on a population whose two-epoch events cluster close to it, and a
