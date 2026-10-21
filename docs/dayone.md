@@ -143,9 +143,8 @@ two highest scores of the 44 are injections.
 1. **Keep rule.** Replace "|z| ≥ 8 either side" (9% of sources, ~0.4 TB at DR4 scale) with the G3
    statistics computed in the stream and a per-G-bin keep threshold set from DR3, and store features for
    every source as now. Done after the rehearsal: see "Keep rule v2" below.
-2. **Shortlist rule v1.** Pre-register a rule on 1 − P(common classes), or rank by P(u) relative to the
-   controls, and test it on a fresh blind batch, because the post-hoc numbers above were chosen after seeing
-   the labels.
+2. **Shortlist rule.** v1 (S = P(rare astrophysical) + P(u) ≥ 0.35) was pre-registered and failed on a fresh
+   blind batch: 0/11 target decoys (below). The packets need external light curves before a rule can work.
 3. **Grey and non-EB first.** Ranking v1 should sort on the `grey` flag within tier 1 and 2 and remove VSX/
    ASAS-SN eclipsing types before vetting.
 4. **G3 power.** A per-source scale from a quiet reference (or a variability-class-specific null) would let
@@ -178,6 +177,44 @@ numbers that suggested it do not count as its test.
 - **Decision.** Adopt v1 for the D2 freeze if target recall ≥ 0.5, at most 1 of the 14 controls is flagged,
   and AUC(S) ≥ AUC(P(u)). Otherwise revise it and test again on another fresh batch. The batch is small, so
   the result decides which rule goes forward, while the shortlist FP figure still waits for V3's calibration run.
+
+### Batch 2 result: v1 rejected
+
+47 packets (11 target-family decoys, 6 other decoys, 16 real, 14 controls), one blind subagent each. Every
+transcript shows exactly one Read of its prompt and one Write of its reply; verdicts committed at 830f1aa before
+the reveal.
+
+| measure | result | criterion |
+|---|---|---|
+| target-decoy recall | 0/11 (95% CI 0–0.26) | ≥ 0.5: fails |
+| controls flagged | 0/14 (0–0.22) | ≤ 1: passes |
+| AUC, target decoys vs controls | S 0.74, P(u) 0.85 | AUC(S) ≥ AUC(P(u)): fails |
+| other decoys flagged | 1/6 (the step, S 0.80, read as a disk) | |
+| real packets flagged | 1/16 | |
+
+v1 does not go forward, and neither does v0 (P(u) ≥ 0.25 flagged nothing; the highest P(u) in the batch was 0.14).
+
+**Why.** Eight of the 11 target decoys were called eclipsing binaries (the rest blends or a systematic), and on the evidence in the packet that is
+the right call. In 7 of 11 the packet shows one dip event (one field-of-view pair, one or two epochs); the other 4
+show a second dip, which an EB also explains. With ~35 epochs over ~760 d, an occulter that dips a few times
+and an EB eclipse look the same, and a careful vetter prefers the common class. The agents' own
+`discriminating_test` says what would separate them: denser photometry (ZTF, ATLAS, ASAS-SN, TESS) to look for
+recurrence at a fixed period and a secondary eclipse. A threshold on Stage A's class probabilities cannot add
+information the packet does not hold.
+
+**The one real hit** is Gaia DR3 3047786003881272448 (G 12.7, b = +3.4°): a year-long, 10–16% dimming, deeper in
+BP (17%) than RP (14%), read as an occulting disk (S 0.66). It is a known star: a Gaia DR3 SB1 (P = 39.8 d,
+K₁ = 58 km/s, e = 0.25), an ATLAS LPV and an RS CVn star in VSX. A spot cycle on an active K-type binary is the
+likelier cause, and a BP/RP depth ratio of 1.2 fits cool spots better than small-grain dust (≈ 1.7). The blind
+packet carries no catalogue classes, so the agent could not know.
+
+**Next (rule v2 needs more information in the packet, not a new threshold).**
+1. Add an external light-curve block for each queued star: ZTF and ATLAS forced photometry, ASAS-SN, and a
+   TESS cutout where the TESS arm has one, so "EB" becomes testable (recurrence, period, secondary).
+2. Add a known-variable block (VSX type, Gaia NSS orbit, ATLAS class) as context, kept separate from
+   the identifiers so recognition stays measurable.
+3. Pre-register rule v2 on the enlarged packet, then test it on a fresh batch built from injections into stars
+   that have external coverage.
 
 ## Keep rule v2 (after the rehearsal)
 

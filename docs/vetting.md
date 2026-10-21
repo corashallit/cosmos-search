@@ -500,3 +500,8 @@ NEOs within 0.8 au can fall outside the widened cone.
   empty. The agents placed injected grey dips in rare known classes (ε Aur-like disks), so the shortlist rule
   should count rare astrophysical classes as interesting. Packet tests computed from visible epochs only are now
   marked `visible_only` and survive the tail holdout; before, the holdout dropped every test.
+- 2026-10-21. Shortlist rule v1 (S = P(disk) + P(debris) + P(other astrophysical) + P(u) ≥ 0.35), pre-registered
+  before batch 2, failed on 47 fresh blind packets: 0/11 target decoys, 0/14 controls, AUC(S) 0.74 < AUC(P(u))
+  0.85. Gaia's ~35 epochs show most injected dip trains as one or two dips, which an EB explains, so the agents
+  called them EBs. The one real hit was a known RS CVn SB1. Packets need external light curves and known-variable
+  context before the next rule (docs/dayone.md).
