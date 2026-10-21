@@ -109,3 +109,21 @@ def test_opposite_colour_change_excludes_occultation():
     r = single_event.test(lcs, SUN_LIKE, n_draws=4000)
     assert r is not None and r["colour_excludes_occultation"]
     assert r["colour_ratio_rp_bp"] < 0
+
+
+def test_packet_shows_the_flag_but_not_the_arbitrary_scale_ratio():
+    from cosmos_search.vetting.candidate import Candidate
+    from cosmos_search.vetting.packet import build
+
+    rng = np.random.default_rng(1)
+    tg, tz = _gaia_times(rng), _nightly(rng, 1300, 2500)
+    i = 10
+    tg = np.sort(np.r_[tg, tg[i] + 2.0, tg[i] + 2.074, tg[i] + 4.0, tg[i] + 4.074])
+    t0, t1 = tg[i] - 0.01, tg[i] + 4.1
+    k = lambda t: 1 - 0.1 * ((t >= t0) & (t <= t1))
+    cand = Candidate(candidate_id="gaia_dr3:1", arm="gaia", source=SUN_LIKE, lightcurves=_lcs(k, rng, tg, tz))
+    packet, _ = build(cand)
+    se = packet["tests"]["single_event"]
+    assert "single_dip_flag" in se and "p_eb" in se
+    assert not set(single_event.PIPELINE_ONLY) & set(se)
+    assert "log10_oneoff" not in packet["text"]

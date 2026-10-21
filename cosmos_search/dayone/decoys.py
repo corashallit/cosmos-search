@@ -66,7 +66,10 @@ def hosts(lc_dir, ranked, like, exclude, n, rng, tap, g_mag=None):
     table) narrows the pool to the G range before the TAP query, since most kept stars are fainter than the reals."""
     from .rank import context
 
+    from .controls import reserved
+
     ids = np.setdiff1d(kept_ids(lc_dir, rng=rng), np.fromiter(set(ranked) | set(exclude), np.int64))
+    ids = ids[~reserved(ids)]                 # the reserved control pool stays untouched (dayone.controls)
     targets = np.asarray(like, float)
     if g_mag is not None:
         g = g_mag.reindex(ids).to_numpy(float)

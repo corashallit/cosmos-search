@@ -55,7 +55,10 @@ def _columns(res, s, p_min, id_col):
         g = ok.groupby(id_col)
         out = pd.DataFrame({f"{s}_n_matched": g.size(), f"{s}_ids": g[f"{s}_id"].agg(list)})
         return out.join(cover, how="outer").reset_index()
-    top = m[(m["rank"] == 1) & (m.p_match >= p_min)].set_index(id_col)
+    top = m[(m["rank"] == 1) & (m.p_match >= p_min)]
+    # Not set_index: pandas 3 turns exactly two int64 ids into a RangeIndex, which overflows for Gaia source_ids
+    # (id + step > 2^63) and comes back empty.
+    top = top.drop(columns=id_col).set_axis(pd.Index(top[id_col].to_numpy(), name=id_col))
     cols = {f"{s}_id": top[f"{s}_id"], f"{s}_p": top.p_match, f"{s}_p_cal": top.p_cal,
             f"{s}_sep_arcsec": top.sep_arcsec,
             f"{s}_multiplicity": top.survey_multiplicity, f"{s}_p_chance": top["p_chance_0.9"]}
