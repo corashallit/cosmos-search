@@ -117,6 +117,10 @@ def test_synthetic_field_calibration_and_false_matches(bg, true_scale, true_floo
         tol = 5 + 3 * np.sqrt(true_false)
         assert abs(row["false_shift"] - true_false) < tol, (T, row, true_false)
         assert abs(row["false_model"] - true_false) < tol, (T, row, true_false)
+    # Where the model holds, the shifted-sky calibration changes little and stays honest.
+    sc = res.report["shift_calibration"]
+    true_false = int(((b.p_best >= 0.9) & ~ok).sum())
+    assert abs(sc["false_cal"] - true_false) < 5 + 3 * np.sqrt(true_false), (sc, true_false)
 
     # Posteriors mean what they say.
     m = res.matches
@@ -257,3 +261,13 @@ def test_competition_from_gaia_neighbours_halves_false_matches_and_stays_calibra
     n1, f1, fm1, fs1 = out[True]
     assert n1 > n0 and f1 < 0.7 * f0
     assert abs(fm1 - f1) < 5 + 3 * np.sqrt(f1) and abs(fs1 - f1) < 5 + 3 * np.sqrt(f1)
+
+
+def test_odds_correction_matches_shifted_sky_and_only_lowers():
+    from cosmos_search.xmatch.calibrate import apply_odds, odds_correction
+
+    p = np.full(1000, 0.995)  # model expects 5 false
+    k = odds_correction(p, 20.0, 40)
+    assert k > 1 and np.sum(1 - apply_odds(p, k)) == pytest.approx(20.0, rel=1e-3)
+    assert odds_correction(p, 2.0, 40) == 1.0   # model already more pessimistic: unchanged
+    assert odds_correction(p, 20.0, 3) == 1.0   # too few shifted-sky false accepts to measure

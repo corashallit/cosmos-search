@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 
 from .astrometry import Astrometry
-from .calibrate import DEFAULT_G_BINS, best_per_unit, chance_probability, fit, strata, summary
+from .calibrate import (DEFAULT_G_BINS, apply_odds, best_per_unit, chance_probability, fit, odds_correction,
+                        strata, summary)
 from .compete import competition
 from .geometry import healpix_groups
 from .match import ErrorModel, gather, posteriors
@@ -60,7 +61,7 @@ def crossmatch(gaia, survey, *, source=None, n_shifts=2, seed=0, calibrate=True,
     nbrs = cands.nbrs
     if compete:
         nb_stratum = strata(nbrs.gmag, g_bins)
-        blend_r = survey.fwhm_arcsec * 500.0  # half the FWHM, in mas
+        blend_r = survey.fwhm_arcsec * 500.0  # half the FWHM, in mas: the most that sharing a row can span
         region = healpix_groups(astro.ra, astro.dec, COMPETE_REGION_ORDER)
         report["neighbour_pairs"] = len(nbrs)
         cands.log_comp, cands.claimed = competition(cands, nbrs, model, prior[stratum], prior[nb_stratum],
@@ -81,16 +82,27 @@ def crossmatch(gaia, survey, *, source=None, n_shifts=2, seed=0, calibrate=True,
     report["p_chance_check"] = {
         "threshold": CHANCE_THRESHOLD, "mean_p_chance": float(np.mean(p_chance)),
         "fmr_shift": next(r["fmr_shift"] for r in report["thresholds"] if r["threshold"] == CHANCE_THRESHOLD)}
-    matches, best = tables(cands, gaia_df, model, pi_t, id_col=id_col)
+    t = next(r for r in report["thresholds"] if r["threshold"] == CHANCE_THRESHOLD)
+    p_pair, p_none, _, _ = posteriors(cands, model, pi_t)
+    _, best_p = best_per_unit(cands, p_pair, p_none)
+    acc_p = best_p[(cands.unit_shift < 0) & (best_p >= CHANCE_THRESHOLD)]
+    kappa = odds_correction(acc_p, t["false_shift"], t["false_rows_shift"])
+    matches, best = tables(cands, gaia_df, model, pi_t, id_col=id_col, kappa=kappa)
+    report["shift_calibration"] = {
+        "kappa": kappa, "threshold": CHANCE_THRESHOLD, "accepted": int(len(acc_p)),
+        "false_model": t["false_model"], "false_shift": t["false_shift"],
+        "false_cal": float(np.sum(1 - apply_odds(acc_p, kappa))),
+        "accepted_cal": int((best.p_cal >= CHANCE_THRESHOLD).sum())}
     pc = pd.Series(p_chance, index=np.asarray(gaia_df[id_col]) if id_col in gaia_df else np.arange(len(gaia_df)))
     best[f"p_chance_{CHANCE_THRESHOLD:g}"] = best[id_col].map(pc).to_numpy()
     matches[f"p_chance_{CHANCE_THRESHOLD:g}"] = matches[id_col].map(pc).to_numpy()
     return Result(survey.name, matches, best, model, prior, report)
 
 
-def tables(cands, gaia_df, model, pi_t, *, id_col="source_id"):
+def tables(cands, gaia_df, model, pi_t, *, id_col="source_id", kappa=1.0):
     survey = cands.survey
     p_pair, p_none, chi2, llr = posteriors(cands, model, pi_t)
+    cal = lambda p: apply_odds(p, kappa)
     real = cands.shift < 0
     ids = np.asarray(gaia_df[id_col]) if id_col in gaia_df else np.arange(len(gaia_df))
 
@@ -106,6 +118,7 @@ def tables(cands, gaia_df, model, pi_t, *, id_col="source_id"):
         id_col: ids[cands.target[keep]],
         f"{survey.name}_id": rows[survey.id].to_numpy(),
         "p_match": p_pair[keep],
+        "p_cal": cal(p_pair[keep]),
         "p_none": p_none[cands.unit[keep]],
         "sep_arcsec": sep,
         "chi2": chi2[keep],
@@ -128,6 +141,7 @@ def tables(cands, gaia_df, model, pi_t, *, id_col="source_id"):
         id_col: ids[cands.unit_target[ru]],
         "group": cands.unit_group[ru],
         "p_best": best_p[ru],
+        "p_cal": cal(best_p[ru]),
         "p_none": p_none[ru],
         "n_candidates": n_cand[ru],
         "n_local": cands.n_local[cands.unit_target[ru]] if cands.n_local is not None else -1,

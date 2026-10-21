@@ -8,18 +8,22 @@ estimates disagree; this module removes the cause.
 
 Model. Each survey source is the counterpart of at most one resolved Gaia source. Claimants are every Gaia
 source near the survey source, not just our targets: the targets, plus Gaia neighbours fetched from the
-Gaia catalogue itself. Two claimants closer than the survey's resolution (blend_radius, half the FWHM)
-cannot be told apart by the survey, so they do not compete: the survey source is a blend of both, and the
-blend columns (blend.py, survey multiplicity) say so.
+Gaia catalogue itself.
 
-Approximation. Exact marginals of a bipartite matching need a permanent. We use the mean-field fixed point
-that belief propagation for matching reduces to on small clusters: a claimant's likelihood ratio for row j
-is scaled by the probability that no competing (non-blended) claimant has row j,
+Which claimants compete. A survey source 0.8 arcsec from a faint target and 0.07 arcsec from a bright Gaia
+neighbour is the neighbour's, even though 2MASS cannot resolve the pair: its position (good to ~0.1 arcsec)
+says whose light dominates it. Letting the target share it would hand the target the neighbour's flux,
+which is exactly how a spurious IR excess is made. So two claimants share a row only when its position
+cannot tell them apart: their offsets differ by less than SHARE_SIGMA combined positional sigmas (and by
+less than half the FWHM, the survey's resolution). Those rows are genuine blends of both, and the blend
+columns (blend.py, survey multiplicity) say so; a target merely inside a neighbour's beam gets no match of
+its own, and blend.py reports how much of the beam the neighbour fills.
 
-    LR'_ij = LR_ij * (1 - sum_{m competing with i} P_mj),
-
-iterated a few times with damping. Pseudo-targets (shifted sky) compete against the real claimants but are
-not claimants in the real sky, exactly as a star added to the real sky would be.
+Approximation. Exact marginals of a bipartite matching need a permanent. We use belief propagation for
+matching (below), which is exact on trees and close on the small clusters crowded fields produce; mean-field
+double-counts and was ~1.7x overconfident on synthetic fields. Pseudo-targets (shifted sky) compete
+against the real claimants but are not claimants in the real sky, exactly as a star added to the real sky
+would be.
 """
 
 import numpy as np
@@ -29,6 +33,7 @@ from .match import log_lr, unit_posteriors
 
 DAMPING = 0.5
 ITERATIONS = 8
+SHARE_SIGMA = 2.0  # claimants closer than this many positional sigmas share a row instead of competing
 
 
 def competition(cands, nbrs, model, prior_t, prior_nb, blend_radius_mas, *, region=None,
@@ -76,9 +81,13 @@ def competition(cands, nbrs, model, prior_t, prior_nb, blend_radius_mas, *, regi
     f_reg = reg_codes[cands.target[f_idx]]
     n_reg = int(reg_codes.max()) + 1 if len(reg_codes) else 1
 
-    # Competitor pairs on the same row whose claimants are resolved from each other.
-    ci, cj = _same_row_pairs(codes, codes, d, d, blend_radius_mas, exclude_self=True)
-    fi, mj = _same_row_pairs(fc, codes, cands.d[f_idx], d, blend_radius_mas)
+    # Competitor pairs on the same row whose claimants the row's position tells apart.
+    cg = np.concatenate([cands.cov_gaia[t_idx], nbrs.cg]) if n_n else cands.cov_gaia[t_idx]
+    cs = np.concatenate([cands.cov_survey[t_idx], nbrs.cs]) if n_n else cands.cov_survey[t_idx]
+    var = _pos_var(model, cg, cs)
+    f_var = _pos_var(model, cands.cov_gaia[f_idx], cands.cov_survey[f_idx])
+    ci, cj = _same_row_pairs(codes, codes, d, d, var, var, blend_radius_mas, exclude_self=True)
+    fi, mj = _same_row_pairs(fc, codes, cands.d[f_idx], d, f_var, var, blend_radius_mas)
 
     # Belief propagation for matching with a "no counterpart" option on each claimant:
     #   mu_e  = pi LR_e / ((1 - pi) + pi sum_{k != e in unit} LR_k nu_k)   claimant -> row (odds it takes the row)
@@ -119,14 +128,23 @@ def competition(cands, nbrs, model, prior_t, prior_nb, blend_radius_mas, *, regi
     return out, claimed[reg_codes]
 
 
-def _same_row_pairs(codes_a, codes_b, d_a, d_b, min_sep, exclude_self=False):
-    """Index pairs (i into a, j into b) on the same row whose offsets differ by at least min_sep."""
+def _pos_var(model, cov_gaia, cov_survey):
+    """Per pair: the mean per-axis variance of the offset under the core error model (mas^2)."""
+    c = model.total_cov(cov_gaia.copy(), cov_survey)
+    return 0.5 * (c[:, 0, 0] + c[:, 1, 1])
+
+
+def _same_row_pairs(codes_a, codes_b, d_a, d_b, var_a, var_b, max_share, exclude_self=False):
+    """Index pairs (i into a, j into b) on the same row whose claimants compete: offsets that differ by at
+    least SHARE_SIGMA combined sigmas, or by at least max_share (half the FWHM) whatever the errors."""
     a = pd.DataFrame({"code": codes_a, "i": np.arange(len(codes_a))})
     b = pd.DataFrame({"code": codes_b, "j": np.arange(len(codes_b))})
     a, b = a[a.code >= 0], b[b.code >= 0]
     m = a.merge(b, on="code")
     i, j = m.i.to_numpy(), m.j.to_numpy()
-    keep = np.hypot(*(d_a[i] - d_b[j]).T) >= min_sep
+    sep = np.hypot(*(d_a[i] - d_b[j]).T)
+    share = np.minimum(max_share, SHARE_SIGMA * np.sqrt(var_a[i] + var_b[j]))
+    keep = sep >= share
     if exclude_self:
         keep &= i != j
     return i[keep], j[keep]

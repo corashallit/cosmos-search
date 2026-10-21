@@ -56,8 +56,9 @@ def _columns(res, s, p_min, id_col):
         out = pd.DataFrame({f"{s}_n_matched": g.size(), f"{s}_ids": g[f"{s}_id"].agg(list)})
         return out.join(cover, how="outer").reset_index()
     top = m[(m["rank"] == 1) & (m.p_match >= p_min)].set_index(id_col)
-    cols = {f"{s}_id": top[f"{s}_id"], f"{s}_p": top.p_match, f"{s}_sep_arcsec": top.sep_arcsec,
-            f"{s}_multiplicity": top.survey_multiplicity}
+    cols = {f"{s}_id": top[f"{s}_id"], f"{s}_p": top.p_match, f"{s}_p_cal": top.p_cal,
+            f"{s}_sep_arcsec": top.sep_arcsec,
+            f"{s}_multiplicity": top.survey_multiplicity, f"{s}_p_chance": top["p_chance_0.9"]}
     for c in survey.keep:
         if c in top:
             cols[f"{s}_{c}"] = top[c]

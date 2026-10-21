@@ -45,7 +45,7 @@ These apply to every arm and every thread.
 | I2 | Gaia DR3 epoch photometry streamed to per-source features (bulk CDN files and DataLink) ✓ | I1 | Archive thread |
 | I3 | Versioned target queries with a freeze manifest | I1 | Archive thread |
 | I4 | Durable store | Cora | Cora |
-| I5 | Proper-motion-aware cross-match to WISE family, 2MASS, SIMBAD/VSX | I1 | Cross-match thread |
+| I5 | Proper-motion-aware cross-match ✓ (`xmatch/`; docs/infra/xmatch.md): 2MASS, AllWISE, CatWISE2020, unWISE, NEOWISE epochs, TIC, eROSITA DR2, ZTF DR22, VSX, ASAS-SN, SIMBAD. Calibrated per batch, Gaia neighbours compete for survey sources, false-match rate measured on the shifted sky per run, `p_cal` and `p_chance_0.9` per source | I1 | Cross-match thread |
 | **Gaia dimmers (main)** | | | |
 | G1 | DR3 rehearsal sample: full DR3 epoch photometry (11.75 M) plus random controls ✓ (features for every source; docs/infra/gaia-epoch.md) | I2 | Archive thread |
 | G2 | Detectors v0: invariance tests (FoV pairs, bands), dip colour, secular trend, surprisal score | G1 | TESS thread's survey-agnostic detector in `dimming/`, then Gaia-specific tests |

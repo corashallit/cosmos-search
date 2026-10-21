@@ -16,6 +16,17 @@ counterpart is matched to a chance neighbour. Planted pseudo-targets get a synth
 from the fitted error model, next to the real neighbours at their shifted position; they measure recall
 and how often a chance neighbour beats a true counterpart (confusion), which matters in crowded fields.
 Neither number is assumed; both are reported with every run.
+
+When check 2 fails (crowded fields with wide-beam surveys: the model's background is too simple there),
+odds_correction() finds the one factor kappa by which the posterior odds must be divided for the model's
+expected false count over accepted matches to equal the shifted sky's: p_cal = P / (P + kappa (1 - P)).
+kappa is "the chance background near these targets is kappa times what the model assumed", which is the
+assumption the shifted sky tests. It is applied only when the shifted sky saw enough false accepts to
+measure it (MIN_FALSE_ACCEPTS distinct survey rows) and only downward (kappa >= 1), so p_cal is the conservative reading.
+A free-form map fitted on the shifted-sky mixture (isotonic, or logistic in log-odds) was tried first and
+over-corrected 2-6x where the model holds: accepted matches sit at 1 - P ~ 1e-4, where a few thousand
+pseudo-targets cannot resolve the map's shape, and the planted half of the mixture does not reproduce the
+real P distribution closely enough.
 """
 
 import numpy as np
@@ -117,36 +128,38 @@ def _fill_small_strata(pis, counts, min_count):
     return out
 
 
-def chance_probability(cands, model, pi_t, threshold=0.9):
+def chance_probability(cands, model, pi_t, threshold=0.9, *, n_draws=32, seed=0):
     """Per target: the probability that, if it had no counterpart, an unrelated survey source would still be
     accepted at P >= threshold. This is the per-source version of the shifted-sky false-match rate.
 
     A chance source at offset d is accepted when pi LR / ((1 - pi) + pi LR) >= T, i.e. when its density
     f(d) >= rho_free L* with L* = T (1 - pi) / (pi (1 - T)). That happens inside a region of area A around
     the target, and unrelated sources arrive as a Poisson process of density rho_free, so
-    p_chance = 1 - exp(-rho_free A). The error ellipse is approximated by a circle of equal area; the
-    target's own most likely candidate supplies the survey errors and density (else the medians).
+    p_chance = 1 - exp(-rho_free A). A depends on the chance source's own positional error, and chance
+    sources are mostly faint, with larger errors than a star's real counterpart: so A is averaged over
+    survey covariances drawn from the rows the pseudo-targets found (the background population), not taken
+    from the target's best candidate. The error ellipse is approximated by a circle of equal area.
     """
     n = cands.n_targets
+    rng = np.random.default_rng(seed)
     real = cands.shift < 0
-    llr, _ = cands.log_lr(model)
     cg_med = np.median(cands.cov_gaia[real], axis=0) if real.any() else np.eye(2) * 1.0
-    cs_med = np.median(cands.cov_survey[real], axis=0) if real.any() else np.zeros((2, 2))
-    rho_med = np.median(cands.rho[real]) if real.any() else 1e-9
+    rho_med = np.median(cands.rho) if len(cands.rho) else 1e-9
     cg = np.broadcast_to(cg_med, (n, 2, 2)).copy()
-    cs = np.broadcast_to(cs_med, (n, 2, 2)).copy()
     rho = np.full(n, rho_med)
-    if real.any():
-        idx = np.nonzero(real)[0]
-        order = idx[np.lexsort((llr[idx], cands.target[idx]))]
-        last = np.r_[cands.target[order][1:] != cands.target[order][:-1], True]
-        top = order[last]
-        t = cands.target[top]
-        cg[t], cs[t], rho[t] = cands.cov_gaia[top], cands.cov_survey[top], cands.rho[top]
-    c = model.total_cov(cg, cs)
+    if len(cands.target):
+        # Gaia covariance and local density of each target, from any of its pairs.
+        first = np.unique(cands.target, return_index=True)[1]
+        t = cands.target[first]
+        cg[t], rho[t] = cands.cov_gaia[first], cands.rho[first]
+    pool = cands.cov_survey[~real] if (~real).any() else cands.cov_survey
+    if not len(pool):
+        return np.zeros(n)
+    cs = pool[rng.integers(0, len(pool), (n, n_draws))]
+    c = model.total_cov(np.repeat(cg, n_draws, axis=0), cs.reshape(-1, 2, 2))
     s2 = np.sqrt(np.maximum(c[:, 0, 0] * c[:, 1, 1] - c[:, 0, 1] ** 2, 1e-12))  # equal-area variance
-    free = rho * (1.0 - (cands.claimed if cands.claimed is not None else 0.0))
-    pi = np.clip(pi_t, 1e-9, 1 - 1e-9)
+    free = np.repeat(rho * (1.0 - (cands.claimed if cands.claimed is not None else 0.0)), n_draws)
+    pi = np.repeat(np.clip(pi_t, 1e-9, 1 - 1e-9), n_draws)
     level = free * threshold * (1 - pi) / (pi * (1 - threshold))
     eps, tau2 = model.tail_frac, model.tail_mas**2
 
@@ -156,13 +169,38 @@ def chance_probability(cands, model, pi_t, threshold=0.9):
         return core + tail
 
     # f is decreasing in r^2: bisect for f(r2) = level.
-    lo, hi = np.zeros(n), np.full(n, 1e12)
+    lo, hi = np.zeros(len(s2)), np.full(len(s2), 1e12)
     for _ in range(80):
         mid = 0.5 * (lo + hi)
         above = f(mid) >= level
         lo, hi = np.where(above, mid, lo), np.where(above, hi, mid)
-    area = np.where(f(np.zeros(n)) >= level, np.pi * lo, 0.0)
-    return 1.0 - np.exp(-free * area)
+    area = np.where(f(np.zeros(len(s2))) >= level, np.pi * lo, 0.0)
+    return (1.0 - np.exp(-free * area)).reshape(n, n_draws).mean(axis=1)
+
+
+MIN_FALSE_ACCEPTS = 5
+
+
+def odds_correction(p_accepted, false_shift, n_false_rows):
+    """kappa >= 1 such that sum over accepted of kappa (1 - P) / (P + kappa (1 - P)) equals false_shift
+    (module docstring); 1 when the shifted sky's false accepts hit fewer than MIN_FALSE_ACCEPTS distinct rows or the model
+    already expects at least as many."""
+    p = np.clip(np.asarray(p_accepted, float), 0.0, 1.0)
+    false = lambda k: float(np.sum(k * (1 - p) / (p + k * (1 - p))))
+    if n_false_rows < MIN_FALSE_ACCEPTS or not len(p) or false(1.0) >= false_shift:
+        return 1.0
+    if false(1e6) <= false_shift:
+        return 1e6
+    lo, hi = 0.0, 6.0 * np.log(10)  # bisect on log kappa
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if false(np.exp(mid)) < false_shift else (lo, mid)
+    return float(np.exp(0.5 * (lo + hi)))
+
+
+def apply_odds(p, kappa):
+    p = np.asarray(p, float)
+    return p / np.maximum(p + kappa * (1 - p), 1e-300)
 
 
 def best_per_unit(cands, p_pair, p_none):
@@ -180,9 +218,11 @@ def best_per_unit(cands, p_pair, p_none):
 
 
 def planted(cands, model, prior, rng=0):
-    """Plant a synthetic counterpart in every pseudo-target unit whose parent target has a real candidate.
+    """Plant a synthetic counterpart in every pseudo-target unit.
 
     The template is the parent's most likely real candidate: its Gaia and survey covariances and density.
+    A parent with no real candidate (common in sparse surveys) still gets one, with its own Gaia covariance
+    and the median survey covariance and density, so the planted set mirrors the prior over all targets.
     The planted offset is drawn from N(0, C) under the fitted model. Returns per planted unit:
     (unit index, P of the planted pair, best P among the real neighbours).
     """
@@ -198,17 +238,29 @@ def planted(cands, model, prior, rng=0):
     last = np.r_[key[order][1:] != key[order][:-1], True]
     tmpl = dict(zip(key[order][last], order[last]))
     fake_units = np.nonzero(cands.unit_shift >= 0)[0]
-    ukey = cands.unit_target[fake_units] * (cands.unit_group.max() + 1) + cands.unit_group[fake_units]
-    has = np.array([k in tmpl for k in ukey], bool)
-    fake_units, ukey = fake_units[has], ukey[has]
     if not len(fake_units):
         return np.zeros(0, int), np.zeros(0), np.zeros(0)
-    t = np.array([tmpl[k] for k in ukey])
-    cg, cs, rho = cands.cov_gaia[t], cands.cov_survey[t], cands.rho[t]
+    ukey = cands.unit_target[fake_units] * (cands.unit_group.max() + 1) + cands.unit_group[fake_units]
+    t = np.array([tmpl.get(k, -1) for k in ukey])
+    has = t >= 0
+    # Fallback: the parent's Gaia covariance from any of its pairs, median survey covariance and density.
+    first = dict(zip(*np.unique(cands.target, return_index=True)))
+    tg = cands.unit_target[fake_units]
+    any_pair = np.array([first.get(x, -1) for x in tg])
+    cg = np.broadcast_to(np.median(cands.cov_gaia[real], axis=0), (len(t), 2, 2)).copy()
+    ok = any_pair >= 0
+    cg[ok] = cands.cov_gaia[any_pair[ok]]
+    cs = np.broadcast_to(np.median(cands.cov_survey[real], axis=0), (len(t), 2, 2)).copy()
+    rho = np.full(len(t), np.median(cands.rho))
+    cg[has], cs[has], rho[has] = cands.cov_gaia[t[has]], cands.cov_survey[t[has]], cands.rho[t[has]]
     c = model.total_cov(cg.copy(), cs)
     L = np.linalg.cholesky(c)
     d = np.einsum("nij,nj->ni", L, rng.standard_normal((len(t), 2)))
     llr_plant, _ = log_lr(d, cg, cs, rho, model)
+    if cands.claimed is not None:
+        # A planted counterpart is a free row: it sees the same reduced chance background as the shifted
+        # pairs it competes with (whose log_comp already carries that correction).
+        llr_plant = llr_plant - np.log1p(-cands.claimed[cands.unit_target[fake_units]])
     # Units: the planted units, with their existing shifted pairs plus the planted pair.
     remap = np.full(len(cands.unit_target), -1)
     remap[fake_units] = np.arange(len(fake_units))
@@ -255,7 +307,10 @@ def summary(cands, model, prior, stratum, *, thresholds=THRESHOLDS, seed=0):
         rec = float(np.mean((pl_p >= T) & (pl_p >= pl_bg))) if len(pl_p) else float("nan")
         rows.append({
             "threshold": T, "units": int(n_real), "accepted": int(acc.sum()),
-            "fmr_shift": float(fmr),
+            "fmr_shift": float(fmr), "false_accepts_shift": int(fa.sum()),
+            # Pseudo-targets of neighbouring targets can land on the same survey row: distinct rows are the
+            # independent events, and what odds_correction() counts.
+            "false_rows_shift": int(len(np.unique(cands.rid[best_i[fa]]))) if fa.any() else 0,
             "fmr_shift_err": float(np.sqrt(max(fa.sum(), 1)) / max(n_fake, 1)),
             "confusion": conf, "recall": rec,
             "false_shift": float(fmr * np.sum(1 - pi_u[real]) + np.nan_to_num(conf) * np.sum(pi_u[real])),
