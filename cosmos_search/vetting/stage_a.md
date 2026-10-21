@@ -24,6 +24,14 @@ fainter. Momentum dumps every few days cause brief pointing excursions. Sectors 
 An asteroid crossing the background annulus raises the background estimate and produces a short apparent dip.
 Systematics shared by many stars on the same camera and CCD at the same time are instrumental.
 
+Other surveys on a Gaia packet. Bands ztf_g, ztf_r and ztf_i are ZTF PSF photometry (~2 arcsec), usually every
+1-3 nights in season from 2018 on, normalised to the median of each field, CCD and filter, so offsets between
+those can appear as steps. Band TESS is aperture photometry in 21 arcsec pixels, binned to 30 min and normalised
+per ~27 d sector; a change on the star is diluted by any neighbours in the aperture (context tess_contamination is
+their flux relative to the star's), and slow trends within a sector are not reliable. These epochs come from
+other years than Gaia's, on the same clock; use them to test what an explanation predicts, for example whether an
+eclipse recurs at a fixed period and depth.
+
 Detector scores and false-positive tests in the packet are computed by the pipeline. A test's p-value is for the
 null "this false-positive class does not explain the signal": a small p supports that class.
 

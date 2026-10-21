@@ -39,6 +39,11 @@ class LightCurve:
                 "flux_err": self.flux_err.tolist(), "meta": {k: v.tolist() for k, v in self.meta.items()}}
 
 
+# The arm's own bands. A Gaia candidate may also carry ZTF or TESS light curves, named as in
+# inject.lightcurve.BAND_WAVELENGTH_UM; those are evidence from other years, not the detection.
+PRIMARY_BANDS = {"gaia": ("G", "BP", "RP")}
+
+
 @dataclass
 class Candidate:
     candidate_id: str            # pipeline-internal, never shown to Stage A ("gaia_dr3:123", "tic:456")
@@ -73,6 +78,13 @@ class Candidate:
                 return lc
         return None
 
+    def primary(self):
+        """The arm's own light curves; other surveys' (ZTF, TESS on a Gaia candidate) are context."""
+        own = PRIMARY_BANDS.get(self.arm)
+        lcs = [lc for lc in self.lightcurves if own is None or lc.band in own]
+        return lcs or self.lightcurves
+
     def time_span(self):
-        t = np.concatenate([lc.time for lc in self.lightcurves])
+        """Span of the arm's own epochs, which sets the packet clock and the tail holdout."""
+        t = np.concatenate([lc.time for lc in self.primary()])
         return float(t.min()), float(t.max())

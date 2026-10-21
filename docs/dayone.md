@@ -211,10 +211,92 @@ packet carries no catalogue classes, so the agent could not know.
 **Next (rule v2 needs more information in the packet, not a new threshold).**
 1. Add an external light-curve block for each queued star: ZTF and ATLAS forced photometry, ASAS-SN, and a
    TESS cutout where the TESS arm has one, so "EB" becomes testable (recurrence, period, secondary).
-2. Add a known-variable block (VSX type, Gaia NSS orbit, ATLAS class) as context, kept separate from
-   the identifiers so recognition stays measurable.
+2. A known-variable block (VSX type, Gaia NSS orbit, ATLAS class) is held back for now: 43 of the 47 batch-2
+   stars match VSX, because VSX ingests every Gaia DR3 variable, so on DR3 the block would mostly repeat Gaia's own
+   classification and would mark decoy hosts as known variables. It needs a design that works on DR4, whose
+   epoch photometry covers non-variables too.
 3. Pre-register rule v2 on the enlarged packet, then test it on a fresh batch built from injections into stars
-   that have external coverage.
+   that have external coverage (below).
+
+## Shortlist rule v2 and batch 3 (pre-registered 2026-10-21, before the decoy plan was drawn)
+
+Batch 2 showed that the packet, not the rule, was the limit. v2 changes the packet and keeps the rule, so the
+test isolates what the extra light curves do.
+
+- **Packet.** Each Gaia packet also carries ZTF DR22 (ztf_g, ztf_r, ztf_i; catflags 0, normalised per field, CCD
+  and filter) and TESS (TGLC aperture flux, 30 min bins, normalised per sector) epochs within 1.5" or from the
+  star's own TGLC file, on the Gaia clock, with the TESS contamination ratio in the context
+  (`dayone.external`). Long light curves are binned and also list their faintest epochs (≥ 4 robust σ below the
+  median, at most 60), so short dips survive the binning. The tail holdout hides the window [t_cut, end of Gaia]
+  in every band.
+- **Rule.** Unchanged from v1: shortlist = real packets with S = P(disk_occultation) + P(debris_transit) +
+  P(other_astrophysical) + P(unexplained) ≥ 0.35.
+- **Decoys** (`dayone.decoys`). 20 hosts drawn from kept light curves that are not ranked, not injected in the
+  rehearsal and not in a DPAC class that dips, matched in G to the real candidates, and with ≥ 100 epochs in at
+  least one external band. Families fixed in advance: Poisson, prime and geometric dip trains 3 each, grey dips
+  3, blue dip 1, chromatic flip 1, secular fade 2 (16 target), periodic trains 2, dust dip 1, step 1 (4 other).
+  Signals are drawn over DR3's span and trains keep running under the same law to the end of the external data;
+  TESS sees the change diluted by the contamination ratio. A decoy must move some visible G epoch by ≥ 5 robust
+  σ. The plan is sealed (Cora's key and the rehearsal key) and injected at build time in memory.
+- **Real packets and controls.** Batch 2's 16 real packets and 14 controls again, now with external data, so
+  each gives a paired before/after verdict.
+- **Measures.** As v1 (`score_v1`), plus the share of target decoys called eclipsing binaries, and the paired
+  change in S on the real packets and controls.
+- **Decision.** Adopt v2 for the D2 freeze if target recall ≥ 0.5, at most 1 of the 14 controls is flagged, and
+  AUC(S) ≥ AUC(P(u)). If recall improves but stays below 0.5, the next step is a pipeline recurrence test on the
+  external epochs (does the Gaia dip depth recur at a fixed period?), pre-registered before batch 4.
+
+### Batch 3 result: v2 not adopted
+
+50 packets (16 target decoys, 4 other decoys, 16 real, 14 controls), one blind subagent each. All 50 transcripts
+show exactly one Read of the prompt and one Write of the reply; verdicts committed at 0a3882c before the reveal.
+SkyBoT is unreachable from the cloud container, so the solar-system check did not run for this batch.
+
+| measure | result | criterion |
+|---|---|---|
+| target-decoy recall | 4/16 (95% CI 0.10–0.49) | ≥ 0.5: fails |
+| controls flagged | 0/14 (0–0.22) | ≤ 1: passes |
+| AUC, target decoys vs controls | S 0.69, P(u) 0.63 | AUC(S) ≥ AUC(P(u)): passes |
+| other decoys flagged | 2/4 (the step, S 0.50, unexplained; a periodic train, S 0.43, EB) | |
+| real packets flagged | 1/16 (3047786003881272448 again, S 0.66 → 0.43) | |
+| target decoys called EB | 8/16 (batch 2: 8/11) | |
+| paired change in S, real | median −0.025 (4 up, 11 down) | |
+| paired change in S, controls | median −0.025 (5 up, 9 down) | |
+
+Recall rose from 0/11 to 4/16 but stays below 0.5, so by the pre-registered decision the next step is the pipeline
+recurrence test. The rise is smaller than it looks: two of the four hits are secular fades (S 0.80, 0.36), a family
+batch 2 did not have. On the families both batches share, it is 2/14 against 0/11, within noise.
+
+**Why the external data barely helped.** For most decoys the external epochs never saw the signal. Of the 14
+dip decoys (trains and single dips), only 3 have any external epoch moved by ≥ 5 robust σ: one Poisson train in
+124 ZTF epochs, and two prime trains in 1 and 3. Single dips do not recur by design. Sparse trains with dips of
+hours to days mostly fall between ZTF's nights and outside TESS's sectors (the TGLC route ends at BTJD 2824). In
+the other 11 the external data said "no other dip", which the agents read either as a long-period EB that ZTF
+missed or, in the two geometric trains near the threshold, as weak evidence for a one-off occulter.
+
+The one decoy with clear external recurrence shows what is missing. The Poisson train (79 dips over the span, 124
+ZTF epochs in dip) showed dozens of dips at a constant ~16% depth. The agent read that as a strict period near a
+1-day alias and called an EB (S 0.06), while its own `discriminating_test` asked for a BLS search to recover the
+period. An agent reading tables of epochs cannot run a period search; the pipeline can. That is the recurrence
+test.
+
+External data also made the agents slightly surer of mundane classes for real packets and controls alike. The
+real hit fell because ZTF shows a ~39 d, 4.5% oscillation and slow 15–20% swings, which supports an evolved
+pulsator (long secondary period or RVb) over an occulting disk; it is still a known SB1 (batch 2).
+
+**Next (batch 4, pre-registered before its decoy plan is drawn).**
+
+1. A recurrence test in the pipeline. For each packet with external epochs, mark in-dip epochs per band, then ask
+   whether one strict period explains them: fold all epochs over a period grid and score how cleanly in-dip
+   epochs separate from flat epochs at the same phase. An eclipse window holds only in-dip epochs; an aperiodic
+   train's window fills with flat ones. The packet gets the best period, that purity, the number of distinct
+   dips and their depth scatter. Calibrate on Gaia DR3 eclipsing binaries with ZTF data and on injected aperiodic
+   trains before freezing a threshold.
+2. Decoy dip trains must also be visible externally (some external epoch moved by ≥ 5σ), as they already must be
+   in Gaia's visible epochs, so the batch measures what the test does when it has something to test. Single-dip
+   families stay in the batch but are scored separately, since recurrence cannot help them.
+3. Report how many of the real candidates have external epochs in dip, so the conditional recall can be scaled
+   to DR4.
 
 ## Keep rule v2 (after the rehearsal)
 
