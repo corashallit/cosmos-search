@@ -94,6 +94,60 @@ vetting package.
 documented, so each star is tested in its event sectors and in up to two quiet sectors. The quiet sectors
 of the same stars are the best negatives available: same star, same pipeline, different state.
 
+## Results, v0 (2026-10-21)
+
+9,973 QLP light curves, ~1,660 each from sectors 60, 66, 72, 78, 84 and 90, each searched three ways (real,
+mirrored, one injection). Outputs (summary, per-injection recovery, candidates, controls, Stage A batch) are on
+the project share under `tess-dimmers/v0/`.
+
+**No population excess.** 103 real light curves pass the dip channel at FAR 10⁻², against ~100 expected from
+the mirror null, and none survive Benjamini–Hochberg at q = 0.1. Real and mirrored data have surviving events
+on 1,655 and 1,566 stars. Mirror-null thresholds at FAR 10⁻²: SNR 29.5 for events up to 3 h (flares in the
+mirror set this) and 12.7 for longer ones.
+
+**Recovery at FAR 10⁻²**, by peak depth over the star's per-cadence noise:
+
+| Family | 1–3 | 3–10 | ≥ 10 | All |
+|---|---|---|---|---|
+| Boyajian-like complex | 0.10 | 0.39 | 0.77 | 0.45 |
+| Grey dip | 0.08 | 0.27 | 0.58 | 0.27 |
+| Dip train, periodic | 0.07 | 0.30 | 0.80 | 0.36 |
+| Dip train, primes | 0.01 | 0.08 | 0.70 | 0.29 |
+| Dust dip | 0.01 | 0.20 | 0.54 | 0.17 |
+| Shallow swarm | 0.00 | 0.04 | 0.12 | 0.02 |
+| Telegraph | 0.03 | 0.17 | 0.18 | 0.06 |
+
+The population anomaly score adds most for prime-spaced trains (0.29 → 0.40 with either channel). Secular
+fades and steps are invisible in one sector by construction. The largest single loss is common mode: 21%
+of injected detections fall in epochs where many stars on the CCD dip together (mostly sector starts), which
+is the case for subtracting the CCD's common mode rather than vetoing it.
+
+**Known-answer controls** against the same null (fraction of sectors flagged by either channel, event
+sectors vs quiet sectors of the same stars): aperiodic deep dimmers 0.29 vs 0.08; long or disk eclipses 0.43
+vs 0.00; YSO dippers 0.57 vs 0.46; UX Ori 0.54 vs 0.46; R CrB 0.21 vs 0.18; detached EBs 0.51 (event only).
+Stars that dip all the time are caught by the anomaly score (YSO dippers 0.55) and rarely by the dip channel
+(0.02), because the per-star red-noise factor makes a dip ordinary for a star that always dips. That is the
+intended split: the dip channel looks for rare events on otherwise quiet stars. R CrB declines last weeks
+and are mostly invisible within one sector; that is the Gaia arm's job.
+
+**Stage A pilot** (13 packets: the 8 highest-value candidates, 3 controls, 2 decoys; blind subagents, one
+read of their own packet each, audited from transcripts; key sealed with a session-only age identity until
+the verdicts were committed). All 8 real candidates were judged ordinary: 7 eclipsing binaries (four with
+period and secondary worked out from the packet) and one blended EB; the highest P(unexplained) was 0.20.
+Controls: 3/3 in the correct group. Decoys: the prime-spaced grey train got P(unexplained) 0.55 and the
+periodic grey decoy was called an EB, both correct. Cost per packet: ~55k context tokens (Claude Code
+subagent overhead included; ~10k through the Messages API) and ~2.6k output tokens, 22–82 s.
+
+**Vetting cost per surviving candidate.** Zero of 8 top candidates survived, so the survival rate is below
+~0.37 (95%), and the dominant contaminant is ordinary EBs. Stage A on the whole 193-candidate queue would
+cost ~10⁷ tokens per 10⁴ stars, and with a control false-unexplained rate of a few per cent would put ~4
+false entries on the shortlist. A deterministic EB filter (two or more equal-depth dips at a common period,
+or a secondary at phase 0.5) ahead of Stage A is the cheap fix; most of the queue is EBs.
+
+**Decoys leak.** Two experts spotted the injection: one saw the dip missing from QLP's alternate apertures,
+another saw the flux error scale with the flux inside the dip. Decoys must be applied to every flux channel
+and leave the errors alone, or Stage A learns to recognise them.
+
 ## Milestones
 
 | # | Milestone | Depends on | Status |
@@ -101,7 +155,7 @@ of the same stars are the best negatives available: same star, same pipeline, di
 | T1 | QLP/TGLC access, streamed through `cosmos_search.net` | I1 | Done |
 | T2 | Detector in `dimming/`, survey-agnostic | — | v0 done |
 | T3 | Injection families and recovery maps | inject core | v0 done (visible tuning set) |
-| T4 | 10⁴-target comparison run: recovery, false alarms, vetting cost per survivor | T1–T3, V2 | Running |
+| T4 | 10⁴-target comparison run: recovery, false alarms, vetting cost per survivor | T1–T3, V2 | v0 done (below) |
 | T5 | TESS cross-check of Gaia candidates via TGLC (Gaia source_id keyed) | T1, G6 | Not started |
 
 ## Log
