@@ -1,0 +1,5 @@
+# Exercises the sealing path; no real data.
+class: smoke
+n_packets: 200
+injected_fraction: 0.1
+amplitude: [3.0, 6.0]
