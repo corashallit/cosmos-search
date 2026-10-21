@@ -26,7 +26,11 @@ SHORT_SCALE = 0.125     # d; events found at this scale or shorter are calibrate
 
 # Veto thresholds, v0. Each is checked against injection loss in summary["veto_loss"].
 VETO = {
-    "explained": 0.5,      # fraction of the dip predicted by background/centroid coupling (features._explained)
+    # Fraction of the dip predicted by background coupling (features._explained). Background only: when a
+    # blended star dims, its flux-weighted centroid moves towards the neighbours, so centroid coupling
+    # "explains" real on-target dips (it removed a third of known dimmers' dips in the control set).
+    "explained": 0.5,
+    "alt_flux_max_duration": 0.1,  # d; aperture ratios only below this (QLP's alternate apertures are detrended)
     "depth_ratio": (0.5, 2.0),  # alternative-aperture depth ratio outside this range: not on target
     "edge_dist": 0.1,      # d from a segment edge (residual ramps after scattered-light removal)
     "dump_dist": 0.05,     # d from a momentum dump, for events shorter than dump_max_dur
@@ -67,10 +71,11 @@ def veto_reasons(ev, cm_dip, cm_burst):
         frac = in_common_mode(cm, (r.sector, r.camera, r.ccd), r.t_start, r.t_end)
         if frac > 0:
             why.append("common_mode")
-        if _get(r, "explained_total") > VETO["explained"]:
+        if _get(r, "explained_bkg") > VETO["explained"]:
             why.append("systematics")
         lo, hi = VETO["depth_ratio"]
-        ratios = [_get(r, c, np.nan) for c in ("depth_ratio_sml", "depth_ratio_lag")]
+        short = (r.t_end - r.t_start) < VETO["alt_flux_max_duration"]
+        ratios = [_get(r, c, np.nan) if short else np.nan for c in ("depth_ratio_sml", "depth_ratio_lag")]
         if any(np.isfinite(x) and not lo <= x <= hi for x in ratios):
             why.append("aperture")
         if r.edge_dist < VETO["edge_dist"]:

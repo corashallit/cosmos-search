@@ -245,9 +245,11 @@ def edge_kinematics(lc, e, n_sigma=5.0):
     sm = np.convolve(ff, np.ones(3) / 3, mode="same") if len(ff) >= 3 else ff
     depth_peak = float(base - np.min(sm[1:-1] if len(sm) > 2 else sm))
     tt = t[sel]
-    # Only consecutive cadences count as a single-cadence step.
+    # Only consecutive cadences count as a single-cadence step. A 3-point running median first, so one bad
+    # point (cosmic ray, hot pixel) does not register as two steps, while a genuine step edge survives.
     contiguous = np.diff(tt) < 1.5 * dt
-    steps = np.abs(np.diff(ff))[contiguous]
+    fm = _median3(ff)
+    steps = np.abs(np.diff(fm))[contiguous]
     sig_d = robust_std(np.diff(f))
     if not len(steps) or depth_peak <= 0 or not np.isfinite(sig_d) or sig_d == 0:
         return {"depth_peak": depth_peak}
@@ -264,6 +266,13 @@ def edge_kinematics(lc, e, n_sigma=5.0):
         "kinematic_limit": limit,
         "fast_edge": bool(edge_sigma > n_sigma and big > limit),
     }
+
+
+def _median3(x):
+    if len(x) < 3:
+        return x
+    m = np.median(np.column_stack([x[:-2], x[1:-1], x[2:]]), axis=1)
+    return np.concatenate([[x[0]], m, [x[-1]]])
 
 
 def _nuisance_tests(lc, e, n_null=64, seed=0):
@@ -330,8 +339,10 @@ def _nuisance_tests(lc, e, n_null=64, seed=0):
 
 
 # Alternative-aperture fluxes may be detrended by their pipeline (QLP's spline breaks at 0.3-2.5 d), so
-# their depth ratio is only reported for events shorter than this.
-ALT_FLUX_MAX_DURATION = 0.3
+# their depth ratio is only reported for events well shorter than the shortest break. At 0.3 d the spline
+# already ate part of real dips (known YSO dippers failed the ratio test), which injections multiplied in
+# after detrending could not show.
+ALT_FLUX_MAX_DURATION = 0.1
 
 
 def _explained(flux, channels, inside, around, depth):

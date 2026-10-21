@@ -27,26 +27,54 @@ from cosmos_search.vetting.candidate import Candidate, LightCurve
 
 from . import qlp
 from .analyse import SHORT_SCALE, calibrated_p, tmag_stratum
+from .controls import jobs
 
 # Candidate meta channel <-> dimming aux name.
 CHANNELS = {"background": "bkg", "centroid_x": "x", "centroid_y": "y", "flux_small_aperture": "flux_sml",
             "flux_large_aperture": "flux_lag"}
 # One-band decoys only: chromatic and single-band specs need several bands.
 TESS_DECOYS = ("grey_primes", "grey_geometric", "step", "dust_dip", "periodic_grey", "grey_dip")
-TEST_DEFINITIONS = (
-    "Tests describe the strongest dip. placement_z: dip mean minus surroundings, against the same window placed "
-    "elsewhere in this light curve (more negative = more unusual for this star). explained_total: fraction of the "
-    "dip predicted by the flux's coupling to background and centroid outside the dip (near 0 = systematics do not "
-    "explain it; near 1 = they do). depth_ratio_sml/lag: fractional depth in a smaller/larger aperture over the "
-    "primary, only for dips under 0.3 d (near 1 = on target). edge_frac/edge_sigma: largest single-cadence flux "
-    "step in the dip as a fraction of its depth / in noise units. kinematic_limit: deepest flux change an occulter "
-    "moving at twice the star's escape speed can make in one cadence; a step larger than this cannot be an "
-    "occultation. z_bkg, z_x, z_y: in-dip shift of background and centroids against random placements. "
-    "dip_false_alarm_p: how often the mirror-image (brightening) light curves of 10^4 stars of similar brightness "
-    "give a dip this strong, x2 for the two duration classes searched."
-)
-TEST_KEYS = ("placement_z", "explained_total", "depth_ratio_sml", "depth_ratio_lag", "edge_frac", "edge_sigma",
+# Rendered with each test in the packet (vetting/packet.py); all refer to the strongest dip.
+TEST_DESCRIPTIONS = {
+    "placement_z": "dip mean minus surroundings, against the same window placed elsewhere in this light curve; "
+                   "more negative = more unusual for this star",
+    "explained_bkg": "fraction of the dip predicted by the flux's coupling to the background outside the dip; "
+                     "near 0 = the background does not explain it, near 1 = it does",
+    "depth_ratio_sml": "fractional depth in a smaller aperture over the primary (dips under 0.1 d only); near 1 = on target",
+    "depth_ratio_lag": "fractional depth in a larger aperture over the primary (dips under 0.1 d only); near 1 = on target",
+    "edge_frac": "largest single-cadence flux step in the dip as a fraction of its depth",
+    "edge_sigma": "largest single-cadence flux step in the dip in units of the point-to-point noise",
+    "kinematic_limit": "deepest flux change an occulter at twice the star's escape speed can make in one cadence; "
+                       "a larger step cannot be an occultation",
+    "z_bkg": "in-dip background shift against random placements of the same window",
+    "z_x": "in-dip column centroid shift against random placements of the same window",
+    "z_y": "in-dip row centroid shift against random placements of the same window",
+}
+TEST_KEYS = ("placement_z", "explained_bkg", "depth_ratio_sml", "depth_ratio_lag", "edge_frac", "edge_sigma",
              "kinematic_limit", "z_bkg", "z_x", "z_y")
+
+# controls.csv class -> (taxonomy label, groups counted as correct). Aperiodic deep dimmers are the class this
+# arm is looking for: the literature explains most of them (debris, disks), but "unexplained" from a packet
+# alone is a fair answer, so both groups count.
+CONTROL_LABELS = {
+    "1_yso_dipper": ("yso_dipper", ["astrophysical"]),
+    "2_aperiodic_deep_dimmer": ("debris_transit", ["astrophysical", "unexplained"]),
+    "3_rcb": ("rcrb_dust", ["astrophysical"]),
+    "4_uxor_haebe": ("yso_dipper", ["astrophysical"]),
+    "5_long_or_disk_eclipse": ("disk_occultation", ["astrophysical"]),
+    "5b_detached_eb_reference": ("eclipsing_binary", ["astrophysical"]),
+}
+
+
+def control_label(cls, notes=""):
+    if cls in CONTROL_LABELS:
+        return CONTROL_LABELS[cls]
+    notes = str(notes).lower()
+    if "scattered" in notes:
+        return "scattered_light", ["instrumental"]
+    if "blend" in notes or "neighbour" in notes or "contamination" in notes:
+        return "blend_or_crowding", ["instrumental"]
+    return "processing", ["instrumental", "astrophysical"]
 
 
 def to_candidate(lc, cid):
@@ -56,7 +84,9 @@ def to_candidate(lc, cid):
               "ra": m.get("ra"), "dec": m.get("dec")}
     return Candidate(cid, "tess", {k: v for k, v in source.items() if v is not None and np.isfinite(v)},
                      [LightCurve("TESS", lc.t, lc.flux, lc.err, meta)],
-                     context={"pipeline_test_definitions": TEST_DEFINITIONS,
+                     context={"dip_false_alarm_p": "how often the mirror-image (brightening) light curves of 10^4 "
+                                                   "stars of similar brightness give a dip this strong, x2 for the "
+                                                   "two duration classes searched",
                               "photometry": "MIT QLP simple-aperture flux, 200 s cadence, scattered-light cadences "
                                             "removed; one TESS sector"})
 
@@ -93,7 +123,7 @@ class Detector:
         for k in TEST_KEYS:
             v = diag.get(k)
             if v is not None and np.isfinite(v):
-                cand.tests[k] = {"statistic": float(v)}
+                cand.tests[k] = {"statistic": float(v), "description": TEST_DESCRIPTIONS[k]}
         return cand
 
 
@@ -112,13 +142,17 @@ def cmd_build(args):
             entries.append((to_candidate(qlp.clean(lc), f"tic:{int(r.tic)}:s{int(r.sector)}"), {"kind": "real"}))
     if args.controls:
         ctl = pd.read_csv(args.controls)
-        ctl = ctl[ctl.qlp_sector.notna()] if "qlp_sector" in ctl else ctl
-        for r in ctl.sample(min(args.n_controls, len(ctl)), random_state=int(rng.integers(1 << 31))).itertuples():
-            lc = qlp.fetch(int(r.qlp_sector), int(r.tic))
-            if lc is not None:
-                entries.append((to_candidate(qlp.clean(lc), f"tic:{int(r.tic)}:s{int(r.qlp_sector)}"),
-                                {"kind": "control", "label": r.label, "aliases": [str(r.name)],
-                                 "acceptable": [r.group] if "group" in ctl else None}))
+        ev = [(i, s) for i, s, state in jobs(ctl, max_event=1, max_quiet=0) if state == "event"]
+        for k in rng.permutation(len(ev))[:args.n_controls]:
+            i, sector = ev[k]
+            r = ctl.loc[i]
+            lc = qlp.fetch(int(sector), int(r.tic))
+            if lc is None:
+                continue
+            label, acceptable = control_label(r["class"], r["notes"])
+            entries.append((to_candidate(qlp.clean(lc), f"tic:{int(r.tic)}:s{int(sector)}"),
+                            {"kind": "control", "label": label, "acceptable": acceptable,
+                             "aliases": [str(r["name"])], "control_class": r["class"]}))
     n_decoy = int(round(args.decoy_frac * len(entries) / (1 - args.decoy_frac)))
     hosts = targets[~targets.tic.isin(cand.tic)].sample(4 * n_decoy + 10, random_state=int(rng.integers(1 << 31)))
     truths = []
@@ -154,7 +188,7 @@ def main(argv=None):
     b.add_argument("--out", required=True)
     b.add_argument("--n-real", type=int, default=24)
     b.add_argument("--controls")
-    b.add_argument("--n-controls", type=int, default=4)
+    b.add_argument("--n-controls", type=int, default=12)
     b.add_argument("--decoy-frac", type=float, default=0.15)
     b.set_defaults(fn=cmd_build)
     args = p.parse_args(argv)

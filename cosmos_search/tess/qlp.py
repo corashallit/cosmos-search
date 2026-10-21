@@ -80,15 +80,25 @@ def read(data):
         }
         t = np.asarray(d["TIME"], float)
         meta["desat_times"] = t[(q & DESAT) != 0].tolist()
+        names = set(d.columns.names)
+
+        def col(*options):
+            # Sectors before ~56 name the detrended columns KSPSAP_* instead of DET_*.
+            for o in options:
+                if o in names:
+                    return np.asarray(d[o], float)
+            return None
+
         aux = {
-            "bkg": np.asarray(d["SAP_BKG"], float),
-            "x": np.asarray(d["SAP_X"], float),
-            "y": np.asarray(d["SAP_Y"], float),
-            "flux_sml": np.asarray(d["DET_FLUX_SML"], float),
-            "flux_lag": np.asarray(d["DET_FLUX_LAG"], float),
+            "bkg": col("SAP_BKG"), "x": col("SAP_X"), "y": col("SAP_Y"),
+            "flux_sml": col("DET_FLUX_SML", "KSPSAP_FLUX_SML"),
+            "flux_lag": col("DET_FLUX_LAG", "KSPSAP_FLUX_LAG"),
         }
-        flux = np.asarray(d["SAP_FLUX"], float)
-        err = np.asarray(d["DET_FLUX_ERR"], float)
+        aux = {k: v for k, v in aux.items() if v is not None}
+        flux = col("SAP_FLUX")
+        err = col("DET_FLUX_ERR", "KSPSAP_FLUX_ERR")
+        if err is None:
+            err = np.full(len(t), np.nan)
     return LightCurve(t, flux, err, q, band="TESS", meta=meta, aux=aux)
 
 
