@@ -470,3 +470,299 @@ against ~0.4 TB. The sampled injections it drops are ones G3 does not select eit
 loses them; a more sensitive detector would need its own keep table. A two-file stream run kept 39 of 10,140
 sources (0.38%). DR4 thresholds will differ (about twice the epochs, other noise), so after G3 runs on DR4,
 `python -m cosmos_search.dayone.keep missing` lists selections without a light curve for a DataLink pull.
+
+## Single-event test and rule v4 (pre-registered 2026-10-21, before batch 5's decoy plan was drawn)
+
+Batch 4 left single dips as the gap: 0 of 4 grey, blue and chromatic single events were shortlisted, because a
+recurrence test needs something to recur. A single dip cannot be tested against an orbit's period, but it can be
+tested against the claim that it is an eclipse. Kepler ties an eclipse's duration to its period, and the period
+predicts repeats the other epochs should have caught.
+
+**The test** (`vetting.single_event`, test `single_event` in every packet whose visible epochs in all surveys
+show exactly one dip event). In-dip epochs are as in the recurrence test (≥ 4 robust σ low, deeper than the
+band's second-largest brightening). A ZTF or TESS in-dip epoch with no other in-dip epoch of its band within 1 d
+is ignored as a lone outlier. One event is split in two only by a normal epoch between in-dip epochs that would
+have shown the dip at ≥ 5 σ, or by in-dip epochs from different surveys more than 1 d apart. The test reports:
+
+- **The eclipse hypothesis.** A Monte Carlo of mundane eclipsing companions: stellar binaries (log-normal period,
+  mean 10^5.03 d, σ 2.28 dex, 46%; mass ratio 0.1–1) and dark bodies (0.03–0.2 R☉, log-uniform period
+  0.5–10⁴ d, 30%). Eccentricity is up to 0.7, ω is uniform, and b is uniform over [0, 1 + k]. The host's radius
+  and mass come from `physics.stellar_params` with 0.15 dex scatter, or from a broad prior when the parallax is
+  poor. The duration is drawn log-uniform between the event's bounds and fixes the period. Each draw is weighted
+  by the population density, the transit probability and the catch probability T/P. A draw fits when a
+  trapezoid eclipse matches every in-dip epoch to 25% + 3 σ and leaves the bracketing normal epochs below 5 σ.
+  It is refuted when some other epoch in any survey would have shown a repeat at ≥ max(1.2 × threshold,
+  threshold + 2 σ).
+  - `p_eb` is the share of fitting weight that is not refuted.
+  - `eb_rate` is the per-star rate of "this event and no repeat". With fewer than 20 fitting draws, an upper
+    bound stands in for it, and `oneoff_vs_eb_is_lower_bound` says so.
+- **The one-off hypothesis.** An occulter of unknown duration (log-uniform 0.01–1000 d), depth (log-uniform
+  1e-3–1) and shape (trapezoid or Gaussian), scored with the same fit rules. `log10_oneoff_vs_eb` is the log
+  ratio of the two rates. The one-off rate's normalisation is arbitrary, so only thresholds calibrated on data
+  give the ratio a meaning.
+- **Colour.** `colour_excludes_occultation` is true when, over the event, one of BP and RP dims and the other
+  brightens, each at ≥ 3 σ. Removing light can only dim every band (an occulter's own glow is constant), so no
+  eclipse, transit or dust occultation does this. A temperature change of the star can, and so can a colour
+  error of the instrument.
+- **Context for Stage A:** `quiet_ratio_g` (robust scatter of the other G epochs over their errors), the speed
+  bound, the colour ratio, and the surviving periods as a follow-up ephemeris.
+
+The pipeline flag is
+
+    single_dip_flag = (log10_oneoff_vs_eb ≥ 2.5 or colour_excludes_occultation)
+                      and n_in_dip ≥ 2, at least one in G
+                      and beyond_one_transit (the in-dip epochs span > 0.08 d, or there are ≥ 3)
+                      and bracketed (normal epochs on both sides) and quiet_ratio_g ≤ 3
+
+The first condition is the evidence. The others make the event **testable**: they say whether the data can
+carry that evidence at all.
+
+**Calibration** (`dayone.single_cal`, packets' visible epochs under the tail holdout), done before this rule
+was written. The table counts stars with exactly one dip event, those that are testable and quiet, and those
+flagged.
+
+| population | n | one event | testable, quiet | flagged |
+|---|---|---|---|---|
+| grey dips injected into 120 quiet hosts (3 rounds, ≥ 5 σ in some visible G epoch) | 120 | 96 | 31 | 30 |
+| blue dips, same | 120 | 95 | 22 | 21 |
+| chromatic flips, same | 120 | 66 | 14 | 12 |
+| the same hosts without injection | 120 | 17 | 1 | 0 |
+| DR3 sources with one low episode (min z ≤ −5) | 150 | 60 | 2 | 2 (both DPAC SOLAR_LIKE) |
+| DPAC eclipsing binaries with P > 20 d | 120 | 15 | 2 | 0 |
+| physical EBs injected into the quiet hosts (the EB-filter thread's injector, run from a scratch script; P log-uniform 10–3000 d) | 1,320 (11 rounds) | 279 | 15 | 0 (highest ratio 2.13, a dip of the host itself) |
+| the EB-filter thread's joint Gaia + ZTF set (all DPAC classes) | 7,564 | 1,161 | 5 | 1 (SOLAR_LIKE, a 2% low state ≥ 52 d) |
+| of which DPAC EBs | 1,352 | 102 | 2 | 0 |
+| rehearsal tier-1 single-episode stars | 79 | 30 | 1 | 0 |
+| batch 4's real candidates / controls | 16 / 14 | 1 / 4 | 0 / 0 | 0 / 0 |
+
+- **Testable dips are recognised.** 63 of the 67 testable injected dips are flagged. The likelihood ratio does
+  most of it. Colour exclusion adds one blue dip and one chromatic flip whose ratio is below 2.5.
+- **Testability is the bottleneck.** Only 68 of 360 injected dips (19%) are testable at DR3 cadence. Most leave
+  a single transit pair, or no normal epoch near enough on one side. DR4's doubled epochs and longer ZTF overlap
+  raise this; the rule cannot.
+- **Why the flag needs more than one transit.** The calibration runs first used a flag without
+  `beyond_one_transit`. Events seen on one transit pair (two epochs 106.5 min apart) gave injected dips and
+  eclipsing binaries overlapping ratios (injected median ~2.2; DPAC EBs at G 18–19.7, 2.9 and 3.3; an RS CVn,
+  2.7). One look bounds the duration only at 106.5 min, which an eclipse of almost any period meets. A single
+  bad transit can also fake a dip and its colour. On one transit, the ratio reflects the priors more than the
+  data.
+- **The false-positive class is stellar activity.** All three flagged real stars are DPAC SOLAR_LIKE (spotted,
+  active) stars with 2–3% dips lasting a quarter of a day to weeks. The ratio says correctly that these are not
+  eclipses. Ruling out a low state of an active star is Stage A's job, using the class and the colour.
+
+**Rule v4.** Shortlist = v3b (S ≥ 0.35 or `aperiodic`) or `single_dip_flag`.
+
+**Batch 5.**
+
+- **Decoys.** 18 decoys on fresh hosts: quiet DR3 stars (robust scatter < 2× errors, no 3 σ epoch, not in a DPAC
+  class that dips, not in the calibration), G-matched to batch 4's real and control stars and tier-1 singles,
+  with ≥ 100 epochs in at least one external band.
+  - The primary measure is 16 single events: grey dips 8, blue dips 4, chromatic flips 4. Each is redrawn until
+    it moves a visible G epoch by ≥ 5 σ and the packet shows exactly one testable dip event
+    (`single_cal plan5`).
+  - 2 dust dips are other decoys, visibility only.
+  - The plan is sealed to Cora's key and the reveal key, as before.
+- **Controls.**
+  - Batch 4's 14 controls.
+  - Up to 8 single-eclipse EB controls (role `control_single_eb`, label eclipsing_binary). These are fresh DPAC
+    EBs with P > 20 d whose packet shows exactly one dip event, falling inside DPAC's eclipse model, testable
+    ones first.
+- **Real packets.**
+  - Batch 4's 16.
+  - 8 rehearsal tier-1 stars whose packet shows one dip event, testable first, then at random.
+
+**Measures and decision.** For v4 and v3b:
+
+- recall on the 16 single-event decoys;
+- the single-dip flag alone on the decoys;
+- controls flagged, separately for the 14 old controls and the single-eclipse EB controls (with how many of
+  those are testable);
+- dust dips flagged;
+- real packets flagged.
+
+Adopt v4 for the DR4 shortlist if:
+
+- single-event recall is ≥ 0.75 (calibration puts the flag alone at ~0.9 on testable dips);
+- at most 1 of the 14 old controls is flagged (v3b flagged 1 in batch 4);
+- at most 1 single-eclipse EB control is flagged.
+
+If recall passes but an EB control is flagged, look at the case before changing anything, because the EB
+controls are few. A real packet that v4 flags goes to the expert queue whatever the decision. The single-event
+test is a packet test and a flag on top of v3b; it does not change the stream, the keep rule or the queue
+inside the D2 freeze.
+
+*Deviations, recorded before the build:*
+
+- **Coincidence reference.** Batch 5 has no ranked list from a G3 run, so the coincidence test uses a stand-in
+  (`single_cal.reference`): 6,000 random DR3 sources whose deepest G epoch is ≥ 5 robust σ low, plus the
+  batch's real and control stars.
+- **Host G distribution.** In DR3, epoch photometry exists only for variables, and quiet bright stars are rare
+  in it (55 stars between G 10 and 13 out of 11.75 M have scatter < 2× their errors and no 3 σ epoch). The hosts therefore sit near G 13, about half a
+  magnitude fainter than the real candidates.
+- **Calibration overlap.** The tier-1 stars and the batch 4 controls were in the calibration, and none of them
+  was flagged there.
+
+*Changes before the build, after the red-team review (recorded 2026-10-21, after the plan was sealed and before
+any packet existed):*
+
+- **R6: the ratio leaves the packet.** `log10_oneoff_vs_eb` has an arbitrary scale: it rests on an assumed
+  one-off rate of 1e-3 per day per star. Shown to a vetter, it reads as odds. It, its lower-bound marker and
+  `eb_rate` are now pipeline-only (`single_event.PIPELINE_ONLY`). The packet and the Stage A text describe the
+  flag and `p_eb`, `expected_repeat_epochs` and the surviving periods, which have physical meaning. The flag
+  itself is unchanged, so rule v4 is unchanged.
+- **Plan draw without TESS contamination.** The cross-match over all 459 candidate stars was too slow (one
+  cone per star, survey and shift), so the decoy draw and the EB-control selection used the default TESS
+  dilution (0.3). The cross-match then ran on the 64 batch stars only. It crashed once on a pandas 3 bug
+  (exactly two int64 Gaia ids become an overflowing RangeIndex in `set_index`), which is fixed in
+  `xmatch.context` with a test.
+- **R2: the record.** This section was committed at c86751b on the branch before the plan was sealed. The repo
+  does not accept tag pushes from here, so PR #46 will be merged with a merge commit, not a squash, which keeps
+  c86751b and the verdict commit in main's history. Before the reveal, the SHA-256 of the committed verdict file
+  is committed and pushed.
+- **R3: what is in-sample.** Only the 18 decoys and the 8 single-eclipse EB controls are new to this work. The
+  14 old controls, the 16 old real packets and the 8 tier-1 stars were in the calibration. None of the old
+  controls or old real packets was testable there, so for the single-dip flag the "≤ 1 of 14 old controls"
+  criterion is close to met by construction; only v3b's flag can fail it.
+- **R4: what this batch can measure.** Single-event recall is the measured quantity. "≥ 12 of 16" passes with
+  probability 0.98 at a true recall of 0.9, 0.63 at 0.75 and 0.17 at 0.6. Only 1 of the 8 single-eclipse EB
+  controls is testable, so the EB-control criterion says almost nothing. The flag's false-positive rate comes
+  from the calibration, with intervals:
+  - 0 of 15 testable physical-EB injections (95% 0–0.20);
+  - 0 of 2 testable DPAC EBs;
+  - 1 of 3 testable, quiet non-EB variables in the joint set (0.06–0.79), the SOLAR_LIKE star.
+
+  By class, the joint set has 7,564 stars, of which 1,161 show one event and 5 are testable and quiet: ECL 2,
+  SOLAR_LIKE 1, DSCT 1, no class 1. Unlike v3b's `aperiodic` flag (red-team R1), this flag rarely gets the
+  chance to fire on active stars, because testable single events on quiet stars are rare. When it does, activity
+  is its main false-positive class, and nothing here measures that rate well. Batch 5 cannot fix this; a
+  confirmatory set of active-star controls would.
+- **TESS contamination is a flux ratio.** `xmatch.blend` reports neighbour flux over target flux, and in this
+  batch it reaches 75. `single_event` and `external.apply` had used it as the diluted fraction, so a ratio above
+  1 turned an injected TESS dip into a brightening. Both now use the target's share, 1 / (1 + c). This cannot
+  change batch 5's decoys, whose single dips fall before TESS began. It changes the single-event test only
+  through how strongly TESS epochs refute repeats.
+- **Secondary measure (reported, not used for the decision):** v4g = v3b or (`single_dip_flag` and the vetter
+  puts < 0.5 on eclipsing_binary + rotation_or_spots + pulsation_or_irregular + extragalactic). This is
+  red-team R1's gating applied to the single-dip flag.
+
+### Step back: what limits single dips, and what to build for DR4 (written while batch 5 was being fetched)
+
+Cora asked to re-check the assumptions one or two levels up. Only 19% of injected single dips were testable, so
+the question is whether the limit sits in the rule or in the framing (one star at a time, argued not to be an EB).
+
+**The limit is Gaia's visit structure, and DR4 does not change it.** On the real cadences of 300 calibration
+stars:
+
+- Half of consecutive G epochs are ≤ 0.18 d apart and a quarter are ≥ 29 d apart. Gaia sees a star in short
+  visits (one transit pair, sometimes two or three scans 6 h apart) separated by weeks.
+- A dip that lasts 0.5–10 d and is caught at all is caught on a single transit pair 71–76% of the time,
+  whatever its length. Only dips longer than about a month reach multiple visits: 36% are testable at 30 d and
+  84% at 100 d.
+- DR4 doubles the baseline, not the visit structure. It will catch about twice as many dips and refute eclipse
+  repeats over a longer span, but the testable share of caught dips stays near a quarter.
+
+A one-pair dip bounds its duration only between 106.5 min and the neighbouring visits, so no per-star argument
+from Gaia alone can separate it from an eclipse (calibration above). This is a property of the instrument, not of
+the rule.
+
+**Two levers do change it.**
+
+1. **Concurrent external data, which DR3 lacked and DR4 has.**
+   - **ZTF.** DR4 ends in January 2020, and 34% of its span overlaps ZTF (from March 2018). For calibration stars
+     with ZTF in that window, a dip of 1, 5 or 10 d gets ≥ 2 ZTF epochs inside it 10%, 26% and 33% of the time.
+   - **TESS.** It covers most stars for one or two 27-d sectors between July 2018 and January 2020 and resolves
+     any dip longer than an hour when it overlaps. In the calibration fetch, though, TESS epochs inside that
+     window are almost absent (about 1 per star). The "Concurrent ZTF and TESS coverage" thread found the cause:
+     `dayone.external._bin` drops 30-min bins with fewer than 2 points, which removes every epoch of the
+     30-min FFI sectors 1–26. Its branch fixes the binning and ranks sectors by closeness to the dip. Batch 5 is
+     built with the fetch as pre-registered; for DR3 this only loses refutation epochs, since TESS starts after
+     DR3 ends.
+   - **The event rule also needs revisiting for concurrent data.** `single_event` splits in-dip epochs from
+     different surveys more than 1 d apart into separate events. That stops lone ZTF outliers merging with a
+     Gaia dip, but a multi-day dip seen by Gaia and by ZTF 2 d later would split and drop out of the test. The
+     rule cannot bite on DR3 (no concurrent epochs); for DR4 it should join across surveys when no informative
+     normal epoch lies between. The change comes after batch 5, so the batch tests the rule as registered.
+2. **Population statistics for the one-look dips.** Most single dips will be one-look dips that no single star
+   can argue. Their rate can still be tested.
+   - **The EB expectation.** The single-event test already computes `eb_rate`, a per-star probability that a
+     mundane companion produces such an event. Summed over stars in a bin (colour–magnitude, distance, sky
+     position), it gives the expected count from eclipses.
+   - **The artefact expectation.** The coincidence test (stars sharing a scan) and FoV/CCD splits give it.
+   - **Activity.** The calibration's false-positive class, it can be modelled per DPAC class from DR4's own
+     variable-star tables.
+   - **The search.** An excess over the expectation that clusters in a way stellar physics does not predict
+     would be a population signal. One example is a 3D scan statistic over position and distance, with
+     permutations within CMD bins for the look-elsewhere effect.
+   - **Verification.** DR4 offers a built-in check: find in one half of the epochs and replicate in the other.
+   - **Follow-up.** Members of a significant cluster become TESS and ground follow-up targets, which makes the
+     find individually verifiable afterwards.
+
+**Batch 5 is still worth finishing, but it is confirmatory.** The flag's recall on testable dips is already
+measured, so the batch mainly checks Stage A's behaviour and the controls. Its data are mostly fetched, and the
+rule was pre-registered against it. The larger DR4 investments for single dips are the two levers above: a
+concurrent-coverage fetch, and a one-look dip-rate census built on `eb_rate` (shared census tooling).
+
+### Batch 5 result: v4 not adopted
+
+64 packets: 16 single-event decoys (8 grey dips, 4 blue dips, 4 chromatic flips), 2 dust dips, 16 old real
+packets, 8 tier-1 single-event stars, 14 old controls and 8 single-eclipse EB controls. One blind subagent per
+packet. All 64 transcripts show one Read of the prompt and one Write of the reply (plus the harness's hand-back).
+The verdicts were committed and pushed to `prereg/verdicts/dayone-batch5` (cf60d94, code at 8a0881e, plan SHA-256
+ef6815f7…) before the reveal.
+
+| measure | v3b (adopted) | v4 = v3b or flag | flag alone | criterion for v4 |
+|---|---|---|---|---|
+| single-event recall | 10/16 (95% CI 0.39–0.82) | 11/16 (0.44–0.86) | 9/16 (0.33–0.77) | ≥ 0.75: **fails** |
+| old controls flagged | 1/14 | 1/14 | 0/14 | ≤ 1: passes |
+| single-eclipse EB controls flagged | 0/8 | 0/8 | 0/8 (1 testable) | ≤ 1: passes |
+| dust dips flagged | 0/2 | 0/2 | 0/2 | |
+| real packets flagged | 2/24 | 2/24 (the same) | 0/24 | |
+| AUC, single events vs controls | S 0.93, P(u) 0.90 | | | |
+
+v4g (secondary) gives the same numbers as v4. By the pre-registered decision, v4 is not adopted and the D2 rule
+stays v3b (`ADOPTED_RULE` unchanged).
+
+**By family.** On testable events, the flag caught 7 of 7 grey dips, 0 of 4 blue dips and 2 of 3 chromatic flips.
+That is 9 of 14, against 63 of 67 in the calibration. One grey dip was untestable in its packet (below), and one
+chromatic flip had quiet_ratio_g 3.02, just over the limit. The agents follow the same split: S ≥ 0.35 for 7 of 8
+grey dips, 0 of 4 blue dips and 1 of 4 flips (batch 4: 0 of 4 single events). The single-event test in the
+packet moved them on the deep grey dips. v4 adds one grey dip over v3b (S 0.26, flag set).
+
+**Why blue dips and flips fail.** They are shallow in G. Their depths are 0.9–5.5%; the grey dips' are 2–39%,
+6 of 8 above 6%. Four of the flag's seven misses are two-epoch events on two transit pairs (0.18 d). For two-epoch events
+in the calibration, the ratio rises with depth (correlation 0.59 with log depth), and the testable two-epoch blue
+dips there sat at median 2.8, only just above the 2.5 threshold. Batch 5's blue dips gave 1.2–2.3 (p_eb 0.12–0.84).
+So the threshold was set in-sample (red-team R3) on a population whose two-epoch events cluster close to it, and a
+fresh draw landed below it. The test is reading the physics correctly here: a shallow blue dip is what eclipsing a
+hotter companion looks like, and two looks 4 h apart do not rule out an orbit. The flag is reliable for deep events
+and for colour exclusion (1 of 1 flips where it fired); for shallow chromatic single dips it has little power at
+Gaia cadence.
+
+**Two consistency gaps in the pipeline.**
+
+- **plan5's testability gate differs from the test.** `single_cal.single_event_count` counts in-dip epochs before
+  `single_event.test` drops lone ZTF epochs. One grey dip (33% deep) passed the gate on a Gaia epoch plus a ZTF
+  epoch, then showed one in-dip epoch in the packet. The gate should call the test itself.
+- **The two tests define events differently.** The recurrence test set `aperiodic` on 6 of the 16 single-event
+  decoys, so it counted several dip events where the single-event test found one. The cause is the same lone-epoch
+  handling. The "Concurrent ZTF and TESS coverage" thread's `relax_lone` and `event_joined` (PR #49) address it for
+  DR4. Its numbers: as the test stands, ZTF and TESS raise testable/caught for 1–10 d dips from 22% to 23%, and to
+  25% with the relaxed rule (30–31% for northern G 13–17 stars with ZTF). Adding real TGLC makes 30% of
+  Gaia-testable dips "more than one event" because of TGLC's own dip-like systematics. That calibration, on EBs and
+  active stars, is needed before adopting the relaxed rule.
+
+**Real packets.** v3b flags 3047786003881272448 again (S 0.48, disk occultation), and a tier-1 single-event star,
+2035622809661715072 (aperiodic, S 0.25, read as an eclipsing binary). Both go to the expert queue under v3b. The
+flagged old control is an EB the agent scored S 0.37; in batch 4 it was a different control (an irregular
+pulsator, via `aperiodic`).
+
+**What this changes.** It confirms the step back above. Single dips at DR3/DR4 Gaia cadence are mostly not
+arguable one star at a time. The deep, multi-visit ones are, and v3b plus the agents already catch most of those
+(grey 7/8). The shallow chromatic ones are not, so for DR4 they belong to the population census (summed `eb_rate`
+per bin, split-half replication) and to concurrent coverage, not to a per-star flag. The single-event test stays
+in the packets, where it moved the agents on deep events. Follow-ups, none inside the D2 freeze:
+
+- make plan5's gate call `single_event.test`;
+- unify event definitions across the two tests (with PR #49);
+- a confirmatory set of active-star single-event controls;
+- the test on residual light curves, and a k-event generalisation (from the residual-search thread).

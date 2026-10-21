@@ -49,6 +49,7 @@ ADOPTED_RULE = "v3b"
 # Injected families an ideal v1 shortlist should keep; the others should read as EB, YSO or instrumental.
 TRAIN_FAMILIES = ("dip_train_poisson", "dip_train_primes", "dip_train_geometric")
 SINGLE_FAMILIES = ("grey_dip", "blue_dip", "chromatic_flip")
+COMMON_VARIABILITY = ("eclipsing_binary", "rotation_or_spots", "pulsation_or_irregular", "extragalactic")
 HELD_OUT_FAMILIES = lc_families.HELD_OUT_FAMILIES
 TARGET_FAMILIES = ("grey_dip", "blue_dip", "dip_train_poisson", "dip_train_primes", "dip_train_geometric",
                    "chromatic_flip", "secular_fade")
@@ -198,8 +199,9 @@ def build(queue, ranked, lc_dir, out, wide=None, rng=None, sso_check=True, plan_
     cands = candidate_dicts(queue, ranked, lc_dir, wide, plan_map, external)
     _, flagged = coincidence_tests(ranked)
     cands = add_tests(cands, coincidence_at(ranked), sso_check)
-    entries = [(c, {"kind": "control" if c["role"] == "control" else "real", "role_in_queue": c["role"],
-                    **(_control_label(c) if c["role"] == "control" else {})})
+    # Roles starting "control" are known-answer controls (batch 5 adds "control_single_eb").
+    entries = [(c, {"kind": "control" if c["role"].startswith("control") else "real", "role_in_queue": c["role"],
+                    **(_control_label(c) if c["role"].startswith("control") else {})})
                for c in cands]
     # The batch detector, as a hook: with no hook, build_batch also clears the tests and scores.
     packets, keys = build_batch(entries, rng, holdout=("tail",), detect=lambda c: setattr(c, "dips", simple_dips(c)),
@@ -237,6 +239,7 @@ def score_batch(out, batch, plan=None, remote="origin"):
                      "ok": v.ok, "p_unexplained": v.groups["unexplained"] if v.ok else None,
                      "decision": decision(v) if v.ok else None,
                      "s_interesting": interesting_score(v.class_probs) if v.ok else None,
+                     "p_common": float(sum(v.class_probs.get(k, 0.0) for k in COMMON_VARIABILITY)) if v.ok else None,
                      "top_leaf": max(v.class_probs, key=v.class_probs.get) if v.ok else None})
     table = pd.DataFrame(rows).sort_values("p_unexplained", ascending=False)
     ctrl = table[table.kind == "control"]
@@ -257,6 +260,26 @@ def score_batch(out, batch, plan=None, remote="origin"):
     rules["v3b"] = score_v1(table, flag="aperiodic", targets=TRAIN_FAMILIES)
     rep["v3"] = {"v3a": rules["v3a"], "v3b": rules["v3b"],
                  "single_events_v3b": score_v1(table, flag="aperiodic", targets=SINGLE_FAMILIES)["target_decoy_recall"]}
+    # Rule v4 (docs/dayone.md, batch 5): v3b or the single-event test's flag; recall on single-event decoys, and
+    # controls flagged separately for batch 3's controls and the single-eclipse EB controls.
+    single = {p["packet_id"]: bool(keys[p["packet_id"]].get("pipeline", p["tests"]).get("single_event", {})
+                                   .get("single_dip_flag", False)) for p in packets}
+    table["single_dip"] = table.packet_id.map(single).fillna(False)
+    table["v4"] = table["aperiodic"] | table["single_dip"]
+    # Secondary, reported only (red-team R1): the single-dip flag counts unless the vetter puts most of its mass on
+    # a common variability class.
+    table["v4g"] = table["aperiodic"] | (table["single_dip"] & (table["p_common"].fillna(1.0) < 0.5))
+    rules["v4"] = score_v1(table, flag="v4", targets=SINGLE_FAMILIES)
+    rules["v4g"] = score_v1(table, flag="v4g", targets=SINGLE_FAMILIES)
+    rep["v4"] = {"single_events_v4": rules["v4"],
+                 "single_events_v3b": score_v1(table, flag="aperiodic", targets=SINGLE_FAMILIES),
+                 "flag_alone_single_events": score_v1(table, threshold=float("inf"), flag="single_dip",
+                                                      targets=SINGLE_FAMILIES),
+                 "single_events_v4g": rules["v4g"]}
+    for role in sorted(set(table.role_in_queue.dropna()) & {"control", "control_single_eb"}):
+        sub = table[(table.kind != "control") | (table.role_in_queue == role)]
+        rep["v4"][f"{role}_flagged"] = score_v1(sub, flag="v4")["controls_flagged"]
+        rep["v4"][f"{role}_flagged_v4g"] = score_v1(sub, flag="v4g")["controls_flagged"]
     held = (table.kind == "decoy") & table.injected_family.isin(HELD_OUT_FAMILIES)
     if held.any():
         rep["held_out_recall"] = {r: score_v1(table, flag="aperiodic" if r == "v3b" else None,
