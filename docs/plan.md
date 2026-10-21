@@ -49,7 +49,7 @@ These apply to every arm and every thread.
 | **Gaia dimmers (main)** | | | |
 | G1 | DR3 rehearsal sample: full DR3 epoch photometry (11.75 M) plus random controls ✓ (features for every source; docs/infra/gaia-epoch.md) | I2 | Archive thread |
 | G2 | Detectors v0: invariance tests (FoV pairs, bands: stage-0 mask ✓ `vetting/stage0.py`), dip colour, secular trend, surprisal score. The per-candidate path (DataLink → `stage0.clean_long` → detector) is not written yet | G1 | TESS thread's survey-agnostic detector in `dimming/`, then Gaia-specific tests |
-| G3 | Empirical nulls (brightening mirror, stratified permutation) and calibrated false-alarm rates | G2 | DR4 plan thread (library ✓ `stats/`); detector owner (strata and runs) |
+| G3 | Empirical nulls (brightening mirror, stratified permutation) and calibrated false-alarm rates. Mirror competition per G bin ✓ on all of DR3 (`scripts/dr3_g3.py`; arms/gaia-dimmers.md log). No power yet at G ≥ 16; stratified permutation not started | G2 | DR4 plan thread (library ✓ `stats/`); detector owner (strata and runs) |
 | G4 | Injection families (library ✓ `inject/lightcurve.py`) and recovery maps on DR3 (binning ✓ `inject/recovery.py`) | G2 | DR4 plan thread (library); detector owner (maps) |
 | G5 | Energy-budget test against WISE | I5, G2 | unassigned |
 | G6 | Ranking with value term, plus a random-audit stream below threshold (audit sampler ✓ `stats/audit.py`) | G3, G4, G5 | unassigned |
