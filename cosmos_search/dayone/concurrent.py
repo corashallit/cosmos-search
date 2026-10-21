@@ -181,18 +181,73 @@ def draw_caught(tg, h, n, rng, span=GAIA_DR4_SPAN):
     return np.array(out[:n]), p_caught
 
 
-def gate(lcs):
+def relax_lone(ep):
+    """Variant of the single-event test's lone-epoch rule. As written, an external in-dip epoch counts only if
+    another in-dip epoch of the same band lies within a day; ZTF revisits a band every ~3 nights, so a dip that ZTF
+    sees on every visit for weeks is set aside epoch by epoch, even an epoch minutes from Gaia's. Here an external
+    in-dip epoch is lone only if neither of its neighbours in the same band is in dip and no in-dip epoch of
+    another band (Gaia included) lies within a day."""
+    from cosmos_search.vetting import recurrence
+
+    ep = dict(ep)
+    t, band = ep["t"], ep["band"]
+    dip = ep["z"] > ep["thresh"] / ep["sigma"]
+    ignore = np.zeros(len(t), bool)
+    for b in np.unique(band):
+        if b in ("G", "BP", "RP"):
+            continue
+        idx = np.flatnonzero(band == b)
+        d = dip[idx]
+        prev = np.r_[False, d[:-1]]
+        nxt = np.r_[d[1:], False]
+        for j in np.flatnonzero(d & ~prev & ~nxt):
+            i = idx[j]
+            other = dip & (band != b) & (np.abs(t - t[i]) <= recurrence.EVENT_GAP)
+            ignore[i] = not other.any()
+    ep["ignore"] = ignore
+    return ep
+
+
+def event_joined(ep):
+    """`single_event._event` without its cross-survey split: in-dip epochs of different surveys more than a day
+    apart stay one event unless an informative normal-brightness epoch lies between them (the eclipse Monte Carlo
+    already draws durations shorter than the event's span, so two eclipses in different cycles remain allowed)."""
+    from cosmos_search.vetting import recurrence
+    from cosmos_search.vetting import single_event as se
+
+    t = ep["t"]
+    in_dip = (ep["z"] > ep["thresh"] / ep["sigma"]) & ~ep["ignore"]
+    idx = np.flatnonzero(in_dip)
+    if not len(idx):
+        return None, 0
+    deep = float(np.max(ep["depth"][idx]))
+    flat = (ep["z"] < recurrence.FLAT_SIGMA) & (deep * (1 - ep["dil"]) >= se.FLAT_TOL_SIGMA * ep["sigma"])
+    n_flat_before = np.cumsum(flat)
+    splits = np.flatnonzero(n_flat_before[idx[1:]] - n_flat_before[idx[:-1]] > 0)
+    if len(splits):
+        return None, len(splits) + 1
+    t_a, t_b = t[idx].min(), t[idx].max()
+    before, after = flat & (t < t_a), flat & (t > t_b)
+    return {"idx": idx, "t_a": float(t_a), "t_b": float(t_b), "depth": deep,
+            "t_deep": float(t[idx[np.argmax(ep["depth"][idx])]]),
+            "t_before": float(t[before].max()) if before.any() else -np.inf,
+            "t_after": float(t[after].min()) if after.any() else np.inf}, 1
+
+
+def gate(lcs, relaxed=False):
     """The single-event test's gate on these light curves, without its Monte Carlo: (status, details).
 
     status: 'testable' (one event, >= 2 in-dip epochs incl. G, beyond one transit, bracketed), 'one_look' (one event
     not beyond one transit), 'unbracketed', 'no_g' (the event has no G epoch), 'multi' (more than one event),
-    'none' (no in-dip epoch)."""
+    'none' (no in-dip epoch). relaxed: with `relax_lone` and `event_joined` in place of the test's rules."""
     from cosmos_search.vetting import single_event as se
 
     ep = se._band_epochs(lcs, {"TESS": 0.0})
     if ep is None:
         return "none", {}
-    event, n_ev = se._event(ep)
+    if relaxed:
+        ep = relax_lone(ep)
+    event, n_ev = (event_joined if relaxed else se._event)(ep)
     if event is None:
         return ("multi" if n_ev > 1 else "none"), {"n_events": n_ev}
     idx = event["idx"]
@@ -209,6 +264,28 @@ def gate(lcs):
     if not bracketed:
         return "unbracketed", det
     return "testable", det
+
+
+def evidence(lcs, source, relaxed=False, n_draws=20000, rng=None):
+    """The single-event test's Monte Carlo on these light curves: log10(one-off / eclipse) and p_eb, or None when
+    there is not exactly one event. relaxed as in `gate`."""
+    from cosmos_search.vetting import single_event as se
+
+    ep = se._band_epochs(lcs, {"TESS": se.TESS_DILUTION_UNKNOWN})
+    if ep is None:
+        return None
+    if relaxed:
+        ep = relax_lone(ep)
+    event, _ = (event_joined if relaxed else se._event)(ep)
+    if event is None:
+        return None
+    rng = rng or np.random.default_rng(0)
+    res = se.eb_probability(ep, event, source, n_draws, rng)
+    eb = res.get("eb_rate") or res.get("eb_rate_upper")
+    one = se.oneoff_rate(ep, event, n_draws, rng) if eb else 0.0
+    return {"log10_oneoff_vs_eb": float(np.log10(one / eb)) if eb and one > 0 else np.nan,
+            "p_eb": res.get("p_eb"), "dur_lo": event["t_b"] - event["t_a"],
+            "dur_hi": event["t_after"] - event["t_before"]}
 
 
 def _star_lcs(ext):
@@ -256,12 +333,16 @@ def run_star(star, tg, ext, err_table, n_draws, rng, durations=DURATIONS, depths
                     row[f"has_{name}"] = len(lcs) > 1
                     row[f"n_cov_{name}"] = n_cov
                     if len(lcs) == 1:
-                        row[name] = status_g
+                        row[name] = row[f"{name}_relaxed"] = status_g
                         continue
                     st, det = gate(lcs)
                     row[name] = st
                     row[f"bands_{name}"] = det.get("bands", "")
                     row[f"dur_hi_{name}"] = det.get("dur_hi", np.nan)
+                    if status_g == "one_look":
+                        st, det = gate(lcs, relaxed=True)
+                        row[f"{name}_relaxed"] = st
+                        row[f"dur_hi_{name}_relaxed"] = det.get("dur_hi", np.nan)
                 rows.append(row)
     for r in rows:
         r["source_id"] = int(star["source_id"])
@@ -326,6 +407,8 @@ def summarise(grid, sample_df=None):
     ol = caught[caught["gaia"] == "one_look"]
     for name in EXT_SETS:
         s[f"ol_testable_{name}"] = ol.groupby(keys)[name].apply(lambda x: np.mean(x == "testable"))
+        s[f"ol_testable_{name}_relaxed"] = ol.groupby(keys)[f"{name}_relaxed"].apply(
+            lambda x: np.mean(x == "testable"))
         s[f"ol_with_{name}"] = ol.groupby(keys)[f"has_{name}"].mean()
     return pc.to_frame().join(s).reset_index()
 
