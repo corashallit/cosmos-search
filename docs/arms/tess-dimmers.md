@@ -148,6 +148,19 @@ or a secondary at phase 0.5) ahead of Stage A is the cheap fix; most of the queu
 another saw the flux error scale with the flux inside the dip. Decoys must be applied to every flux channel
 and leave the errors alone, or Stage A learns to recognise them.
 
+**Stage A batch 2** (16 packets: candidates 9–16 by value, 4 controls from sectors where the detector fired,
+4 decoys built with the vetting thread's fixed injector; same protocol, all 16 transcripts clean). Real
+candidates: 7 EBs (P(EB) 0.42–0.87, several with period and eccentric secondary worked out) and one
+scattered-light edge dip. Across both batches 0 of the top 16 survive (below ~0.19 at 95%), and 14 of 16 are
+EBs, so the EB filter stays the first job. Controls 3/4 in the right group: the debris-transit star was
+called a debris transit with P(unexplained) 0.12, one dipper was called a dipper, one anomaly-only star
+(no dip in the packet) was called spots, and one dipper sector was called scattered light; the highest
+control P(unexplained) was 0.12. Decoys 3/4: the chirped box train got P(unexplained) 0.74, above every
+control, and both dust dips were called dust; the geometric grey train was put down to the background,
+because the host's own strongest dip sat on a scattered-light ramp. No expert cited an aperture or error
+tell this time, and several used the matching aperture depths as evidence for an on-target signal, so the
+injector fix works. Decoy hosts should be drawn from stars whose strongest pre-injection dip is clean.
+
 ## Milestones
 
 | # | Milestone | Depends on | Status |
