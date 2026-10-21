@@ -1,0 +1,95 @@
+{
+  "finished": "2026-10-21T03:11:20Z",
+  "git_commit": "81d1db416ba13f294571929589b6add0caf1082c",
+  "pooled_threshold": 30.0,
+  "queries": {
+    "histogram_bright": {
+      "adql": "SELECT mag_bin, d_bin, COUNT(*) AS n FROM ( SELECT FLOOR(median_mag_g_fov / 0.5) AS mag_bin, FLOOR((median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov / 0.25) AS d_bin FROM gaiadr3.vari_summary WHERE mad_mag_g_fov > 0 AND num_selected_g_fov >= 10 ) AS h GROUP BY mag_bin, d_bin",
+      "rows": 7249,
+      "sha256": "35a8bfa7726b8fc04cd24f395202b572445b6a2ef8cdb37a7cad39e74609483e"
+    },
+    "histogram_faint": {
+      "adql": "SELECT mag_bin, d_bin, COUNT(*) AS n FROM ( SELECT FLOOR(median_mag_g_fov / 0.5) AS mag_bin, FLOOR((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov / 0.25) AS d_bin FROM gaiadr3.vari_summary WHERE mad_mag_g_fov > 0 AND num_selected_g_fov >= 10 ) AS h GROUP BY mag_bin, d_bin",
+      "rows": 13204,
+      "sha256": "0318a8eba19df2fe46cf7b89a925ed0ca4493e39809464926b4f30cd6bd4ef93"
+    },
+    "prefilter": {
+      "adql": "SELECT source_id, num_selected_g_fov, median_mag_g_fov, mad_mag_g_fov, min_mag_g_fov, max_mag_g_fov, skewness_mag_g_fov, outlier_median_g_fov, FLOOR(median_mag_g_fov / 0.5) AS mag_bin, (max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov AS d_faint, (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov AS d_bright, MOD(source_id, 4093) AS control_mod FROM gaiadr3.vari_summary WHERE mad_mag_g_fov > 0 AND num_selected_g_fov >= 10 AND (MOD(source_id, 4093) = 0 OR ((median_mag_g_fov >= 2 AND median_mag_g_fov < 2.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 2.5 AND median_mag_g_fov < 3 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 3 AND median_mag_g_fov < 3.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 3.5 AND median_mag_g_fov < 4 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 4 AND median_mag_g_fov < 4.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 4.5 AND median_mag_g_fov < 5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 5 AND median_mag_g_fov < 5.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 5.5 AND median_mag_g_fov < 6 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 6 AND median_mag_g_fov < 6.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 6.5 AND median_mag_g_fov < 7 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 7 AND median_mag_g_fov < 7.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 7.5 AND median_mag_g_fov < 8 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 19.2500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 19.2500)) OR (median_mag_g_fov >= 8 AND median_mag_g_fov < 8.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 17.5000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 17.5000)) OR (median_mag_g_fov >= 8.5 AND median_mag_g_fov < 9 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 13.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 13.0000)) OR (median_mag_g_fov >= 9 AND median_mag_g_fov < 9.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 17.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 17.0000)) OR (median_mag_g_fov >= 9.5 AND median_mag_g_fov < 10 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 20.5000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 20.5000)) OR (median_mag_g_fov >= 10 AND median_mag_g_fov < 10.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 15.2500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 15.2500)) OR (median_mag_g_fov >= 10.5 AND median_mag_g_fov < 11 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 17.2500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 17.2500)) OR (median_mag_g_fov >= 11 AND median_mag_g_fov < 11.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 17.7500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 17.7500)) OR (median_mag_g_fov >= 11.5 AND median_mag_g_fov < 12 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 16.7500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 16.7500)) OR (median_mag_g_fov >= 12 AND median_mag_g_fov < 12.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 16.5000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 16.5000)) OR (median_mag_g_fov >= 12.5 AND median_mag_g_fov < 13 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 18.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 18.0000)) OR (median_mag_g_fov >= 13 AND median_mag_g_fov < 13.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 27.7500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 27.7500)) OR (median_mag_g_fov >= 13.5 AND median_mag_g_fov < 14 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 14 AND median_mag_g_fov < 14.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 28.5000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 28.5000)) OR (median_mag_g_fov >= 14.5 AND median_mag_g_fov < 15 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 31.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 31.0000)) OR (median_mag_g_fov >= 15 AND median_mag_g_fov < 15.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 35.5000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 35.5000)) OR (median_mag_g_fov >= 15.5 AND median_mag_g_fov < 16 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 37.2500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 37.2500)) OR (median_mag_g_fov >= 16 AND median_mag_g_fov < 16.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 36.7500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 36.7500)) OR (median_mag_g_fov >= 16.5 AND median_mag_g_fov < 17 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 37.5000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 37.5000)) OR (median_mag_g_fov >= 17 AND median_mag_g_fov < 17.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 34.5000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 34.5000)) OR (median_mag_g_fov >= 17.5 AND median_mag_g_fov < 18 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 31.2500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 31.2500)) OR (median_mag_g_fov >= 18 AND median_mag_g_fov < 18.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 29.7500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 29.7500)) OR (median_mag_g_fov >= 18.5 AND median_mag_g_fov < 19 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 27.7500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 27.7500)) OR (median_mag_g_fov >= 19 AND median_mag_g_fov < 19.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 24.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 24.0000)) OR (median_mag_g_fov >= 19.5 AND median_mag_g_fov < 20 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 19.7500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 19.7500)) OR (median_mag_g_fov >= 20 AND median_mag_g_fov < 20.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 20.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 20.0000)) OR (median_mag_g_fov >= 20.5 AND median_mag_g_fov < 21 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 34.2500 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 34.2500)) OR (median_mag_g_fov >= 21 AND median_mag_g_fov < 21.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 15.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 15.0000)) OR (median_mag_g_fov >= 21.5 AND median_mag_g_fov < 22 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 16.5000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 16.5000)) OR (median_mag_g_fov >= 22 AND median_mag_g_fov < 22.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 22.5 AND median_mag_g_fov < 23 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 23 AND median_mag_g_fov < 23.5 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000)) OR (median_mag_g_fov >= 23.5 AND median_mag_g_fov < 24 AND ((max_mag_g_fov - median_mag_g_fov) / mad_mag_g_fov >= 30.0000 OR (median_mag_g_fov - min_mag_g_fov) / mad_mag_g_fov >= 30.0000))))",
+      "rows": 132604,
+      "sha256": "0546e4228e7940a47231b4747588978e7628ca959d76e3850599cd221c8cf9ed"
+    }
+  },
+  "release": "dr3",
+  "rule": {
+    "alpha": 0.0012,
+    "control_modulus": 4093,
+    "d_step": 0.25,
+    "mag_bin": 0.5,
+    "min_count": 2000,
+    "min_transits": 10,
+    "version": 1
+  },
+  "selected": {
+    "bright": 13797,
+    "controls": 2865,
+    "faint": 116214,
+    "total": 132604
+  },
+  "started": "2026-10-21T03:10:53Z",
+  "tables": {
+    "gaia_source": "gaiadr3.gaia_source",
+    "n_vari_summary": 11754237,
+    "schema": "gaiadr3",
+    "vari_summary": "gaiadr3.vari_summary"
+  },
+  "templates_sha256": {
+    "dimmer_prefilter": "3e122c6503c7be8abe14198e50c4551c27aa10b6e72f79de9ac576177da86211",
+    "dimmer_tail_histogram": "b1cbc8af64a3a048e084df9a0b4f462ff0382fb2358dc6f0bdf33f06b57e0cdb"
+  },
+  "thresholds": {
+    "10": 30.0,
+    "11": 30.0,
+    "12": 30.0,
+    "13": 30.0,
+    "14": 30.0,
+    "15": 19.25,
+    "16": 17.5,
+    "17": 13.0,
+    "18": 17.0,
+    "19": 20.5,
+    "20": 15.25,
+    "21": 17.25,
+    "22": 17.75,
+    "23": 16.75,
+    "24": 16.5,
+    "25": 18.0,
+    "26": 27.75,
+    "27": 30.0,
+    "28": 28.5,
+    "29": 31.0,
+    "30": 35.5,
+    "31": 37.25,
+    "32": 36.75,
+    "33": 37.5,
+    "34": 34.5,
+    "35": 31.25,
+    "36": 29.75,
+    "37": 27.75,
+    "38": 24.0,
+    "39": 19.75,
+    "4": 30.0,
+    "40": 20.0,
+    "41": 34.25,
+    "42": 15.0,
+    "43": 16.5,
+    "44": 30.0,
+    "45": 30.0,
+    "46": 30.0,
+    "47": 30.0,
+    "5": 30.0,
+    "6": 30.0,
+    "7": 30.0,
+    "8": 30.0,
+    "9": 30.0
+  }
+}
