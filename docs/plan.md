@@ -47,7 +47,7 @@ These apply to every arm and every thread.
 | I4 | Durable store | Cora | Cora |
 | I5 | Proper-motion-aware cross-match to WISE family, 2MASS, SIMBAD/VSX | I1 | Cross-match thread |
 | **Gaia dimmers (main)** | | | |
-| G1 | DR3 rehearsal sample: full DR3 epoch photometry (11.75 M) plus random controls | I2 | unassigned |
+| G1 | DR3 rehearsal sample: full DR3 epoch photometry (11.75 M) plus random controls ✓ (features for every source; docs/infra/gaia-epoch.md) | I2 | Archive thread |
 | G2 | Detectors v0: invariance tests (FoV pairs, bands), dip colour, secular trend, surprisal score | G1 | TESS thread's survey-agnostic detector in `dimming/`, then Gaia-specific tests |
 | G3 | Empirical nulls (brightening mirror, stratified permutation) and calibrated false-alarm rates | G2 | DR4 plan thread (library ✓ `stats/`); detector owner (strata and runs) |
 | G4 | Injection families (library ✓ `inject/lightcurve.py`) and recovery maps on DR3 (binning ✓ `inject/recovery.py`) | G2 | DR4 plan thread (library); detector owner (maps) |
