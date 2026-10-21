@@ -103,6 +103,14 @@ a 1-in-several alias 170 bits worse than the true period could cover an extra di
 bound uses the whole run of dip epochs touching a window (no flat between, gaps < min(1.5 d, P/2)), because a
 narrow window inside a 4-day dip otherwise claims a short eclipse.
 
+*Deviation after a first half-A run, recorded before half B was run:* at the rule's threshold (8 bits) the first
+run lost 7 of 893 target-family injections and 13 of 121 dips injected into real EBs. Several losses were windows
+holding far more flat epochs than dips (one at P = 0.999 d held 22 dips and 192 flats: a nightly ZTF systematic,
+not an eclipse). An eclipse dims every epoch inside it, so the decision now also requires at least 80% of a
+window's labelled epochs (in bands with a dip there) to be dips (`MIN_PURITY`, the recurrence test's value). Half
+A was then run again with fresh injections and the threshold rule applied to that run; half B was not run before
+this change. So half B stays a clean held-out test, while half A has been used twice.
+
 **Decision.** Use the filter in ranking for the D2 freeze if, on half B, the pooled target-family loss has a
 95% upper bound ≤ 3% and joint synthetic-EB recall is ≥ 0.5. Otherwise revise and test on fresh injections.
 

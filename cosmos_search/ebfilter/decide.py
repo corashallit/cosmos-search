@@ -10,7 +10,9 @@ hold:
    cadence, so the threshold is a false-alarm bound per star, not a tuned score.
 2. **The selected dip is one of the eclipses.** The epoch that put the star in the queue (`t_target`, the deepest
    Gaia G epoch) falls inside one of the solution's windows, and that window holds dips from other cycles at least
-   as deep as it, within DEPTH_FACTOR x their depth + DEPTH_SLACK (in magnitudes, as ranking v0's DPAC check).
+   as deep as it, within DEPTH_FACTOR x their depth + DEPTH_SLACK (in magnitudes, as ranking v0's DPAC check),
+   and at least MIN_PURITY of the window's labelled epochs are dips: an eclipse dims every epoch in it, so a window
+   where dips are merely more common than elsewhere (a nightly systematic at P = 1 d) is not an eclipse.
    An eclipsing binary with an extra dip at another phase, or deeper than its eclipses (a circumbinary occulter, a
    disk, debris passing during an eclipse), is not explained by its eclipses, so it stays in the queue.
 3. **The eclipse duration fits an orbit at that period.** The dip epochs inside the primary window span at least
@@ -36,6 +38,7 @@ from . import search as S
 DELTA_BITS = 10.0
 DEPTH_FACTOR = 1.5
 DEPTH_SLACK = 0.05      # mag
+MIN_PURITY = 0.8        # an eclipse window's labelled epochs are dips (flats only from mislabelled ingress)
 SAME_EVENT_D = 1.0      # dips this close to the target are its own event, not another cycle
 ALIAS_MARGIN = 10.0     # bits: periods this much worse than the best are 2^-10 as likely; not used to explain
 EVENT_GAP_D = 1.5       # dip epochs with no flat between them and closer than this (and than P/2) are one eclipse       # pre-registered in docs/arms/eb-filter.md before the held-out half was scored
@@ -73,7 +76,9 @@ def decide(lcs, source=None, t_target=None, delta_bits=DELTA_BITS, **search_kw):
     for s in good:
         cov_target = None
         if t_target is not None:
-            cov_target = target_explained(t, lab, frac, t_target, s)
+            cov_target = target_explained(t, lab, bi, frac, t_target, s)
+        elif window_purity(t, lab, bi, s["period"], s["s1"], s["q1"]) < MIN_PURITY:
+            continue
         dur_lo = duration_lo(tk, labk, s)
         dur_ok = None
         if sp:
@@ -88,7 +93,7 @@ def decide(lcs, source=None, t_target=None, delta_bits=DELTA_BITS, **search_kw):
             out["periodic_unphysical"] = True
     # Nothing explains it: report the best solution's target and duration status.
     s = good[0]
-    out["target_covered"] = None if t_target is None else target_explained(t, lab, frac, t_target, s)
+    out["target_covered"] = None if t_target is None else target_explained(t, lab, bi, frac, t_target, s)
     return out
 
 
@@ -116,13 +121,22 @@ def duration_lo(t, lab, sol):
     return best
 
 
+def window_purity(t, lab, bi, period, s, q):
+    """Share of dips among the labelled epochs in a window, in the bands that have a dip there."""
+    inw = (((t / period) % 1.0 - s) % 1.0) <= q
+    part = np.isin(bi, np.unique(bi[inw & (lab == 1)]))
+    n_dip, n_flat = int((inw & part & (lab == 1)).sum()), int((inw & part & (lab == 0)).sum())
+    return n_dip / (n_dip + n_flat) if n_dip + n_flat else 0.0
+
+
 def _mag(frac):
     return -2.5 * np.log10(np.clip(1 - np.asarray(frac, float), 1e-3, None))
 
 
-def target_explained(t, lab, frac, t_target, sol):
-    """True if the epoch at t_target lies in one of the solution's windows and that window holds dips from other
-    cycles at least 1 / DEPTH_FACTOR as deep (after DEPTH_SLACK)."""
+def target_explained(t, lab, bi, frac, t_target, sol):
+    """True if the epoch at t_target lies in one of the solution's windows, at least MIN_PURITY of that window's
+    labelled epochs (in bands with a dip there) are dips, and it holds dips from other cycles at least
+    1 / DEPTH_FACTOR as deep (after DEPTH_SLACK)."""
     k = int(np.argmin(np.abs(t - t_target)))
     windows = [(sol["s1"], sol["q1"])] + ([(sol["s2"], sol["q2"])] if sol["q2"] > 0 else [])
     ph = (t / sol["period"]) % 1.0
@@ -132,6 +146,8 @@ def target_explained(t, lab, frac, t_target, sol):
             continue
         other = inw & (lab == 1) & (np.abs(t - t[k]) > SAME_EVENT_D)
         if not other.any():
+            return False
+        if window_purity(t, lab, bi, sol["period"], s, q) < MIN_PURITY:
             return False
         return bool(_mag(frac[k]) <= DEPTH_FACTOR * _mag(frac[other]).max() + DEPTH_SLACK)
     return False

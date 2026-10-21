@@ -198,6 +198,50 @@ def wilson(k, n, z=1.96):
     return (max(0.0, c - h), min(1.0, c + h))
 
 
+def threshold(df, k_min=7, k_max=60, pooled=0.01, per_family=0.03):
+    """The pre-registered rule: smallest integer k >= k_min with joint-mode target-family loss <= pooled overall
+    and <= per_family in every target family."""
+    d = df[(df.kind == "anomaly") & (df["mode"] == "joint") & df.family.isin(TARGET_FAMILIES)]
+    for k in range(k_min, k_max + 1):
+        s = score(d, k)
+        if s.hit.mean() <= pooled and s.groupby("family").hit.mean().max() <= per_family:
+            return k
+    return None
+
+
+def report(df, bits):
+    """Markdown tables of recall and loss at a threshold."""
+    s = score(df, bits)
+    lines = []
+
+    def row(label, sub):
+        k, n = int(sub.hit.sum()), len(sub)
+        lo, hi = wilson(k, n)
+        return f"| {label} | {k}/{n} | {k / n if n else float('nan'):.3f} | {lo:.3f}-{hi:.3f} |"
+
+    head = "| population | explained | rate | 95% CI |\n|---|---|---|---|"
+    lines.append(f"Threshold {bits} bits.\n\n" + head)
+    for kind, fams in (("eb_synth", None), ("real_eb", None), ("host", None), ("anomaly", TARGET_FAMILIES),
+                       ("anomaly", OTHER_FAMILIES), ("eb_host", HOST_FAMILIES)):
+        for mode in ("gaia", "ztf", "joint"):
+            sub = s[(s.kind == kind) & (s["mode"] == mode)]
+            if fams is not None:
+                sub = sub[sub.family.isin(fams)]
+            if len(sub):
+                name = kind if fams is None else f"{kind} ({', '.join(fams) if len(fams) < 3 else 'target'})"
+                lines.append(row(f"{name}, {mode}", sub))
+    lines.append("\nPer anomaly family (joint):\n\n" + head)
+    for fam in TARGET_FAMILIES + OTHER_FAMILIES:
+        lines.append(row(fam, s[(s.kind == "anomaly") & (s["mode"] == "joint") & (s.family == fam)]))
+    eb = s[(s.kind == "eb_synth") & (s["mode"] == "joint")]
+    if len(eb):
+        lines.append("\nSynthetic EBs by true period (joint):\n\n" + head)
+        bins = [0.3, 1, 3, 10, 30, 100, 300]
+        for a, b in zip(bins[:-1], bins[1:]):
+            lines.append(row(f"{a}-{b} d", eb[(eb.true_period >= a) & (eb.true_period < b)]))
+    return "\n".join(lines)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m cosmos_search.ebfilter.cal")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -211,7 +255,15 @@ def main(argv=None):
     r.add_argument("--workers", type=int, default=os.cpu_count())
     r.add_argument("--seed", type=int)
     r.add_argument("--out", required=True)
+    p = sub.add_parser("report")
+    p.add_argument("files", nargs="+")
+    p.add_argument("--bits", type=int)
     a = ap.parse_args(argv)
+    if a.cmd == "report":
+        df = pd.concat([pd.read_parquet(f) for f in a.files], ignore_index=True)
+        bits = a.bits if a.bits is not None else threshold(df)
+        print(report(df, bits))
+        return 0
     seed = a.seed if a.seed is not None else int.from_bytes(os.urandom(8), "little")
     rng = np.random.default_rng(seed)
     lc = pd.read_parquet(a.lc)
