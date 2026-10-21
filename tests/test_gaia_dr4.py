@@ -74,6 +74,23 @@ def test_ccd_at_extremes_tells_coherent_dip_from_one_ccd_spike():
     assert r.loc[5, "frac_ccd_low_min"] == 1.0 and r.loc[5, "n_ccd_min"] == 9
     assert r.loc[5, "frac_ccd_high_max"] == 1 / 9 and r.loc[5, "chi2_ccd_max"] > 100
     assert np.isnan(r.loc[6, "frac_ccd_low_min"])
+    assert r.loc[5, "z_trim_min"] < -100 and abs(r.loc[5, "z_trim_max"]) < 5  # spike trimmed away
+
+
+def test_ccd_trimmed_shift_sees_dip_below_the_count_threshold():
+    import pandas as pd
+
+    rng = np.random.default_rng(9)
+    n = 40
+    flux = 1000 + rng.normal(0, 5, (n, 9))
+    flux[5] -= 2.0 * 5  # 2 sigma per CCD, 6 sigma per transit: few CCDs pass 3 sigma
+    t = 2000 + np.arange(n)[:, None] * 0.3 + np.arange(9)[None, :] * 4.85 / 86400
+    table = Table({"source_id": np.full(n, 5, np.int64), "transit_id": np.arange(n, dtype=np.int64),
+                   "af_obs_time": list(t), "af_flux": list(flux), "af_flux_error": list(np.full((n, 9), 5.0))})
+    feat = pd.DataFrame({"source_id": [5], "tid_min": [5], "tid_max": [5]})
+    r = dr4.ccd_at_extremes(feat, dr4.epoch_photometry_ccd_to_long(table)).iloc[0]
+    assert r["frac_ccd_low_min"] < 0.5 and r["z_trim_min"] < -3
+    assert r["z_trim_max"] < r["z_trim_min"] + 2 and r["z_trim_max"] < 0  # same transit, other trim
 
 
 def test_features_carry_extreme_transit_ids():

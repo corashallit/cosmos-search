@@ -154,7 +154,7 @@ def ccd_consistency(ccd_long):
     return pd.DataFrame({"transit_id": n.index, "n_ccd": n.to_numpy(), "chi2_red": chi2.to_numpy()})
 
 
-def ccd_at_extremes(feat, ccd_long, nsigma=3.0):
+def ccd_at_extremes(feat, ccd_long, nsigma=3.0, trim=2):
     """Per-CCD tests at each source's faintest and brightest transits (features' tid_min, tid_max).
 
     An occultation lasting more than the ~45 s AF crossing dims all nine AF CCDs; a cosmic ray, a CCD
@@ -163,6 +163,12 @@ def ccd_at_extremes(feat, ccd_long, nsigma=3.0):
     frac_ccd_high is the mirror. Baseline and scale are per source and CCD (median, and the larger of the
     quoted error and 1.4826 MAD), so CCD calibration offsets cancel. Both sides are computed the same way,
     so the mirror null stays symmetric. chi2_ccd_* is ccd_consistency's reduced chi-squared at that transit.
+
+    Each CCD carries about a third of a transit's S/N, so a dip of Z sigma per transit is only ~Z/3 per CCD
+    and the nsigma count stays coarse until Z ~ 9. z_trim_min is the coherent shift with the trim most
+    negative CCD z dropped, sum(rest) / sqrt(n - trim) (negative for a dip); z_trim_max drops the trim most
+    positive (positive for a spike). A cosmic ray or neighbour sits in the dropped CCDs, while an
+    occultation shifts them all. NaN where n <= trim.
 
     ccd_long: epoch_photometry_ccd_to_long rows covering all transits of the sources (the baseline needs
     them). Returns pandas indexed like feat's source_id, NaN where the transit has no CCD rows.
@@ -177,11 +183,20 @@ def ccd_at_extremes(feat, ccd_long, nsigma=3.0):
     chi = ccd_consistency(ccd_long).set_index("transit_id")
     df["low"], df["high"] = (df["z"] < -nsigma).astype(float), (df["z"] > nsigma).astype(float)
     per = df.groupby(["source_id", "transit_id"]).agg(n=("z", "size"), low=("low", "mean"), high=("high", "mean"))
+    df = df.sort_values(["source_id", "transit_id", "z"], kind="stable")
+    rank = df.groupby(["source_id", "transit_id"]).cumcount().to_numpy()
+    size = df.groupby(["source_id", "transit_id"])["z"].transform("size").to_numpy()
+    keys = [df["source_id"], df["transit_id"]]
+    per["sum_lo"] = df["z"].where(rank >= trim, 0.0).groupby(keys).sum()  # drop the trim lowest
+    per["sum_hi"] = df["z"].where(rank < size - trim, 0.0).groupby(keys).sum()  # drop the trim highest
+    kept = (per["n"] - trim).where(per["n"] > trim)
+    per["trim_min"], per["trim_max"] = per["sum_lo"] / np.sqrt(kept), per["sum_hi"] / np.sqrt(kept)
     out = pd.DataFrame({"source_id": feat["source_id"].to_numpy()})
     for side, frac in (("min", "low"), ("max", "high")):
         key = pd.MultiIndex.from_arrays([out["source_id"], feat[f"tid_{side}"].to_numpy()])
         row = per.reindex(key)
         out[f"n_ccd_{side}"] = row["n"].to_numpy()
         out[f"frac_ccd_{frac}_{side}"] = row[frac].to_numpy()
+        out[f"z_trim_{side}"] = row[f"trim_{side}"].to_numpy()
         out[f"chi2_ccd_{side}"] = chi["chi2_red"].reindex(feat[f"tid_{side}"].to_numpy()).to_numpy()
     return out
