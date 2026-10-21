@@ -102,7 +102,9 @@ def to_dimming(cand):
 
 
 class Detector:
-    """The bake-off detector as a vetting hook: dips, a mirror-null p-value, and per-dip systematics tests."""
+    """The bake-off detector as a vetting hook: dips, a mirror-null p-value, and per-dip systematics tests.
+
+    Sets cand.dips, cand.scores and cand.tests in place and returns the dips (make_decoy's detector contract)."""
 
     def __init__(self, null):
         self.null = null
@@ -119,7 +121,7 @@ class Detector:
         cand.context["tests"] = TEST_CONTEXT
         if not events:
             cand.scores["dip_false_alarm_p"] = 1.0
-            return cand
+            return cand.dips
         stratum = tmag_stratum([cand.source.get("tmag", 12.0)])
         ps = [calibrated_p([e.snr], stratum, self.null[c].values, self.null.stratum.values)[0]
               for e, c in zip(events, event_class([e.scale for e in events]))]
@@ -130,19 +132,20 @@ class Detector:
             v = diag.get(k)
             if v is not None and np.isfinite(v):
                 cand.tests[k] = {"statistic": float(v)}
-        return cand
+        return cand.dips
 
 
 def cmd_build(args):
     run = Path(args.out)
-    vet = run / "vet"
+    vet = run / args.vet_dir
     vet.mkdir(exist_ok=True)
     rng = np.random.default_rng(secrets.randbits(64))
     null = pd.read_parquet(run / "null.parquet")
+    detector = Detector(null)
     cand = pd.read_parquet(run / "candidates.parquet")
     targets = pd.read_parquet(run / "targets.parquet")
     entries = []
-    for r in cand.head(args.n_real).itertuples():
+    for r in cand.iloc[args.real_offset:args.real_offset + args.n_real].itertuples():
         lc = qlp.fetch(int(r.sector), int(r.tic))
         if lc is not None:
             entries.append((to_candidate(qlp.clean(lc), f"tic:{int(r.tic)}:s{int(r.sector)}"), {"kind": "real"}))
@@ -181,12 +184,12 @@ def cmd_build(args):
         host = to_candidate(qlp.clean(lc), f"tic:{int(r.tic)}:s{int(r.sector)}")
         spec = str(rng.choice(TESS_DECOYS))
         try:
-            dec, extra, truth = make_decoy(host, spec, rng)
+            dec, extra, truth = make_decoy(host, spec, rng, detect=detector)
         except RuntimeError:
             continue
         entries.append((dec, extra))
         truths.append(truth)
-    packets, keys = build_batch(entries, rng, detect=Detector(null))
+    packets, keys = build_batch(entries, rng, detect=detector)
     for k in keys:
         if k.get("kind") == "decoy":
             k["candidate_id"] = "decoy"
@@ -203,6 +206,8 @@ def main(argv=None):
     b = sub.add_parser("build")
     b.add_argument("--out", required=True)
     b.add_argument("--n-real", type=int, default=24)
+    b.add_argument("--real-offset", type=int, default=0, help="skip this many top candidates (already vetted)")
+    b.add_argument("--vet-dir", default="vet", help="batch directory inside the run")
     b.add_argument("--controls")
     b.add_argument("--n-controls", type=int, default=12)
     b.add_argument("--decoy-frac", type=float, default=0.15)
