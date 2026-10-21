@@ -30,7 +30,8 @@ def knockoff_q(dim, bright, offset=1):
     """q-value of every source under per-source competition (knockoff+ with offset=1).
 
     For threshold t, FDR-hat(t) = (offset + #{W <= -t}) / max(1, #{W >= t}); a source's q is the smallest
-    FDR-hat over thresholds at or below its own W. Sources whose bright side wins get q = 1.
+    FDR-hat over thresholds at or below its own W. Sources whose bright side wins get q = 1. With
+    offset=1 no q falls below 1 / (number of dim winners), so q <= 0.01 needs at least 100 discoveries.
     """
     w = competition(dim, bright)
     finite = np.isfinite(w)
