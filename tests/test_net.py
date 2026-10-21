@@ -271,6 +271,13 @@ def test_tap_sync_query_is_cached(archive, tmp_path):
     assert archive.hits["/tap/sync"] == 1
 
 
+def test_tap_parse_prefers_field_names_over_ids():
+    from cosmos_search.net.tap import _parse
+
+    raw = VOTABLE.replace(b'<FIELD name="g"', b'<FIELD ID="col_1" name="G"')
+    assert _parse(raw).colnames == ["source_id", "g"]
+
+
 def test_tap_upload_changes_cache_key(tmp_path):
     tap = Tap("http://127.0.0.1/tap", client=make_client(tmp_path))
     a = Table({"source_id": np.array([1, 2], dtype=np.int64)})
