@@ -646,3 +646,102 @@ def test_sso_search_corrects_for_gaia_parallax():
     cand.dips = [{"t_min": 57074.0 + 2400000.0 - 2457000.0, "depth": 0.002}]
     (row,) = sso.check(cand, client=_FakeIMCCE())
     assert row["verdict"] in ("sso_bright", "sso_faint") and row["bodies"]
+
+
+def _clean_long_loop(table, blend=None, nsigma=4.0, err_ratio=5.0, w_range=(0.1, 0.9)):
+    """The per-source clean_long as of #30, kept as the reference the vectorised version must match."""
+    import pandas as pd
+    import pyarrow as pa
+    from cosmos_search.vetting.stage0 import ARTEFACTS, _assess, _partner, dilution_floor, verdict_counts
+
+    df = table.to_pandas()
+    band = df["band"].astype(str).to_numpy()
+    flux, err, tid = (df[c].to_numpy() for c in ("flux", "err", "transit_id"))
+    drop = np.zeros(len(df), bool)
+    counts = []
+    for sid, idx in df.groupby("source_id", sort=False).indices.items():
+        rows = {b: idx[(band[idx] == b) & np.isfinite(flux[idx])] for b in ("G", "BP", "RP")}
+        g = rows["G"]
+        if len(g) == 0:
+            counts.append({"source_id": sid, **verdict_counts([])})
+            continue
+
+        def changes(r):
+            f, e = flux[r], err[r]
+            med = float(np.median(f)) if len(f) else np.nan
+            return 1 - f / med, e / med
+
+        d_g, e_g = changes(g)
+        cols = []
+        for b in ("BP", "RP"):
+            d, e = changes(rows[b])
+            if len(d) == 0:
+                cols += [np.full(len(g), np.nan)] * 2
+                continue
+            at = {t: i for i, t in enumerate(tid[rows[b]])}
+            j = np.array([at.get(t, -1) for t in tid[g]])
+            cols += [np.where(j >= 0, d[np.clip(j, 0, None)], np.nan), np.where(j >= 0, e[np.clip(j, 0, None)], np.nan)]
+        r_lo = dilution_floor(d_g, e_g, cols[0], cols[2], (blend or {}).get(sid))
+        v = _assess(d_g, e_g, *cols, nsigma, err_ratio, w_range, r_lo, _partner(df["t"].to_numpy()[g]))["verdict"]
+        drop[g[np.isin(v, ARTEFACTS)]] = True
+        faulty = set(tid[g][v == "colour_fault"])
+        for b in ("BP", "RP"):
+            drop[rows[b][np.isin(tid[rows[b]], list(faulty))]] = True
+        counts.append({"source_id": sid, **verdict_counts(v)})
+    return table.filter(pa.array(~drop)), pd.DataFrame(counts)
+
+
+def _random_long_table(seed, n_sources=60):
+    import pyarrow as pa
+    from cosmos_search.gaia.epoch import SCHEMA
+
+    rng = np.random.default_rng(seed)
+    cols = {f.name: [] for f in SCHEMA}
+    for s in range(n_sources):
+        n = int(rng.choice([0, 3, 4, 6, 25, 80]))
+        # Transits in FoV pairs (0.074 d apart), so partner transits exist.
+        tt = np.sort(rng.uniform(0, 900, (n + 1) // 2)).repeat(2)[:n] + np.tile([0, 0.074], (n + 1) // 2)[:n]
+        tids = np.arange(n) * 1000 + s
+        base = rng.uniform(1e3, 1e5)
+        variable = rng.random() < 0.4  # real, grey changes in some sources, so dilution floors are measured
+        signal = np.where(rng.random(n) < 0.3, rng.uniform(-0.4, 0.4, n), 0.0) if variable else np.zeros(n)
+        for b, share, dil in (("G", 1.0, 1.0), ("BP", 0.5, rng.choice([1.0, 0.4])), ("RP", 0.8, 1.0)):
+            keep = rng.random(n) > (0.0 if b == "G" else 0.2)  # BP/RP missing at some transits
+            t, tid_b = tt[keep], tids[keep]
+            f = base * share * (1 + dil * signal[keep] + rng.normal(0, rng.uniform(0.001, 0.05), len(t)))
+            if b == "G" and len(t) > 2:
+                f[rng.integers(len(t))] *= rng.choice([0.5, 1.0, 1.6])  # G-only faults
+            if b != "G" and len(t) > 2:
+                f[rng.integers(len(t))] *= rng.choice([1.0, 30.0])  # colour faults
+            f[rng.random(len(t)) < 0.03] = np.nan
+            e = np.abs(f) * 0.01
+            if len(t) > 2:
+                e[rng.integers(len(t))] *= rng.choice([1.0, 20.0])  # inflated errors
+            if b == "BP" and len(t) > 3 and rng.random() < 0.3:  # a repeated transit
+                t, tid_b = np.append(t, t[0]), np.append(tid_b, tid_b[0])
+                f, e = np.append(f, f[0] * 1.1), np.append(e, e[0])
+            m = len(t)
+            for k, val in (("source_id", [10_000 + s] * m), ("band", [b] * m), ("t", t), ("flux", f),
+                           ("err", e), ("flags", [0] * m), ("transit_id", tid_b), ("fov", [1] * m),
+                           ("ccd_row", [1] * m), ("n_obs", [9] * m)):
+                cols[k] += list(val)
+    table = pa.table({k: pa.array(v).cast(SCHEMA.field(k).type) if k != "band" else pa.array(v).dictionary_encode()
+                      for k, v in cols.items()})
+    blend = {10_000 + s: float(rng.choice([0.0, 0.02, 0.5, 1.0])) for s in range(n_sources) if rng.random() < 0.7}
+    return table, blend
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_vectorised_clean_long_matches_the_per_source_loop(seed):
+    from cosmos_search.vetting.stage0 import clean_long
+
+    table, blend = _random_long_table(seed)
+    for bl in (blend, None):
+        out, counts = clean_long(table, blend=bl)
+        ref_out, ref_counts = _clean_long_loop(table, blend=bl)
+        assert out.num_rows == ref_out.num_rows and out.to_pandas().equals(ref_out.to_pandas())
+        a = counts.sort_values("source_id").reset_index(drop=True).astype("int64")
+        b = ref_counts.sort_values("source_id").reset_index(drop=True).astype("int64")
+        assert a.equals(b)
+    exercised = b.drop(columns=["source_id", "stage0_n_untested"]).sum()
+    assert (exercised > 0).sum() >= 2  # several verdicts occur, so the comparison means something

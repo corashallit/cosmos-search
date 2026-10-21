@@ -50,9 +50,39 @@ def _matched(lc, t):
 VERDICTS = ("consistent", "band_inconsistent", "colour_fault", "inflated_error", "untested")
 
 
-def _robust(x):
-    x = x[np.isfinite(x)]
-    return robust_sigma(x) if len(x) >= 5 else 0.0
+def _group_median(gid, n, x):
+    """np.median of x within each of n groups: NaN for an empty group or one holding a NaN.
+
+    Groups are laid out as rows of a padded array and sorted row by row, which is exact and much faster
+    than one sort over all values (memory is n × the largest group, ~300 epochs per Gaia source)."""
+    out = np.full(n, np.nan)
+    nan = np.isnan(x)
+    g, v = gid[~nan], x[~nan]
+    c = np.bincount(g, minlength=n)
+    if len(g):
+        order = np.argsort(g, kind="stable")
+        g, v = g[order], v[order]
+        pos = np.arange(len(g)) - (np.cumsum(c) - c)[g]
+        rows = np.full((n, c.max()), np.inf)
+        rows[g, pos] = v
+        rows.sort(axis=1)
+        ok = np.flatnonzero(c > 0)
+        out[ok] = (rows[ok, (c[ok] - 1) // 2] + rows[ok, c[ok] // 2]) / 2
+    out[np.bincount(gid[nan], minlength=n) > 0] = np.nan
+    return out
+
+
+def _robust(x, gid=None, n=1):
+    """Per group: robust_sigma of the finite values, or 0 when there are fewer than 5. Returned per element
+    when gid is given, else as one number for the whole array."""
+    single = gid is None
+    gid = np.zeros(len(x), np.int64) if single else gid
+    ok = np.isfinite(x)
+    g, v = gid[ok], x[ok]
+    med = _group_median(g, n, v)
+    sigma = 1.4826 * _group_median(g, n, np.abs(v - med[g]))
+    out = np.where(np.bincount(g, minlength=n) >= 5, sigma, 0.0)
+    return float(out[0]) if single else out[gid]
 
 
 PARTNER_DAYS = 0.1  # the other field of view's transit follows ~0.074 d later
@@ -60,16 +90,21 @@ BLEND_MAX = 0.05  # blended-transit fraction below which a quiet source is taken
 RATIO_SIG = 10.0  # G changes (in G errors) used to measure the BP/RP dilution ratio
 
 
-def _partner(t):
-    """Index of the nearest other G epoch within PARTNER_DAYS (the other field of view's transit), else -1."""
+def _partner(t, gid=None):
+    """Index of the nearest other G epoch within PARTNER_DAYS (the other field of view's transit), else -1.
+
+    With gid, partners are only sought within the same group (source)."""
     t = np.asarray(t, float)
-    order = np.argsort(t)
-    ts = t[order]
+    gid = np.zeros(len(t), np.int64) if gid is None else np.asarray(gid)
+    order = np.lexsort((t, gid))
+    ts, gs = t[order], gid[order]
     best = np.full(len(t), -1)
     if len(t) < 2:
         return best
-    gap_prev = np.r_[np.inf, np.diff(ts)]
-    gap_next = np.r_[np.diff(ts), np.inf]
+    same = gs[1:] == gs[:-1]
+    gap = np.where(same, np.diff(ts), np.inf)
+    gap_prev = np.r_[np.inf, gap]
+    gap_next = np.r_[gap, np.inf]
     use_next = gap_next < gap_prev
     nearest = np.where(use_next, np.arange(len(ts)) + 1, np.arange(len(ts)) - 1)
     ok = np.minimum(gap_prev, gap_next) <= PARTNER_DAYS
@@ -101,14 +136,35 @@ def dilution_floor(d_g, e_g, d_bp, d_rp, blend_frac=None, min_epochs=5):
     return 1.0 if unblended else 0.0
 
 
-def _assess(d_g, e_g, d_bp, e_bp, d_rp, e_rp, nsigma, err_ratio, w_range, r_lo=1.0, partner=None):
+def _dilution_floors(gid, n, d_g, e_g, d_bp, d_rp, blend_frac, min_epochs=5):
+    """dilution_floor for every group at once; blend_frac is a per-group array (NaN where unknown)."""
+    unblended = np.isfinite(blend_frac) & (blend_frac < BLEND_MAX)
+    out = np.where(unblended, 1.0, 0.0)
+    mix = 0.5 * (d_bp + d_rp)
+    sig = np.isfinite(mix) & (np.abs(d_g) > RATIO_SIG * e_g)
+    measured = np.flatnonzero(np.bincount(gid[sig], minlength=n) >= min_epochs)
+    if len(measured):
+        rows = np.flatnonzero(sig & np.isin(gid, measured))
+        rows = rows[np.argsort(gid[rows], kind="stable")]
+        ratio, g = mix[rows] / d_g[rows], gid[rows]
+        starts = np.flatnonzero(np.r_[True, g[1:] != g[:-1]])
+        for k, a, b in zip(g[starts], starts, np.r_[starts[1:], len(rows)]):  # only sources that changed
+            r = ratio[a:b]
+            out[k] = float(np.clip(0.7 * (np.quantile(r, 0.2) if unblended[k] else r.min()), 0.0, 1.0))
+    return out
+
+
+def _assess(d_g, e_g, d_bp, e_bp, d_rp, e_rp, nsigma, err_ratio, w_range, r_lo=1.0, partner=None, gid=None):
     """Verdicts from per-G-epoch fractional changes and errors, with BP/RP NaN where the transit has none.
 
     r_lo (per source; scalar or per-epoch array) is dilution_floor's bound: the allowed G interval is the
     BP-RP mixing interval scaled by every r in [r_lo, 1], and BP/RP noise is scaled by 1 / r_lo. partner is
     _partner's index array; an inflated G error is only a fault when neither BP/RP nor the partner transit
-    corroborates the change.
+    corroborates the change. gid (optional) assigns each epoch to a source, so many sources can be assessed in
+    one call: every per-star quantity (the robust floors and the median G error) is then computed per source.
     """
+    gid = np.zeros(len(d_g), np.int64) if gid is None else gid
+    n = int(gid.max()) + 1 if len(gid) else 1
     r_lo = np.broadcast_to(np.asarray(r_lo, float), np.shape(d_g))
     inv = np.divide(1.0, r_lo, out=np.full(np.shape(d_g), np.inf), where=r_lo > 0)
     ends = np.array([w * d_bp + (1 - w) * d_rp for w in w_range])
@@ -122,11 +178,11 @@ def _assess(d_g, e_g, d_bp, e_bp, d_rp, e_rp, nsigma, err_ratio, w_range, r_lo=1
     with np.errstate(invalid="ignore"):
         e_scaled = e_other * inv
     tested = np.isfinite(outside)
-    noise = np.fmax(np.hypot(e_g, e_scaled), _robust(d_g - 0.5 * (d_bp + d_rp)))
-    g_err_ratio = e_g / np.median(e_g)
+    noise = np.fmax(np.hypot(e_g, e_scaled), _robust(d_g - 0.5 * (d_bp + d_rp), gid, n))
+    g_err_ratio = e_g / _group_median(gid, n, e_g)[gid]
 
     def z(d, e):  # a band's change in units of its own scatter (or the epoch's error, if larger)
-        return np.abs(d) / np.fmax(e, _robust(d))
+        return np.abs(d) / np.fmax(e, _robust(d, gid, n))
 
     g_at_fault = z(d_g, e_g) > np.fmax(np.nan_to_num(z(d_bp, e_bp)), np.nan_to_num(z(d_rp, e_rp)))
     verdict = np.full(len(d_g), "untested", dtype=object)
@@ -196,49 +252,59 @@ def clean_long(table, nsigma=4.0, err_ratio=5.0, w_range=W_RANGE, blend=None):
 
     Returns (table without the faulty measurements, pandas frame of per-source verdict_counts). Matching is
     by transit_id, which is exact. blend maps source_id to its BP/RP blended-transit fraction (blend_fraction
-    of the gaia_source row); a quiet source missing from it is left untested (dilution_floor). For the statistics downstream to stay valid, run this before every
-    statistic that reads the light curves (dim and bright alike, so a mirrored null stays symmetric) and on
-    injected light curves too, so completeness is measured after cleaning.
+    of the gaia_source row); a quiet source missing from it is left untested (dilution_floor). For the
+    statistics downstream to stay valid, run this before every statistic that reads the light curves (dim and
+    bright alike, so a mirrored null stays symmetric) and on injected light curves too, so completeness is
+    measured after cleaning.
+
+    Vectorised over sources: one _assess call with per-source groups gives the same verdicts as assessing each
+    source on its own (tests/test_vetting.py checks this against a per-source loop).
     """
     import pandas as pd
     import pyarrow as pa
 
     df = table.to_pandas() if hasattr(table, "to_pandas") else table.copy()
-    band = df["band"].astype(str).to_numpy()
-    flux, err, tid = (df[c].to_numpy() for c in ("flux", "err", "transit_id"))
+    if isinstance(table, pa.Table):
+        col = table["band"].combine_chunks()
+        band = np.asarray(col.dictionary.to_pylist(), dtype=object)[np.asarray(col.indices)]
+    else:
+        band = df["band"].astype(str).to_numpy()
+    flux, err, tid, t = (df[c].to_numpy() for c in ("flux", "err", "transit_id", "t"))
+    code, uniq = pd.factorize(df["source_id"].to_numpy())
+    n = len(uniq)
+    d, e = np.full(len(df), np.nan), np.full(len(df), np.nan)
+    rows = {}
+    for b in ("G", "BP", "RP"):
+        r = np.flatnonzero((band == b) & np.isfinite(flux))
+        med = _group_median(code[r], n, flux[r].astype(float))[code[r]]
+        d[r], e[r] = 1 - flux[r] / med, err[r] / med
+        rows[b] = r
+    g = rows["G"]
+    gid = code[g]
+    keys = pd.DataFrame({"c": gid, "t": tid[g]})
+    cols = []
+    for b in ("BP", "RP"):
+        r = rows[b]
+        # One measurement per (source, transit); if a transit repeats, the last row wins, as before.
+        other = pd.DataFrame({"c": code[r], "t": tid[r], "j": r}).drop_duplicates(["c", "t"], keep="last")
+        j = keys.merge(other, on=["c", "t"], how="left")["j"].to_numpy()
+        ok = np.isfinite(j)
+        jj = np.where(ok, j, 0).astype(np.int64)
+        cols += [np.where(ok, d[jj], np.nan), np.where(ok, e[jj], np.nan)]
+    frac = np.array([np.nan if (x := (blend or {}).get(sid)) is None else x for sid in uniq], dtype=float)
+    r_lo = _dilution_floors(gid, n, d[g], e[g], cols[0], cols[2], frac)[gid]
+    v = _assess(d[g], e[g], *cols, nsigma, err_ratio, w_range, r_lo, _partner(t[g], gid), gid=gid)["verdict"]
     drop = np.zeros(len(df), bool)
-    counts = []
-    for sid, idx in df.groupby("source_id", sort=False).indices.items():
-        rows = {b: idx[(band[idx] == b) & np.isfinite(flux[idx])] for b in ("G", "BP", "RP")}
-        g = rows["G"]
-        if len(g) == 0:
-            counts.append({"source_id": sid, **verdict_counts([])})
-            continue
-        def changes(r):
-            f, e = flux[r], err[r]
-            med = float(np.median(f)) if len(f) else np.nan
-            return 1 - f / med, e / med
-
-        d_g, e_g = changes(g)
-        cols = []
-        for b in ("BP", "RP"):
-            d, e = changes(rows[b])
-            if len(d) == 0:
-                cols += [np.full(len(g), np.nan)] * 2
-                continue
-            at = {t: i for i, t in enumerate(tid[rows[b]])}
-            j = np.array([at.get(t, -1) for t in tid[g]])
-            cols += [np.where(j >= 0, d[np.clip(j, 0, None)], np.nan), np.where(j >= 0, e[np.clip(j, 0, None)], np.nan)]
-        r_lo = dilution_floor(d_g, e_g, cols[0], cols[2], (blend or {}).get(sid))
-        v = _assess(d_g, e_g, *cols, nsigma, err_ratio, w_range, r_lo, _partner(df["t"].to_numpy()[g]))["verdict"]
-        drop[g[np.isin(v, ARTEFACTS)]] = True
-        faulty = set(tid[g][v == "colour_fault"])
-        for b in ("BP", "RP"):
-            drop[rows[b][np.isin(tid[rows[b]], list(faulty))]] = True
-        counts.append({"source_id": sid, **verdict_counts(v)})
-    keep = ~drop
-    out = table.filter(pa.array(keep)) if isinstance(table, pa.Table) else df[keep]
-    return out, pd.DataFrame(counts)
+    drop[g[np.isin(v, ARTEFACTS)]] = True
+    faulty = pd.MultiIndex.from_arrays([gid[v == "colour_fault"], tid[g][v == "colour_fault"]])
+    for b in ("BP", "RP"):
+        r = rows[b]
+        drop[r[pd.MultiIndex.from_arrays([code[r], tid[r]]).isin(faulty)]] = True
+    counts = pd.DataFrame({"source_id": uniq})
+    for name in VERDICTS:
+        counts[f"stage0_n_{name}"] = np.bincount(gid[v == name], minlength=n).astype(np.int64)
+    out = table.filter(pa.array(~drop)) if isinstance(table, pa.Table) else df[~drop]
+    return out, counts
 
 
 def band_consistency(cand, dips, **kw):
