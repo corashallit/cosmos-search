@@ -88,3 +88,21 @@ def test_mirror_sketches_stratify_by_transit_count():
     f = pd.DataFrame({"n_g": [9, 10, 19, 20, 79, 80, 300], "med_flux_g": 1000.0, "min_z_rob": -1.0, "max_z_rob": 1.0})
     keys = {k: sk.n for k, sk in sketches.MirrorSketches().add(f).sketches().items() if k.startswith("dim")}
     assert keys == {"dim|G=18.0|n=10-20": 2, "dim|G=18.0|n=20-40": 1, "dim|G=18.0|n=40-80": 1, "dim|G=18.0|n=80+": 2}
+
+
+def test_blend_for_matches_stage0_blend_fraction(tmp_path):
+    import pandas as pd
+    import pyarrow as pa
+
+    from cosmos_search.vetting import stage0
+
+    rows = pd.DataFrame({"source_id": [5, 3, 9, 7], "phot_bp_n_obs": [20, 10, 0, 30],
+                         "phot_bp_n_blended_transits": [2, 5, 0, None],
+                         "phot_rp_n_obs": [20, 10, 0, 30], "phot_rp_n_blended_transits": [4, 1, 0, None]})
+    path = tmp_path / "blend.parquet"
+    pq.write_table(pa.Table.from_pandas(rows.astype({"phot_bp_n_blended_transits": "Int64",
+                                                     "phot_rp_n_blended_transits": "Int64"})), path)
+    got = dr3_pass.blend_for(np.array([3, 3, 5, 7, 9, 11]), str(path))
+    want = {r.source_id: stage0.blend_fraction({k: (None if pd.isna(v) else v) for k, v in r._asdict().items()})
+            for r in rows.itertuples(index=False)}
+    assert got == {k: v for k, v in want.items() if v is not None}

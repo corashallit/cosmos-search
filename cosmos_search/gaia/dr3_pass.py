@@ -22,11 +22,13 @@ import zlib
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from cosmos_search.net import get_client
+from cosmos_search.vetting import stage0
 
 from . import epoch, features, sketches
 
@@ -48,8 +50,39 @@ def is_done(name, out, durable=None):
     return (Path(out) / "features" / f"{stem(name)}.parquet").exists()
 
 
-def process_file(info, out, durable=None, feature_cut=None, sketch=None):
+_BLEND = {}
+
+
+def blend_table(path):
+    """Sorted source_id and BP/RP blended-transit fraction arrays from a Parquet of gaia_source's
+    stage0.BLEND_COLS (as stage0.blend_fraction: the larger of the BP and RP fractions, NaN if neither is
+    known). Loaded once per worker process."""
+    if path not in _BLEND:
+        t = pq.read_table(path, columns=["source_id", *stage0.BLEND_COLS]).to_pandas()
+        fr = []
+        for b in ("bp", "rp"):
+            n = t[f"phot_{b}_n_obs"].to_numpy(dtype=float, na_value=np.nan)
+            k = t[f"phot_{b}_n_blended_transits"].to_numpy(dtype=float, na_value=np.nan)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                fr.append(np.where(np.isfinite(n) & (n > 0) & np.isfinite(k), k / n, np.nan))
+        sid = t["source_id"].to_numpy()
+        order = np.argsort(sid)
+        _BLEND[path] = sid[order], np.fmax(*fr)[order]
+    return _BLEND[path]
+
+
+def blend_for(source_ids, path):
+    """{source_id: fraction} for the given sources, leaving out those with no known fraction."""
+    sid, frac = blend_table(path)
+    ids = np.unique(np.asarray(source_ids))
+    j = np.clip(np.searchsorted(sid, ids), 0, len(sid) - 1)
+    ok = (sid[j] == ids) & np.isfinite(frac[j])
+    return dict(zip(ids[ok].tolist(), frac[j][ok].tolist()))
+
+
+def process_file(info, out, durable=None, feature_cut=None, sketch=None, blend=None):
     """Process one bulk file. feature_cut: pandas query string for which feature rows to keep (default all).
+    blend: Parquet of gaia_source's stage0.BLEND_COLS; without it Stage 0 leaves quiet sources untested.
     sketch: factory for a per-file accumulator with add(features DataFrame) and to_dict() (for example
     sketches.MirrorSketches); it sees every source, before feature_cut, and is written as gzipped JSON."""
     out = Path(out)
@@ -73,7 +106,8 @@ def process_file(info, out, durable=None, feature_cut=None, sketch=None):
     try:
         with get_client().streamed(info["url"], md5=info.get("md5")) as path:
             for lc in epoch.iter_epoch_csv(path):
-                feat = features.source_features(lc)
+                bl = blend_for(lc["source_id"].to_numpy(), blend) if blend else None
+                feat = features.source_features(lc, blend=bl)
                 if acc is not None:
                     acc.add(feat)
                 keep = feat["source_id"].to_numpy()[features.keep_light_curve(feat)]
@@ -127,7 +161,7 @@ def _publish(paths, durable, name, rec):
         p.unlink(missing_ok=True)
 
 
-def run(out, workers, limit=None, durable=None, shard=(0, 1), feature_cut=None, files=None, sketch=None):
+def run(out, workers, limit=None, durable=None, shard=(0, 1), feature_cut=None, files=None, sketch=None, blend=None):
     out = Path(out)
     files = files if files is not None else epoch.bulk_files()
     mine = [f for f in files if in_shard(f["name"], shard)]
@@ -136,7 +170,7 @@ def run(out, workers, limit=None, durable=None, shard=(0, 1), feature_cut=None, 
     out.mkdir(parents=True, exist_ok=True)
     failures = 0
     with ProcessPoolExecutor(workers) as pool, (out / "manifest.jsonl").open("a") as fh:
-        futures = {pool.submit(process_file, f, out, durable, feature_cut, sketch): f for f in todo}
+        futures = {pool.submit(process_file, f, out, durable, feature_cut, sketch, blend): f for f in todo}
         for i, fut in enumerate(as_completed(futures), 1):
             try:
                 rec = fut.result()
@@ -184,13 +218,14 @@ def main(argv=None):
     ap.add_argument("--shard", type=_shard, default=(0, 1))
     ap.add_argument("--feature-cut", help="pandas query selecting feature rows to keep (default: all)")
     ap.add_argument("--sketch", action="store_true", help="write per-stratum mirror-null tail sketches")
+    ap.add_argument("--blend", help="Parquet of source_id + stage0.BLEND_COLS from gaia_source, for Stage 0")
     ap.add_argument("--consolidate", metavar="DEST")
     a = ap.parse_args(argv)
     if a.consolidate:
         consolidate(a.durable or a.out, a.consolidate)
         return 0
     sketch = sketches.MirrorSketches if a.sketch else None
-    return 1 if run(a.out, a.workers, a.limit, a.durable, a.shard, a.feature_cut, sketch=sketch) else 0
+    return 1 if run(a.out, a.workers, a.limit, a.durable, a.shard, a.feature_cut, sketch=sketch, blend=a.blend) else 0
 
 
 if __name__ == "__main__":
