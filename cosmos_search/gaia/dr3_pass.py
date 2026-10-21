@@ -6,8 +6,8 @@
     python -m cosmos_search.gaia.dr3_pass --out data/gaia-dr3-epoch --consolidate /mnt/project-files/data/gaia-dr3-epoch
 
 Each bulk file is downloaded to a temp file (MD5-checked), parsed in chunks, reduced to features, and
-deleted. Per file it writes features, the light curves passing features.keep_light_curve, and optionally a
-JSON sketch. Outputs and a done-marker go to --durable when given (local copies are then removed), and files
+deleted. Per file it writes features, the light curves passing features.keep_light_curve, and with --sketch
+the per-stratum mirror-null tail sketches (gaia.sketches). Outputs and a done-marker go to --durable when given (local copies are then removed), and files
 already marked done there are skipped, so a reclaimed container or a second session resumes cleanly.
 --shard i/n takes the files whose stable name hash is i mod n, so sessions split the list without talking.
 """
@@ -28,7 +28,7 @@ import pyarrow.parquet as pq
 
 from cosmos_search.net import get_client
 
-from . import epoch, features
+from . import epoch, features, sketches
 
 KINDS = ("features", "lightcurves")
 
@@ -50,7 +50,8 @@ def is_done(name, out, durable=None):
 
 def process_file(info, out, durable=None, feature_cut=None, sketch=None):
     """Process one bulk file. feature_cut: pandas query string for which feature rows to keep (default all).
-    sketch: callable(features DataFrame) -> JSON-serialisable summary, written per file."""
+    sketch: factory for a per-file accumulator with add(features DataFrame) and to_dict() (for example
+    sketches.MirrorSketches); it sees every source, before feature_cut, and is written as gzipped JSON."""
     out = Path(out)
     t0 = time.time()
     name = stem(info["name"])
@@ -67,14 +68,14 @@ def process_file(info, out, durable=None, feature_cut=None, sketch=None):
     }
     tmp = {k: p.with_suffix(".tmp") for k, p in paths.items()}
     writers = {}
-    sketches = []
+    acc = sketch() if sketch is not None else None
     n_src = n_feat = n_kept = n_rows = 0
     try:
         with get_client().streamed(info["url"], md5=info.get("md5")) as path:
             for lc in epoch.iter_epoch_csv(path):
                 feat = features.source_features(lc)
-                if sketch is not None:
-                    sketches.append(sketch(feat))
+                if acc is not None:
+                    acc.add(feat)
                 keep = feat["source_id"].to_numpy()[features.keep_light_curve(feat)]
                 kept = lc.filter(pc.is_in(lc["source_id"], value_set=pa.array(keep)))
                 n_src, n_kept, n_rows = n_src + len(feat), n_kept + len(keep), n_rows + lc.num_rows
@@ -97,10 +98,10 @@ def process_file(info, out, durable=None, feature_cut=None, sketch=None):
             os.replace(tmp[k], paths[k])
     rec = {"name": info["name"], "md5": info.get("md5"), "sources": n_src, "feature_rows": n_feat,
            "kept": n_kept, "rows": n_rows, "seconds": round(time.time() - t0, 1)}
-    if sketch is not None:
-        sk = out / "sketches" / f"{name}.json"
+    if acc is not None:
+        sk = out / "sketches" / f"{name}.json.gz"
         sk.parent.mkdir(parents=True, exist_ok=True)
-        sk.write_text(json.dumps(sketches))
+        sketches.write(sk, acc.to_dict())
         paths["sketches"] = sk
     if durable:
         _publish(paths, Path(durable), name, rec)
@@ -126,7 +127,7 @@ def _publish(paths, durable, name, rec):
         p.unlink(missing_ok=True)
 
 
-def run(out, workers, limit=None, durable=None, shard=(0, 1), feature_cut=None, files=None):
+def run(out, workers, limit=None, durable=None, shard=(0, 1), feature_cut=None, files=None, sketch=None):
     out = Path(out)
     files = files if files is not None else epoch.bulk_files()
     mine = [f for f in files if in_shard(f["name"], shard)]
@@ -135,7 +136,7 @@ def run(out, workers, limit=None, durable=None, shard=(0, 1), feature_cut=None, 
     out.mkdir(parents=True, exist_ok=True)
     failures = 0
     with ProcessPoolExecutor(workers) as pool, (out / "manifest.jsonl").open("a") as fh:
-        futures = {pool.submit(process_file, f, out, durable, feature_cut): f for f in todo}
+        futures = {pool.submit(process_file, f, out, durable, feature_cut, sketch): f for f in todo}
         for i, fut in enumerate(as_completed(futures), 1):
             try:
                 rec = fut.result()
@@ -182,12 +183,14 @@ def main(argv=None):
     ap.add_argument("--limit", type=int)
     ap.add_argument("--shard", type=_shard, default=(0, 1))
     ap.add_argument("--feature-cut", help="pandas query selecting feature rows to keep (default: all)")
+    ap.add_argument("--sketch", action="store_true", help="write per-stratum mirror-null tail sketches")
     ap.add_argument("--consolidate", metavar="DEST")
     a = ap.parse_args(argv)
     if a.consolidate:
         consolidate(a.durable or a.out, a.consolidate)
         return 0
-    return 1 if run(a.out, a.workers, a.limit, a.durable, a.shard, a.feature_cut) else 0
+    sketch = sketches.MirrorSketches if a.sketch else None
+    return 1 if run(a.out, a.workers, a.limit, a.durable, a.shard, a.feature_cut, sketch=sketch) else 0
 
 
 if __name__ == "__main__":

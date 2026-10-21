@@ -64,13 +64,21 @@ Features for every source. Full light curves only where `keep_light_curve` is tr
 sources, because the DR3 sample is already DPAC's variables. Fractional-depth cuts are not used: at G ≈ 20,
 5% scatter is normal, and they kept ~80% of sources in a trial file.
 
-Per file, the pass writes features, kept light curves and (optionally) a JSON sketch. With `--durable DIR`
+Per file, the pass writes features, kept light curves and, with `--sketch`, the mirror-null tail sketches
+described below. With `--durable DIR`
 they are copied to `DIR/{features,lightcurves,sketches}/` and a done-marker is written to `DIR/done/`, after
 which local copies are deleted; files with a done-marker are skipped, so a reclaimed container or another
 session resumes where the last stopped. `--shard i/n` takes the files whose CRC-32 name hash is i mod n,
 so n sessions split the list without coordinating. `--feature-cut` keeps only feature rows matching a
 pandas query (default: all). Light-curve Parquet metadata records the control fraction and salt, so the
 random controls' inclusion probability (0.01) travels with the data.
+
+`--sketch` writes `sketches/<file>.json.gz` (`cosmos_search.gaia.sketches`): one `stats.TailSketch` per
+0.5-mag G stratum and per side, `dim` = −`min_z_rob` and `bright` = `max_z_rob`, over sources with ≥ 10 G
+transits. Each keeps the top 2% of its stratum exactly (at least 100 values) and a 0.05σ histogram on
+0–50σ for the rest; gzip keeps the mostly empty histograms small. `sketches.merge(paths)` gives one sketch
+per stratum across files and sessions, and `sk.p(stat)` gives the mirror-null p-value. The sketch sees every
+source, before `--feature-cut`.
 
 ```
 python -m cosmos_search.gaia.dr3_pass --out /tmp/work --durable /mnt/project-files/data/gaia-dr3-epoch --shard 0/2 --workers 5
