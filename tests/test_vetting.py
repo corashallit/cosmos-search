@@ -29,7 +29,9 @@ def gaia_like(cid="gaia_dr3:4567890123456789", dip_at=None, seed=0, n=120):
     return Candidate.from_dict({
         "candidate_id": cid, "arm": "gaia", "lightcurves": lcs,
         "source": {"source_id": 4567890123456789, "ra": 301.56, "dec": 44.46, "phot_g_mean_mag": 11.73,
-                   "bp_rp": 0.55, "parallax": 2.2, "parallax_error": 0.02, "ruwe": 1.01},
+                   "bp_rp": 0.55, "parallax": 2.2, "parallax_error": 0.02, "ruwe": 1.01,
+                   "phot_bp_n_obs": n, "phot_bp_n_blended_transits": 0, "phot_rp_n_obs": n,
+                   "phot_rp_n_blended_transits": 0},
         "scores": {"surprisal": 1e-6}, "tests": {"fov_invariance": {"statistic": 0.3, "p": 0.7}},
         "context": {"ir_excess_sigma": 0.4},
     })
@@ -559,10 +561,88 @@ def test_stage0_long_table_matches_the_candidate_path():
             cols[k] += list(v)
     table = pa.table({k: pa.array(v).cast(SCHEMA.field(k).type) if k != "band" else pa.array(v).dictionary_encode()
                       for k, v in cols.items()})
-    out, counts = clean_long(table)
+    out, counts = clean_long(table, blend={7: 0.0})
     want = verdict_counts(epoch_verdicts(cand)["verdict"])
     assert counts.iloc[0].drop("source_id").to_dict() == want
     assert want["stage0_n_band_inconsistent"] >= 1 and want["stage0_n_colour_fault"] >= 1
     cleaned, _ = clean(cand)
     bands = out.column("band").to_pylist()
     assert [bands.count(b) for b in ("G", "BP", "RP")] == [len(lc.time) for lc in cleaned.lightcurves]
+
+
+def test_stage0_keeps_corroborated_and_diluted_changes():
+    from cosmos_search.vetting.stage0 import band_consistency, dilution_floor
+    i = 40
+    # A real 10% dip seen in all three bands, on a transit whose G error is inflated, is kept.
+    cand = _one_epoch(gaia_like(seed=1), i, {"G": 0.9, "BP": 0.9, "RP": 0.9})
+    cand.lightcurves[0].flux_err[i] *= 20
+    (row,) = band_consistency(cand, [{"t_min": cand.lightcurves[0].time[i]}])
+    assert row["verdict"] == "consistent"
+    # An eclipsing binary blended in BP/RP: BP and RP see a third of each eclipse. The eclipses are not faults.
+    eb = gaia_like(seed=2, n=150)
+    for lc in eb.lightcurves:
+        ecl = (np.arange(len(lc.time)) % 15) == 0
+        lc.flux[ecl] *= 1 - (0.3 if lc.band == "G" else 0.1)
+    eb.source.update(phot_bp_n_blended_transits=150, phot_rp_n_blended_transits=150)
+    g = eb.lightcurves[0]
+    rows = band_consistency(eb, [{"t_min": t} for t in g.time[::15]])
+    assert {r["verdict"] for r in rows} == {"consistent"} and 0.1 < rows[0]["r_lo"] < 0.35
+    # A quiet star that is often blended cannot have its G-only dips told from diluted real ones.
+    quiet = _one_epoch(gaia_like(seed=1), i, {"G": 0.9})
+    quiet.source.update(phot_bp_n_blended_transits=60, phot_rp_n_blended_transits=60)
+    (row,) = band_consistency(quiet, [{"t_min": quiet.lightcurves[0].time[i]}])
+    assert row["verdict"] == "untested"
+    assert dilution_floor(np.zeros(10), np.ones(10), np.zeros(10), np.zeros(10), None) == 0.0
+
+
+def test_stage0_long_table_survives_a_source_without_bp():
+    import pyarrow as pa
+    from cosmos_search.gaia.epoch import SCHEMA
+    from cosmos_search.vetting.stage0 import clean_long
+    n = 30
+    rows = {"source_id": [1] * n, "band": ["G"] * n, "t": np.arange(n, dtype=float), "flux": np.ones(n),
+            "err": np.full(n, 0.01), "flags": [0] * n, "transit_id": np.arange(n), "fov": [1] * n,
+            "ccd_row": [1] * n, "n_obs": [9] * n}
+    table = pa.table({k: pa.array(v).cast(SCHEMA.field(k).type) if k != "band" else pa.array(v).dictionary_encode()
+                      for k, v in rows.items()})
+    out, counts = clean_long(table, blend={1: 0.0})
+    assert out.num_rows == n and counts.iloc[0]["stage0_n_untested"] == n
+
+
+SKYBOT_TEXT = """# Flag: 1
+# Ticket: 1
+# Num | Name | RA(h) | DE(deg) | Class | Mv | Err(arcsec) | d(arcsec) | dRA(arcsec/h) | dDEC(arcsec/h) | Dg(ua) | Dh(ua)
+ 1009 | Sirene | 15 55 45.3229 | -21 23 17.828 | Mars-Crosser | 20.7 | 0.067 | 543.824 | 14.4594 | 0.615 | 3.63335939559 | 3.77265346836
+"""
+MIRIADE = {
+    "@gaia": "# header\n  2015-02-20T21:28:46.524  +15 56 22.96766  -21 25 34.8964      3.635510581     20.69\n",
+    "500": "# header\n  2015-02-20T21:28:46.524  +15 55 45.29456  -21 23 17.8251      3.633355470     20.69\n",
+}
+
+
+class _FakeIMCCE:
+    """SkyBoT and Miriade answers for Gaia DR3's own detection of (1009) Sirene, 2015-02-20 (sso_observation)."""
+
+    def get(self, url, params=None, cache=False):
+        class R:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+        r = R()
+        r.text = SKYBOT_TEXT if "skybot" in url else MIRIADE[params["-observer"]]
+        return r
+
+
+def test_sso_search_corrects_for_gaia_parallax():
+    from cosmos_search.vetting import sso
+    ra, dec = 239.09585284122534, -21.426396751900427  # where Gaia saw Sirene
+    bodies = sso.nearby(2457074.3949829205, ra, dec, 15.0, "gaia", client=_FakeIMCCE())
+    # Geocentric, SkyBoT puts it 544 arcsec away; seen from Gaia it is where Gaia measured it.
+    assert len(bodies) == 1 and bodies[0]["geo_sep_arcsec"] > 500 and bodies[0]["sep_arcsec"] < 1.0
+    assert sso.flux_ratio(20.7, 15.0, "gaia") < 0.01
+    cand = gaia_like()
+    cand.source.update(ra=ra, dec=dec)
+    cand.dips = [{"t_min": 57074.0 + 2400000.0 - 2457000.0, "depth": 0.002}]
+    (row,) = sso.check(cand, client=_FakeIMCCE())
+    assert row["verdict"] in ("sso_bright", "sso_faint") and row["bodies"]

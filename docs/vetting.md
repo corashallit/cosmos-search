@@ -48,7 +48,7 @@ and a source of known-answer controls or decoys, or its α is unmeasured.
 | calibration_offset | Steps between FoVs, CCDs, sectors, calibration epochs | FoV pair test; step test at known calibration boundaries | Gaia detectors | step decoys |
 | shared_systematic | Same epoch dims in unrelated stars | **cross-candidate coincidence** (`vetting/coincidence.py`, below); TESS common-mode per CCD | vetting; TESS thread | coincident-dip injections across hosts |
 | processing | Detrending or background-model artefacts, cross-match errors | re-extraction with an independent pipeline (TGLC for TESS; DataLink re-pull for Gaia) | arm threads | — |
-| solar_system_occultation | Single-epoch dip near the ecliptic; asteroid in TESS background annulus | **SkyBoT cone search at dip epochs** | vetting (pending the shared client) | known asteroid crossings |
+| solar_system_occultation | Single-epoch dip near the ecliptic; asteroid in TESS background annulus | **SkyBoT cone + Miriade parallax from the spacecraft** (`vetting/sso.py`, §13) | vetting | Gaia DR3 `sso_observation` |
 | eclipsing_binary, planet_transit | Periodic, flat or V-shaped, grey | period search, odd/even, secondary | arm detectors | VSX/Gaia DR3 EBs |
 | disk_occultation, yso_dipper, rcrb_dust, debris_transit | Long, reddened or irregular dips; IR excess | dip colour ratio R; energy budget vs WISE (G5) | Gaia detectors, cross-match thread | KIC 8462852, Gaia17bpp, EPIC 204278916, YSO dippers, R CrB stars, ZTF J0139+5245 |
 | rotation_or_spots, pulsation_or_irregular, eruptive_or_be | Quasi-periodic or red-noise variability | periodograms, colour–magnitude slope | arm detectors | VSX/DR3 classified variables |
@@ -367,38 +367,66 @@ the BP and RP changes, d_G ≈ w d_BP + (1 − w) d_RP, where w is the BP share 
 An epoch whose G change lies outside that interval by more than 4σ is a measurement fault. Faults are excursions,
 so the fault lies with whichever instrument moved more in units of its own scatter. `band_inconsistent` means G is
 at fault, and that G epoch is dropped. `colour_fault` means BP or RP is at fault, and BP and RP are dropped at that
-transit. A G error more than 5 times the star's median is `inflated_error`, and that G epoch is dropped as well.
-Epochs where BP or RP is missing, or too noisy to have shown the change, are `untested`.
+transit. Epochs where BP or RP is missing, or too noisy or too diluted to have shown the change, are `untested`.
+
+**Dilution.** BP and RP are measured in a 3.5 × 2.1 arcsec window, G in a 0.7 × 2.1 arcsec one. A neighbour
+inside the BP/RP window adds constant light there and scales the source's BP/RP changes by r ≤ 1. A real G dip
+then lies outside the unblended interval by about 1/r. The first version of this test missed that, and it removed
+real eclipses in a DR3 LMC chunk: 4659822847978414848 (P = 14.3 d) and 4659737665861241088 (P = 60.8 d), both in
+`vari_eclipsing_binary`, with BP and RP blended in every transit. The test now allows d_G = mix / r for r in
+[r_lo, 1], with BP/RP noise scaled by 1 / r_lo. `dilution_floor` measures r_lo per source from its G changes of
+at least 10 G errors. For a source known to be unblended it takes 0.7 × the lower quintile of mix / d_G. For a
+blended source it takes 0.7 × the minimum, because a neighbour enters the window only at some scan angles. A
+quiet source gives no measurement: r_lo = 1 if it is unblended, else 0, which leaves it `untested`. "Unblended"
+means a BP and RP blended-transit fraction below 5%, from `gaia_source` `phot_{bp,rp}_n_blended_transits` /
+`n_obs`. Without those columns a quiet source is untested. On a blended source the test is therefore lenient by
+design: a G-only change there cannot be told from a diluted real one. Leaving the epoch under test out of the
+minimum would stop a single G fault from setting its own bound. It gained about 4 points of G-only recall, but
+vetoed 2–8% of diluted injections, so the minimum keeps that epoch.
+
+**Error inflation.** A G error more than 5 times the star's median is `inflated_error`, and that G epoch is
+dropped, but only if no independent measurement corroborates the change. It is kept when BP or RP at that
+transit, or G at the partner transit in the other field of view (within 0.1 d), changed the same way by more than
+3 of its own errors. This rule has no physics behind it. A deep, brief change can inflate the error by itself:
+DPAC's G error is the spread over the AF CCDs, so a change during the ~40 s crossing raises it. So the rule leans
+towards keeping data.
 
 The noise is the larger of the quoted errors and the star's own scatter in d_G − (d_BP + d_RP)/2. On the 50 DR3
 stars from pilots 2 and 3, that scatter is about twice what the quoted errors predict (median ratio 2.1), so the
 errors alone would over-flag. The DPAC reject flags were 0 on every epoch these stars kept.
 
-**Injection test** (`scripts/stage0_recovery.py`, the 68 controls and hosts of pilots 1–3, 20 single-transit
-injections each):
+**Injection test** (`scripts/stage0_recovery.py --sources`, the 68 controls and hosts of pilots 1–3, with their
+blend counts, 20 single-transit injections each). "Diluted" is a grey dip that BP and RP see at k ~ U(0.1, 1) of
+its depth, on the same star marked as blended in every transit.
 
-| G deficit (σ_G) | G-only dips flagged | grey, dust (β = 2) or flip flagged |
+| G deficit (σ_G) | G-only dips flagged: all (unblended stars) | grey, dust (β = 2), flip or diluted flagged |
 |---|---|---|
-| 3 | 0.38 (G < 14: 0.68; G > 18: 0.01) | ≤ 0.003 |
-| 10 | 0.71 (14–16: 0.89; G > 18: 0.41) | ≤ 0.001 |
-| 20 | 0.77 (14–16: 0.91) | ≤ 0.003 |
+| 3 | 0.20 (0.31) | 0 |
+| 10 | 0.41 (0.59) | ≤ 0.001 |
+| 20 | 0.45 (0.66) | ≤ 0.001 |
 
-Grey and flip injections were never flagged, and dust only at the 0.1–0.3% level. At 20σ the missed G-only dips
-are 9% with no BP or RP epoch in the transit, 5% too noisy in BP/RP, and 10% on stars whose variability puts the
-injected G change inside the interval. A veto that removes a real signal costs more than one that lets an artefact
-through to Stage A, so the threshold stays at 4σ.
+The first version flagged 71–77% of G-only dips at ≥ 10σ, but it would also have vetoed every diluted real change.
+The fix gives up about half that recall to keep real dips on blended and on quiet unknown stars, and it vetoes
+none of the 6,800 diluted injections. A veto that removes a real signal costs more than one that lets an artefact
+through to Stage A. Recall on the 22 blended stars is about 0: untested, as designed. Known answers kept: the two
+LMC eclipses above keep their deepest points (76% and 68%), and so does the third source the DR4 thread flagged
+(4659940667527443712, 22%), whose deep G point is now corroborated by BP. The archive thread's DR3 chunk with the
+first version removed 29 of 160 bright spikes at ≥ 8σ but only 6 of 381 dips. G faults lean bright. The test is
+symmetric in its residual and in the attribution, so the mirror null stays valid; the asymmetry is in the faults.
 
 **On the pilot-3 controls**, Stage 0 removes the dips behind two of the four instrumental readings: G errors 27 and
-21 times the median at the dip epoch. The other two, a 5% G dip and a 4% G dip with BP and RP flat, are `untested`.
-The stars are faint (G = 16.7), and the band-residual scatter is about 3%, so the data do not show these dips to be
-faults. Their vetters' "instrumental" is a plausible reading, but not a known answer. Across the 50 stars Stage 0
-drops 1.6% of G epochs for inflated errors, and BP/RP at 3.3% of transits for colour faults. The colour faults are
-mostly single BP or RP values tens of times the median.
+21 times the median, with BP and RP flat at that transit. The other two, a 5% G dip and a 4% G dip with BP and RP
+flat, are `untested`. Those stars are unblended (fractions 0.015 and 0), but faint (G = 16.7), and the
+band-residual scatter is about 3%, so the data do not show these dips to be faults. Their vetters'
+"instrumental" is a plausible reading, but not a known answer. Across the 50 stars Stage 0 drops 1.6% of G epochs
+for inflated errors, and BP/RP at 3.3% of transits for colour faults (first version). The colour faults are mostly
+single BP or RP values tens of times the median.
 
 Consequences for the pilots:
 
 - `stage0.clean_long` runs the same test on `gaia.epoch`'s long light-curve table, matching bands by
-  `transit_id`, and returns per-source counts of each verdict as features. Dropped epochs are counted, never
+  `transit_id`. It takes `blend` (source_id → `blend_fraction` of the `gaia_source` row) and returns per-source
+  counts of each verdict as features. Dropped epochs are counted, never
   silently lost, because the fault rate per source and per sky region is an instrument diagnostic. Any statistic
   that reads the light curves should run after it, dim and bright sides alike so a mirrored null stays
   symmetric, and so should injections, so completeness is measured after cleaning. `epoch_verdicts` is the
@@ -410,6 +438,27 @@ Consequences for the pilots:
 - The `single_band_dip` decoy leaves the Gaia mix. Where BP and RP could show it, Stage 0 removes it. Where they
   cannot, the packet does not show it to be single-band, so its "instrumental" label would not be what an ideal
   observer can conclude. Its false-positive class is measured by the injection test above instead.
+
+## 13. Solar-system bodies at dip epochs
+
+`vetting/sso.py` looks for known asteroids near the source at each detected dip. A body inside the photometric
+window adds light. One in a TESS background annulus is over-subtracted and makes a dip. One exactly in front of
+the star occults it for seconds, which Gaia records as a single-epoch dip if a transit catches it. The result,
+`sso_bright` (the body's flux is at least a tenth of the dip depth), `sso_faint` or `clear`, is evidence for the
+packet and Stage B, not a veto.
+
+SkyBoT's cone search is geocentric whatever observer code it is given. On Gaia DR3's own detection of (1009)
+Sirene (`gaiadr3.sso_observation`, 2015-02-20), SkyBoT put the body 544 arcsec from where Gaia saw it, with
+location codes 258, `@gaia` and 500 alike. That offset is parallax: Gaia is about 0.01 au from the Earth, so a body
+at 3.6 au shifts by about 570 arcsec. Miriade's `ephemcc` does take spacecraft observers (`@gaia`, `@tess`). So
+the check runs a geocentric SkyBoT cone widened by the largest parallax (Gaia at 0.0102 au, TESS at 0.0026 au,
+bodies beyond 0.8 au), then makes two Miriade calls for one reference body. Every body near one line of sight
+shifts by the same sky-plane vector divided by its distance, so that one body fixes the shift for all of them.
+On 8 Gaia DR3 asteroid observations ((3200) Phaethon and (7000) Curie), the corrected search found the right body
+0.4–1.6 arcsec from Gaia's position, against 500–830 arcsec geocentric. Search radii are 15 arcsec for Gaia (G
+window 0.7 × 2.1, BP/RP 3.5 × 2.1, plus timing and ephemeris slack) and 150 arcsec for TESS. Dip times are
+converted from BJD to observer UTC by removing the barycentric light time towards the source (up to ±8.3 min).
+NEOs within 0.8 au can fall outside the widened cone.
 
 ## Log
 
@@ -437,3 +486,9 @@ Consequences for the pilots:
   no longer reused as hosts, and single-band decoys leave the Gaia mix.
 - 2026-10-21. Held-out tail intervals are recalibrated by split-conformal widening fitted on controls: factor 1.14
   on pilots 2–3, which brings leave-one-out coverage from 65% to 81%.
+- 2026-10-21. Stage 0 made dilution-aware (§12) after it removed real eclipses on BP/RP-blended LMC stars. The
+  allowed G change scales with a per-source dilution bound, and quiet stars that may be blended are untested.
+  Inflated-error epochs are kept when BP, RP or the partner transit corroborates them. G-only recall falls from
+  71–77% to 41–45% at ≥ 10σ; none of 6,800 diluted injections is vetoed.
+- 2026-10-21. Solar-system check at dip epochs (§13): SkyBoT is geocentric only, so positions are corrected to
+  Gaia or TESS with Miriade. Gaia's own asteroid detections are recovered within 1.6 arcsec.
