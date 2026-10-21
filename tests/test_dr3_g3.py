@@ -38,3 +38,17 @@ def test_g3_finds_fov_confirmed_dimmers_and_reports_symmetry():
     assert np.isnan(q.loc[f["n_g"] < 10, "w_fov"]).all()
     text = g3.summary(sym, q, f)
     assert "FoV-confirmed dimmers at q ≤ 0.01" in text
+
+
+def test_g3_compares_raw_and_cleaned_extremes():
+    rng = np.random.default_rng(2)
+    f = fake_features(rng)
+    # Stage 0 removes bright G faults (cosmic rays, neighbours) far more often than faint ones.
+    f["min_z_raw"] = f["min_z_rob"]
+    f["max_z_raw"] = np.where(rng.random(len(f)) < 0.05, 60.0, f["max_z_rob"])
+    f["stage0_n_band_inconsistent"] = (f["max_z_raw"] != f["max_z_rob"]).astype(int)
+    sym, q = g3.run(f)
+    assert set(sym["statistic"]) == {"single", "fov", "single_raw"}
+    # Faults on the bright side shrink the dim winners' margin, so the raw statistic finds fewer.
+    assert (q["q_single"] <= 0.1).sum() > (q["q_single_raw"] <= 0.1).sum()
+    assert "`single_raw`" in g3.summary(sym, q, f)
