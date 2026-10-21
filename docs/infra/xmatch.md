@@ -233,4 +233,4 @@ default) so a target list costs one fetch per pixel. TAP surveys use the shared 
 - ASAS-SN variables mix epochs (mean epoch 2001.5 ± 4 assumed); its own Gaia DR3 ids are a cross-check.
 - Not done: Pan-STARRS/SkyMapper (for the optical SED), DECaLS, Spitzer, GALEX. The survey spec is a
   dataclass in `surveys.py`; adding one is a few lines plus a validation field.
-- Upstream: the AllWISE HATS column shift is to be reported to the LSDB maintainers (Cora is checking it and will file it herself).
+- Upstream: the AllWISE HATS column shift is reported as [astronomy-commons/lsdb#1660](https://github.com/astronomy-commons/lsdb/issues/1660). When it is fixed, recheck and drop the column restriction in `surveys.py`.
