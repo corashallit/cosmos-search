@@ -44,8 +44,7 @@ These apply to every arm and every thread.
 | I1 | Shared HTTP/TAP client with per-host policies and cache ✓ | — | Archive thread |
 | I2 | Gaia DR3 epoch photometry streamed to per-source features (bulk CDN files and DataLink) ✓ | I1 | Archive thread |
 | I3 | Versioned target queries with a freeze manifest | I1 | Archive thread |
-| I4 | Size of the random full-light-curve channel on day one (arms/gaia-dimmers.md step 2) | Set at D1 from DR3: the channel's yield per source pulled vs the prefilter's, against DataLink capacity |
-| Durable store | Cora | Cora |
+| I4 | Durable store | Cora | Cora |
 | I5 | Proper-motion-aware cross-match to WISE family, 2MASS, SIMBAD/VSX | I1 | Cross-match thread |
 | **Gaia dimmers (main)** | | | |
 | G1 | DR3 rehearsal sample: full DR3 epoch photometry (11.75 M) plus random controls | I2 | unassigned |
