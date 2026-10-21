@@ -505,3 +505,8 @@ NEOs within 0.8 au can fall outside the widened cone.
   0.85. Gaia's ~35 epochs show most injected dip trains as one or two dips, which an EB explains, so the agents
   called them EBs. The one real hit was a known RS CVn SB1. Packets need external light curves and known-variable
   context before the next rule (docs/dayone.md).
+- 2026-10-21. Rule v2 (v1's rule on packets with ZTF and TESS light curves), pre-registered before batch 3, not
+  adopted on 50 fresh blind packets: 4/16 target decoys (two of them secular fades), 0/14 controls, AUC(S) 0.69 ≥
+  AUC(P(u)) 0.63. Only 3 of 14 dip decoys had any external epoch in dip, and the one with clear recurrence was
+  called a periodic EB because an agent cannot run a period search. Next: a pipeline recurrence test in the
+  packet, pre-registered before batch 4 (docs/dayone.md).

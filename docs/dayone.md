@@ -246,6 +246,58 @@ test isolates what the extra light curves do.
   AUC(S) ≥ AUC(P(u)). If recall improves but stays below 0.5, the next step is a pipeline recurrence test on the
   external epochs (does the Gaia dip depth recur at a fixed period?), pre-registered before batch 4.
 
+### Batch 3 result: v2 not adopted
+
+50 packets (16 target decoys, 4 other decoys, 16 real, 14 controls), one blind subagent each. All 50 transcripts
+show exactly one Read of the prompt and one Write of the reply; verdicts committed at 0a3882c before the reveal.
+SkyBoT is unreachable from the cloud container, so the solar-system check did not run for this batch.
+
+| measure | result | criterion |
+|---|---|---|
+| target-decoy recall | 4/16 (95% CI 0.10–0.49) | ≥ 0.5: fails |
+| controls flagged | 0/14 (0–0.22) | ≤ 1: passes |
+| AUC, target decoys vs controls | S 0.69, P(u) 0.63 | AUC(S) ≥ AUC(P(u)): passes |
+| other decoys flagged | 2/4 (the step, S 0.50, unexplained; a periodic train, S 0.43, EB) | |
+| real packets flagged | 1/16 (3047786003881272448 again, S 0.66 → 0.43) | |
+| target decoys called EB | 8/16 (batch 2: 8/11) | |
+| paired change in S, real | median −0.025 (4 up, 11 down) | |
+| paired change in S, controls | median −0.025 (5 up, 9 down) | |
+
+Recall rose from 0/11 to 4/16 but stays below 0.5, so by the pre-registered decision the next step is the pipeline
+recurrence test. The rise is smaller than it looks: two of the four hits are secular fades (S 0.80, 0.36), a family
+batch 2 did not have. On the families both batches share, it is 2/14 against 0/11, within noise.
+
+**Why the external data barely helped.** For most decoys the external epochs never saw the signal. Of the 14
+dip decoys (trains and single dips), only 3 have any external epoch moved by ≥ 5 robust σ: one Poisson train in
+124 ZTF epochs, and two prime trains in 1 and 3. Single dips do not recur by design. Sparse trains with dips of
+hours to days mostly fall between ZTF's nights and outside TESS's sectors (the TGLC route ends at BTJD 2824). In
+the other 11 the external data said "no other dip", which the agents read either as a long-period EB that ZTF
+missed or, in the two geometric trains near the threshold, as weak evidence for a one-off occulter.
+
+The one decoy with clear external recurrence shows what is missing. The Poisson train (79 dips over the span, 124
+ZTF epochs in dip) showed dozens of dips at a constant ~16% depth. The agent read that as a strict period near a
+1-day alias and called an EB (S 0.06), while its own `discriminating_test` asked for a BLS search to recover the
+period. An agent reading tables of epochs cannot run a period search; the pipeline can. That is the recurrence
+test.
+
+External data also made the agents slightly surer of mundane classes for real packets and controls alike. The
+real hit fell because ZTF shows a ~39 d, 4.5% oscillation and slow 15–20% swings, which supports an evolved
+pulsator (long secondary period or RVb) over an occulting disk; it is still a known SB1 (batch 2).
+
+**Next (batch 4, pre-registered before its decoy plan is drawn).**
+
+1. A recurrence test in the pipeline. For each packet with external epochs, mark in-dip epochs per band, then ask
+   whether one strict period explains them: fold all epochs over a period grid and score how cleanly in-dip
+   epochs separate from flat epochs at the same phase. An eclipse window holds only in-dip epochs; an aperiodic
+   train's window fills with flat ones. The packet gets the best period, that purity, the number of distinct
+   dips and their depth scatter. Calibrate on Gaia DR3 eclipsing binaries with ZTF data and on injected aperiodic
+   trains before freezing a threshold.
+2. Decoy dip trains must also be visible externally (some external epoch moved by ≥ 5σ), as they already must be
+   in Gaia's visible epochs, so the batch measures what the test does when it has something to test. Single-dip
+   families stay in the batch but are scored separately, since recurrence cannot help them.
+3. Report how many of the real candidates have external epochs in dip, so the conditional recall can be scaled
+   to DR4.
+
 ## Keep rule v2 (after the rehearsal)
 
 The stream keeps a light curve when the source's G3 `single` or `fov` |W| reaches 0.6 × the |W| at which G3
