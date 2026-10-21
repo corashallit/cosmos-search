@@ -317,3 +317,13 @@ def get_client():
         if _default is None:
             _default = Client()
         return _default
+
+
+def storage_options():
+    """fsspec storage_options for reads that bypass the client (lsdb/HATS over aiohttp).
+
+    Carries the User-Agent and enforces the blind-run refusal; callers cap their own concurrency to the
+    policy table in docs/infra/net.md.
+    """
+    check_blind()
+    return {"headers": {"User-Agent": USER_AGENT}}
