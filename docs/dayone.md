@@ -577,6 +577,11 @@ any packet existed):*
   chance to fire on active stars, because testable single events on quiet stars are rare. When it does, activity
   is its main false-positive class, and nothing here measures that rate well. Batch 5 cannot fix this; a
   confirmatory set of active-star controls would.
+- **TESS contamination is a flux ratio.** `xmatch.blend` reports neighbour flux over target flux, and in this
+  batch it reaches 75. `single_event` and `external.apply` had used it as the diluted fraction, so a ratio above
+  1 turned an injected TESS dip into a brightening. Both now use the target's share, 1 / (1 + c). This cannot
+  change batch 5's decoys, whose single dips fall before TESS began. It changes the single-event test only
+  through how strongly TESS epochs refute repeats.
 - **Secondary measure (reported, not used for the decision):** v4g = v3b or (`single_dip_flag` and the vetter
   puts < 0.5 on eclipsing_binary + rotation_or_spots + pulsation_or_irregular + extragalactic). This is
   red-team R1's gating applied to the single-dip flag.

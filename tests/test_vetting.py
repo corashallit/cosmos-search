@@ -815,8 +815,11 @@ def test_external_apply_dilutes_tess_and_skips_g_only():
     ext = pd.DataFrame({"source_id": [1, 1, 2], "band": ["TESS", "ztf_r", "TESS"], "t": [10.5, 10.5, 10.5],
                         "flux": 1.0, "err": 0.01})
     plan = {1: {"signal": dip, "bands": None}, 2: {"signal": dip, "bands": ["G"]}}
+    # The contamination is neighbour flux over target flux: at 0.5 the target gives 2/3 of the aperture's light.
     out = apply(ext, plan, {1: 0.5})
-    assert out.flux.tolist() == pytest.approx([0.9, 0.8, 1.0])
+    assert out.flux.tolist() == pytest.approx([1 - 0.2 * 2 / 3, 0.8, 1.0])
+    crowded = apply(ext, plan, {1: 74.7})          # a ratio above 1 still only dims, by a small share
+    assert 0.99 < crowded.flux.iloc[0] < 1.0
 
 
 def test_dip_trains_continue_past_the_span():

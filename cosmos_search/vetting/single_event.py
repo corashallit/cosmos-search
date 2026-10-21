@@ -442,7 +442,10 @@ def test(lcs, source=None, context=None, n_draws=N_DRAWS, rng=None):
     # TESS's 21" pixels dilute a change on the target by the neighbours' share of the aperture; without the
     # contamination ratio, assume a sizeable one, which can only make repeats harder to see (conservative).
     c = (context or {}).get("tess_contamination")
-    dil = {"TESS": float(c) if c is not None and np.isfinite(float(c)) else TESS_DILUTION_UNKNOWN}
+    # The contamination is a flux ratio (neighbours / target, xmatch.blend), so the share of the aperture's light
+    # that is not the target's is c / (1 + c).
+    dil = {"TESS": float(c) / (1 + float(c)) if c is not None and np.isfinite(float(c)) and float(c) >= 0
+           else TESS_DILUTION_UNKNOWN}
     ep = _band_epochs(lcs, dil)
     if ep is None:
         return None
