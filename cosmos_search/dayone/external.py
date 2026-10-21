@@ -117,9 +117,39 @@ def rank_sectors(sectors, near=None, span=GAIA_DR4_SPAN):
     return sorted(sectors, key=key)
 
 
+RED_NOISE_SCALES_DAYS = (0.25, 0.5, 1.0, 2.0)   # dip timescales the error should be honest about
+
+
+def _robust_std(x):
+    return 1.4826 * np.median(np.abs(x - np.median(x))) if len(x) else np.nan
+
+
+def red_noise_beta(t, f, sigma_white, scales=RED_NOISE_SCALES_DAYS, min_bins=10):
+    """How much more the flux scatters on day-like timescales than white noise of per-point scatter sigma_white
+    predicts (the time-averaging beta of Pont et al. 2006): for each scale, the robust scatter of bin means over
+    sigma_white / sqrt(points per bin); beta is the median over scales with enough bins, at least 1 (the largest
+    would pick up the estimator's own noise, which with ~10 bins per scale is ~25%). TESS systematics (scattered light,
+    pointing jitter, momentum dumps) and the star's own variability are correlated in time, so a point-to-point
+    error alone overstates how significant a day-long dip is."""
+    ratios = []
+    if not (sigma_white > 0) or len(t) < 2 * min_bins:
+        return 1.0
+    for w in scales:
+        key = np.floor((t - t.min()) / w).astype(np.int64)
+        g = pd.DataFrame({"k": key, "f": f}).groupby("k")["f"].agg(["mean", "size"])
+        n_exp = g["size"].median()
+        g = g[g["size"] >= 0.5 * n_exp]
+        if len(g) < min_bins:
+            continue
+        expected = sigma_white / np.sqrt(g["size"].to_numpy())
+        ratios.append(float(_robust_std(g["mean"].to_numpy()) / np.median(expected)))
+    return max(1.0, float(np.median(ratios))) if ratios else 1.0
+
+
 def _bin(t, f, width):
-    """Mean flux in fixed-width bins, with error = per-point scatter / sqrt(n), the per-point scatter taken from
-    point-to-point differences (robust, so dips and trends barely move it). TGLC gives no per-point errors.
+    """Mean flux in fixed-width bins. TGLC gives no per-point errors, so the error is the per-point white scatter
+    (robust, from point-to-point differences) / sqrt(n), inflated by `red_noise_beta` so that it also covers the
+    sector's correlated noise on 0.25-2 d scales.
 
     Bins with a single point are kept: sectors 1-26 (all of DR4's concurrent TESS data) have 30-min FFIs, one
     point per 30-min bin, and a rule that needed two points per bin dropped every one of them."""
@@ -127,8 +157,9 @@ def _bin(t, f, width):
     df = pd.DataFrame({"k": key, "t": t, "f": f}).groupby("k")
     agg = df.agg(t=("t", "mean"), f=("f", "mean"), n=("f", "size"))
     d = np.diff(f)
-    s = 1.4826 * np.median(np.abs(d - np.median(d))) / np.sqrt(2) if len(d) else np.nan
-    return agg.t.to_numpy(), agg.f.to_numpy(), (s / np.sqrt(agg.n)).to_numpy()
+    s = _robust_std(d) / np.sqrt(2) if len(d) else np.nan
+    beta = red_noise_beta(t, f, s)
+    return agg.t.to_numpy(), agg.f.to_numpy(), (beta * s / np.sqrt(agg.n)).to_numpy()
 
 
 def tess(source_id, ra, dec, max_sectors=None, near=None):
