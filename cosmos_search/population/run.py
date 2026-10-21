@@ -60,10 +60,11 @@ def _events_one(path, out, keep_rejected):
     ev = events.find(rows, stars)
     stars.drop(columns=["first_visit"]).to_parquet(out / "stars" / f"{name}.parquet", index=False)
     ev[ev.half == 0][EVENT_COLS].to_parquet(out / "events_A" / f"{name}.parquet", index=False)
-    hist = np.zeros((2, N_HOURS, N_PIX_MASK), np.int64)
-    np.add.at(hist, (rows["vhalf"], hour_bin(rows["t"]), mask_pixel(rows["source_id"])), 1)
-    b = ev[ev.half == 1][EVENT_COLS]
-    return name, hist, b.to_dict(orient="list")
+    # Epoch counts per (half, hour, nside-2 pixel), returned sparse: a dense array per file is 18 MB of IPC.
+    flat = np.ravel_multi_index((rows["vhalf"].astype(np.int64), hour_bin(rows["t"]), mask_pixel(rows["source_id"])),
+                                (2, N_HOURS, N_PIX_MASK))
+    cells, counts = np.unique(flat, return_counts=True)
+    return name, (cells, counts), ev[ev.half == 1][EVENT_COLS]
 
 
 def cmd_events(a):
@@ -72,16 +73,17 @@ def cmd_events(a):
         (out / d).mkdir(parents=True, exist_ok=True)
     files = sorted(glob.glob(f"{a.lc}/*.parquet"))[: a.limit]
     hist = np.zeros((2, N_HOURS, N_PIX_MASK), np.int64)
-    sealed_b = {k: [] for k in EVENT_COLS}
+    parts_b = []
     with ProcessPoolExecutor(a.workers) as ex:
         for i, (name, h, b) in enumerate(ex.map(_events_one, files, [out] * len(files),
                                                 [a.keep_rejected] * len(files), chunksize=4), 1):
-            hist += h
-            for k in EVENT_COLS:
-                sealed_b[k] += [v.item() if hasattr(v, "item") else v for v in b[k]]
+            hist.ravel()[h[0]] += h[1]
+            parts_b.append(b)
             if i % 200 == 0:
                 print(f"{i}/{len(files)}", flush=True)
     np.save(out / "epoch_hist.npy", hist)
+    b = pd.concat(parts_b, ignore_index=True)
+    sealed_b = {k: b[k].tolist() for k in EVENT_COLS}
     digest = write_sealed(sealed_b, out / "events_B.json.age", RECIPIENTS)
     (out / "events_B.sha256").write_text(digest + "\n")
     print(f"{len(files)} files; half-B events sealed ({digest[:12]})", flush=True)
@@ -102,31 +104,35 @@ def events_A(out):
 # -- time masks ----------------------------------------------------------------------------------------------
 
 def time_mask(ev, hist_half, p=MASK_P):
-    """Masked (hour, nside-2 pixel) cells for one half: whole-sky hours and hour x pixel cells whose event count is
-    improbable (binomial, Bonferroni over occupied cells) given the epochs observed there. All event classes count."""
+    """Masked (hour, nside-2 pixel) cells for one half: whole-sky hours and hour x pixel cells holding improbably
+    many events (Poisson, Bonferroni over occupied cells). All event classes count.
+
+    The expectation is conditioned on position: a cell expects its epochs times its own pixel's events per epoch
+    over the half, and an hour expects the sum of that over pixels. A sky region rich in events then raises its own
+    expectation at every hour it is scanned, so the mask catches what stands out in time, and cannot remove a
+    steady spatial excess (the signal the scan looks for). An unconditioned expectation masked 35% of half A's
+    events, mostly in the hours that crossed event-rich regions."""
     from scipy import stats
     hb, px = hour_bin(ev.t_deep.to_numpy()), mask_pixel(ev.source_id.to_numpy())
-    n = len(ev)
     mask = np.zeros(hist_half.shape, bool)
-    if n == 0:
+    if len(ev) == 0:
         return mask, {}
-    tot = hist_half.sum()
-    sky = hist_half.sum(axis=1)
-    k_sky = np.bincount(hb, minlength=N_HOURS)
-    occ = sky > 0
-    p_sky = stats.binom.sf(k_sky - 1, n, sky / tot)
-    bad_sky = occ & (p_sky < p / occ.sum()) & (k_sky >= 3)
-    mask[bad_sky, :] = True
     k_cell = np.zeros(hist_half.shape, np.int64)
     np.add.at(k_cell, (hb, px), 1)
+    ep_pix = hist_half.sum(axis=0)
+    rate = np.where(ep_pix > 0, k_cell.sum(axis=0) / np.maximum(ep_pix, 1), 0.0)
+    e_cell = hist_half * rate[None, :]
     occ_c = hist_half > 0
-    p_cell = stats.binom.sf(k_cell - 1, n, hist_half / tot)
-    bad_cell = occ_c & (p_cell < p / occ_c.sum()) & (k_cell >= 3)
+    bad_cell = occ_c & (stats.poisson.sf(k_cell - 1, e_cell) < p / occ_c.sum()) & (k_cell >= 3)
+    k_sky, e_sky = k_cell.sum(axis=1), e_cell.sum(axis=1)
+    occ = e_sky > 0
+    bad_sky = occ & (stats.poisson.sf(k_sky - 1, e_sky) < p / occ.sum()) & (k_sky >= 3)
+    mask[bad_sky, :] = True
     mask |= bad_cell
     hit = mask[hb, px]
-    info = {"events": int(n), "sky_hours_masked": int(bad_sky.sum()), "cells_masked": int(bad_cell.sum()),
+    info = {"events": int(len(ev)), "sky_hours_masked": int(bad_sky.sum()), "cells_masked": int(bad_cell.sum()),
             "events_masked": int(hit.sum()), "epochs_masked": int(hist_half[mask].sum()),
-            "epochs_total": int(tot)}
+            "epochs_total": int(hist_half.sum())}
     return mask, info
 
 
@@ -245,16 +251,23 @@ def cmd_replicate(a):
         m = glm.fit(codes, y, e, terms)
         lam[h] = m["predict"](codes, e)
     win = scan.Windows()
+    px, sh = stars.pixel.to_numpy(), stars.shell.to_numpy()
+    phi = {h: scan.dispersion(win, scan.cell_sums(px, sh, y), scan.cell_sums(px, sh, lam[h]))[1]
+           for h, y in (("A", yA), ("B", yB))}
     res = []
-    n = max(len(frozen["candidates"]), 1)
     for c in frozen["candidates"]:
         mem = analysis.window_members(stars, win, c)
         row = dict(c)
+        ri = int(win.disc[c["disc"], 1])
         for h, y in (("A", yA), ("B", yB)):
             o, e = float(y[mem].sum()), float(lam[h][mem].sum())
+            f = float(phi[h][ri, c["shell_window"]])
             lo, hi = _garwood(o)
-            row[h] = {"O": o, "E": e, "excess_ratio": (o - e) / e, "excess_ratio_90": [(lo - e) / e, (hi - e) / e],
-                      "p_one_sided": float(stats.poisson.sf(o - 1, e))}
+            # Negative binomial with the half's own overdispersion at this window's scale (variance phi * E).
+            p_nb = (float(stats.nbinom.sf(o - 1, e / (f - 1), 1 / f)) if f > 1 else float(stats.poisson.sf(o - 1, e)))
+            row[h] = {"O": o, "E": e, "phi": f, "excess_ratio": (o - e) / e,
+                      "excess_ratio_90": [(lo - e) / e, (hi - e) / e],
+                      "p_one_sided": p_nb, "p_poisson": float(stats.poisson.sf(o - 1, e))}
         row["replicated"] = row["B"]["p_one_sided"] < 0.05 / 5
         row["weak"] = row["replicated"] and row["B"]["excess_ratio"] < 0.25 * row["A"]["excess_ratio"]
         res.append(row)
@@ -286,9 +299,16 @@ def cmd_search(a):
     from . import analysis
     out = Path(a.out)
     stars = analysis.load_stars(out)
-    y = analysis.outcome(stars, events_A(out), 0, np.load(out / "mask_A.npy"))
+    y = analysis.outcome(stars, events_A(out), 0, np.load(out / "mask_A.npy"), cls=a.cls)
     cands, info, terms, win = analysis.search(stars, y, stars.E_gen_A.to_numpy(), rng=np.random.default_rng(a.seed))
-    rec = {"half": "A", "candidates": cands, "model": info, "code_commit": _head(),
+    lam = info.pop("_lam")
+    if cands:
+        top = cands[0]
+        mem = analysis.window_members(stars, win, top)
+        top["perm_p"], _, top["perm_mean"] = analysis.permutation_p(stars, y, mem, rng=np.random.default_rng(a.seed + 1))
+    info["refit_check"] = analysis.refit_check(stars, lam, stars.E_gen_A.to_numpy(), terms, win,
+                                               rng=np.random.default_rng(a.seed + 2))
+    rec = {"half": "A", "class": a.cls, "candidates": cands, "model": info, "code_commit": _head(),
            "plan": "docs/population.md", "n_stars": int(len(stars))}
     Path(a.candidates).write_text(json.dumps(rec, indent=1) + "\n")
     print(json.dumps({k: v for k, v in rec.items() if k != "model"}, indent=1), flush=True)
@@ -316,6 +336,7 @@ def main(argv=None):
         s.add_argument("--aux", default="/home/user/pop/aux")
         s.add_argument("--candidates", default=str(REPO / "population" / "candidates_A.json"))
         s.add_argument("--seed", type=int, default=20261021)
+        s.add_argument("--cls", default="SOV", choices=events.CLASSES)
         s.add_argument("--replication", default=str(REPO / "population" / "replication_B.json"))
     a = ap.parse_args(argv)
     {"events": cmd_events, "masks": cmd_masks, "exposure": cmd_exposure, "assemble": cmd_assemble,

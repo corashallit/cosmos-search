@@ -66,6 +66,7 @@ def cmd_run(a):
                        "n_dips": int(len(dips))})
         cands, info, _, _ = analysis.search(stars, y, stars.E_gen_A.to_numpy(), win=win, n_null=a.n_null,
                                             rng=np.random.default_rng(a.seed + uni["universe"]), terms=terms)
+        info.pop("_lam", None)
         results.append({"universe": uni["universe"], "candidates": cands, "max_llr": info["max_llr"],
                         "n_events": info["n_events"], "null_q95": info["null_quantiles"][0.95]})
         truth.append({"universe": uni["universe"], "regions": tr})

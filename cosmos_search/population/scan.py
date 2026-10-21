@@ -108,10 +108,37 @@ def _overlap(win, a, b):
     return la < hb and lb < ha
 
 
-def candidates(win, obs_cells, lam_cells, null, k_max=5, alpha=0.05):
-    """Greedy non-overlapping windows with family-wise p < alpha (p from the max-null)."""
+DISPERSION_MIN_E = 5.0
+
+
+def dispersion(win, obs_cells, lam_cells, min_e=DISPERSION_MIN_E):
+    """Overdispersion per window scale (radius x distance window), robustly from all windows of that scale.
+
+    Unmodelled spatial structure (extinction, distance errors, populations the covariates miss) makes window counts
+    vary more than Poisson. At each scale, phi = (1.4826 MAD of (O - E) / sqrt(E))^2 over windows with E >= min_e,
+    floored at 1. The MAD keeps the few windows a real excess would occupy from inflating it. Returns
+    (phi per window, shape like totals; phi per scale, shape (n_radii, n_shell_windows))."""
     O, E = win.totals(obs_cells), win.totals(lam_cells)
-    L = llr(O, E)
+    radius_idx = win.disc[:, 1]
+    per_scale = np.ones((len(RADII_DEG), len(win.shells)))
+    for ri in range(len(RADII_DEG)):
+        rows = radius_idx == ri
+        for j in range(len(win.shells)):
+            e, o = E[rows, j], O[rows, j]
+            ok = e >= min_e
+            if ok.sum() >= 30:
+                z = (o[ok] - e[ok]) / np.sqrt(e[ok])
+                per_scale[ri, j] = max(1.0, (1.4826 * np.median(np.abs(z - np.median(z)))) ** 2)
+    return per_scale[radius_idx], per_scale
+
+
+def candidates(win, obs_cells, lam_cells, null, k_max=5, alpha=0.05, phi=None):
+    """Greedy non-overlapping windows with family-wise p < alpha (p from the max-null).
+
+    phi: per-window overdispersion (from `dispersion`). The statistic is then the quasi-Poisson LLR / phi, compared
+    with the Poisson max-null, the usual quasi-likelihood correction."""
+    O, E = win.totals(obs_cells), win.totals(lam_cells)
+    L = llr(O, E) / (phi if phi is not None else 1.0)
     order = np.argsort(L, axis=None)[::-1]
     picked = []
     for flat in order[:200000]:
@@ -122,6 +149,7 @@ def candidates(win, obs_cells, lam_cells, null, k_max=5, alpha=0.05):
         if any(_overlap(win, (i, j), (q["disc"], q["shell_window"])) for q in picked):
             continue
         d = win.describe(i, j)
-        d.update(O=float(O[i, j]), E=float(E[i, j]), llr=float(L[i, j]), p_fw=float(p))
+        d.update(O=float(O[i, j]), E=float(E[i, j]), llr=float(L[i, j]), p_fw=float(p),
+                 phi=float(phi[i, j]) if phi is not None else 1.0)
         picked.append(d)
     return picked, float(L.max())

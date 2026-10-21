@@ -101,8 +101,11 @@ def search(stars, y, e, win=None, n_null=scan.N_NULL, rng=None, test_ecl=True, t
     px, sh = stars.pixel.to_numpy(), stars.shell.to_numpy()
     obs, lc = scan.cell_sums(px, sh, y), scan.cell_sums(px, sh, lam)
     null = scan.null_max(win, lc, n=n_null, rng=rng)
-    cands, top = scan.candidates(win, obs, lc, null)
-    info.update(n_events=float(y.sum()), expected=float(lam.sum()), max_llr=top,
+    phi, phi_scale = scan.dispersion(win, obs, lc)
+    cands, top = scan.candidates(win, obs, lc, null, phi=phi)
+    cands_poisson, top_poisson = scan.candidates(win, obs, lc, null)
+    info.update(phi_per_scale=phi_scale.round(3).tolist(), candidates_poisson_only=cands_poisson,
+                max_llr_poisson=top_poisson,_lam=lam, n_events=float(y.sum()), expected=float(lam.sum()), max_llr=top,
                 null_quantiles={q: float(np.quantile(null, q)) for q in (0.5, 0.9, 0.95, 0.99)})
     return cands, info, terms, win
 
@@ -112,3 +115,41 @@ def window_members(stars, win, cand):
     pix = win.M[cand["disc"]].indices
     lo, hi = cand["shells"]
     return np.isin(stars.pixel.to_numpy(), pix) & (stars.shell.to_numpy() >= lo) & (stars.shell.to_numpy() < hi)
+
+
+def refit_check(stars, lam, e, terms, win, n=10, rng=None):
+    """Max LLR over windows in n star-level null realisations, with and without refitting the GLM (§4)."""
+    rng = rng or np.random.default_rng()
+    codes, _ = glm.covariate_codes(stars)
+    px, sh = stars.pixel.to_numpy(), stars.shell.to_numpy()
+    lc = scan.cell_sums(px, sh, lam)
+    E0 = win.totals(lc)
+    out = {"no_refit": [], "refit": []}
+    for _ in range(n):
+        y = rng.poisson(lam).astype(float)
+        O = win.totals(scan.cell_sums(px, sh, y))
+        out["no_refit"].append(float(scan.llr(O, E0).max()))
+        m = glm.fit(codes, y, e, terms)
+        E1 = win.totals(scan.cell_sums(px, sh, m["predict"](codes, e)))
+        out["refit"].append(float(scan.llr(O, E1).max()))
+    return out
+
+
+def permutation_p(stars, y, members, n=9999, rng=None):
+    """One-sided p for a fixed window's event count when events are permuted among stars within full covariate
+    cells: per cell, the window's count is hypergeometric (cell size, cell events, cell members in the window)."""
+    rng = rng or np.random.default_rng()
+    codes, _ = glm.covariate_codes(stars)
+    key = pd.MultiIndex.from_frame(codes[list(glm.MAIN) + ["ecl"]]).codes
+    cell = np.zeros(len(stars), np.int64)
+    for k in key:
+        cell = cell * (int(k.max()) + 1) + k
+    df = pd.DataFrame({"cell": cell, "y": y, "m": members.astype(int)})
+    g = df.groupby("cell").agg(n=("y", "size"), k=("y", "sum"), w=("m", "sum"))
+    g = g[(g.w > 0) & (g.k > 0)]
+    obs = float(y[members].sum())
+    sims = np.zeros(n)
+    for row in g.itertuples():
+        kk = int(min(row.k, row.n))
+        sims += rng.hypergeometric(kk, int(row.n) - kk, int(row.w), n)
+    return float((1 + np.sum(sims >= obs)) / (1 + n)), obs, float(sims.mean())

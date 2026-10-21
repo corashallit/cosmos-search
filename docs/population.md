@@ -144,8 +144,12 @@ In order:
 5. **Time structure:** whether the window's events cluster in time (a local instrument event the global masks
    missed).
 
-Whatever survives is "unexplained". Its members go to per-star vetting (Stage A/B with concurrent ZTF and TESS),
-and the window becomes a follow-up target list.
+6. **Be stars, OB associations, extinction:** the window's share of DPAC `BE|GCAS|SDOR|WR`, the OB associations in
+   `population/regions.py`, and the members' median `ag_gspphot` against the sample at the same distance.
+
+Whatever survives is "not attributed", never "unexplained": it means not on our lists, and only Stage B's literature
+check can say more. Its members go to per-star vetting (Stage A/B with concurrent ZTF and TESS), and the window
+becomes a follow-up target list.
 
 ## 7. Descriptive outputs (not tests)
 
@@ -185,4 +189,44 @@ Same code. Changes for DR4:
 
 ## 10. Changes after pre-registration
 
-(none yet)
+All made on 2026-10-21, before the half-A scan was run on the full data. Only pipeline mechanics and the count of
+masked events had been seen at that point; nothing about where on the sky or at what distance events fall.
+
+1. **Time-mask expectation conditioned on position (§3).** The first full mask used each cell's share of all epochs
+   as its expectation. It masked 35% of half A's events, mostly in the hours that crossed event-rich regions.
+   A steady spatial excess, which is the signal, would have been masked the same way. The expectation is now the
+   cell's epochs times its own nside-2 pixel's events per epoch over the half; an hour's expectation is that,
+   summed over pixels. The mask now removes 26% of half A's events, 11% of SOV events. Most of it is
+   single-epoch brightenings (95,285 of 132,392 masked events), clustered on 123 days.
+2. **Masks act on the deepest epoch's hour.** In the forward models, epochs in a masked cell are neither in dip nor
+   flat. The half-B mask is computed from half-B events in memory and sealed. Half-B exposures are plaintext and
+   therefore show which half-B time cells were masked. That reveals instrument events, not where the excess lies.
+3. **E_gen floor.** E_gen below 10⁻⁴ is a Monte Carlo zero (64 draws). It is raised to 10⁻⁴, so an observed event
+   never has rate zero.
+4. **Eclipse-share bins.** Many stars have E_EB = 0 (no draw survives), so the sextile edges of log(E_EB / E_gen)
+   tie and the lowest bins merge.
+5. **Checks run on the 40-file dry run.** On 10 null realisations, the maximum LLR with a GLM refit and without one
+   agreed (medians 7.0 and 7.0), so the null runs without a refit. The permutation check on the top window draws
+   each covariate cell's count in the window from a hypergeometric, which is the same as permuting labels within
+   cells.
+
+6. **Overdispersion in the null (red-team review R12, approved by Cora).** The Poisson null is too narrow wherever
+   structure the covariates miss (extinction, distance errors, unlisted populations) makes counts vary more than
+   Poisson, and that inflates every window's significance in both halves. Each window scale (radius × distance
+   window) now gets a dispersion φ = (1.4826 MAD of (O − E)/√E)², floored at 1, taken over all windows of that
+   scale with E ≥ 5. The MAD keeps the few windows a real excess would fill from inflating φ. The search statistic
+   is the quasi-Poisson LLR / φ against the Poisson max-null. Replication uses a negative binomial with variance
+   φ_B·E, where φ_B is half B's own dispersion at the candidate's scale. Poisson-only candidates and p values are
+   still reported, for comparison. The same φ is computed for the mirror and SOV-1 classes and reported as a check;
+   the primary φ is SOV's own. Attribution (§6) gains Be stars, OB associations and extinction, and survivors are
+   called "not attributed".
+
+## 11. Data and code
+
+- Compact light curves: `python /home/user/pop/stream_compact.py` (this run's container; 3,386 files, 9.3 GB, Stage 0
+  applied with blend fractions). G flux and relative error, DPAC flags, FoV, BP/RP fractional change at the same
+  transit. Regenerated from the bulk CDN files in about 70 min on 4 cores.
+- Astrometry: one TAP query per 1/24 of the sky, joining `vari_summary`, `gaia_source`, `external.gaiaedr3_distance`
+  and `vari_classifier_result`. 11,754,237 rows, on the share at
+  `data/gaia-dr3-epoch/aux/aux_astrometry.parquet`.
+- Code: `cosmos_search/population/` (`run.py` drives the steps, `calibrate.py` the universes).
