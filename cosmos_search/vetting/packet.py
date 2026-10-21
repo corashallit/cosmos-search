@@ -255,7 +255,7 @@ def build(candidate, holdout=(), packet_id=None):
     if one is not None:
         packet["tests"]["single_event"] = {
             k: (sig(v, 4) if isinstance(v, float) else "-".join(f"{x:.4g}" for x in v) if isinstance(v, list) else v)
-            for k, v in one.items() if k != "visible_only"}
+            for k, v in one.items() if k != "visible_only" and k not in single_event.PIPELINE_ONLY}
     packet["text"] = render(packet, lcs)
     # Random hex ids can contain long digit runs; they are ours, so take them out before scanning.
     leaks = leak_scan((json.dumps({k: v for k, v in packet.items() if k != "text"}) + packet["text"]).replace(packet_id, ""))

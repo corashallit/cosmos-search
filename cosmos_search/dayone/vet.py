@@ -44,6 +44,7 @@ S_SHORTLIST = 0.35
 # Injected families an ideal v1 shortlist should keep; the others should read as EB, YSO or instrumental.
 TRAIN_FAMILIES = ("dip_train_poisson", "dip_train_primes", "dip_train_geometric")
 SINGLE_FAMILIES = ("grey_dip", "blue_dip", "chromatic_flip")
+COMMON_VARIABILITY = ("eclipsing_binary", "rotation_or_spots", "pulsation_or_irregular", "extragalactic")
 TARGET_FAMILIES = ("grey_dip", "blue_dip", "dip_train_poisson", "dip_train_primes", "dip_train_geometric",
                    "chromatic_flip", "secular_fade")
 
@@ -229,6 +230,7 @@ def score_batch(out, batch, plan=None):
                      "ok": v.ok, "p_unexplained": v.groups["unexplained"] if v.ok else None,
                      "decision": decision(v) if v.ok else None,
                      "s_interesting": interesting_score(v.class_probs) if v.ok else None,
+                     "p_common": float(sum(v.class_probs.get(k, 0.0) for k in COMMON_VARIABILITY)) if v.ok else None,
                      "top_leaf": max(v.class_probs, key=v.class_probs.get) if v.ok else None})
     table = pd.DataFrame(rows).sort_values("p_unexplained", ascending=False)
     short = table[(table.kind == "real") & (table.p_unexplained >= P_U_SHORTLIST)]
@@ -250,13 +252,18 @@ def score_batch(out, batch, plan=None):
     single = {p["packet_id"]: bool(p["tests"].get("single_event", {}).get("single_dip_flag", False)) for p in packets}
     table["single_dip"] = table.packet_id.map(single).fillna(False)
     table["v4"] = table["aperiodic"] | table["single_dip"]
+    # Secondary, reported only (red-team R1): the single-dip flag counts unless the vetter puts most of its mass on
+    # a common variability class.
+    table["v4g"] = table["aperiodic"] | (table["single_dip"] & (table["p_common"].fillna(1.0) < 0.5))
     rep["v4"] = {"single_events_v4": score_v1(table, flag="v4", targets=SINGLE_FAMILIES),
                  "single_events_v3b": score_v1(table, flag="aperiodic", targets=SINGLE_FAMILIES),
                  "flag_alone_single_events": score_v1(table, threshold=float("inf"), flag="single_dip",
-                                                      targets=SINGLE_FAMILIES)}
+                                                      targets=SINGLE_FAMILIES),
+                 "single_events_v4g": score_v1(table, flag="v4g", targets=SINGLE_FAMILIES)}
     for role in sorted(set(table.role_in_queue.dropna()) & {"control", "control_single_eb"}):
         sub = table[(table.kind != "control") | (table.role_in_queue == role)]
         rep["v4"][f"{role}_flagged"] = score_v1(sub, flag="v4")["controls_flagged"]
+        rep["v4"][f"{role}_flagged_v4g"] = score_v1(sub, flag="v4g")["controls_flagged"]
     table.to_csv(out / "verdicts_table.csv", index=False)
     (out / "report.json").write_text(json.dumps(rep, indent=2, sort_keys=True, default=str))
     return rep, table

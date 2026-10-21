@@ -540,6 +540,44 @@ inside the D2 freeze.
 - **Calibration overlap.** The tier-1 stars and the batch 4 controls were in the calibration, and none of them
   was flagged there.
 
+*Changes before the build, after the red-team review (recorded 2026-10-21, after the plan was sealed and before
+any packet existed):*
+
+- **R6: the ratio leaves the packet.** `log10_oneoff_vs_eb` has an arbitrary scale: it rests on an assumed
+  one-off rate of 1e-3 per day per star. Shown to a vetter, it reads as odds. It, its lower-bound marker and
+  `eb_rate` are now pipeline-only (`single_event.PIPELINE_ONLY`). The packet and the Stage A text describe the
+  flag and `p_eb`, `expected_repeat_epochs` and the surviving periods, which have physical meaning. The flag
+  itself is unchanged, so rule v4 is unchanged.
+- **Plan draw without TESS contamination.** The cross-match over all 459 candidate stars was too slow (one
+  cone per star, survey and shift), so the decoy draw and the EB-control selection used the default TESS
+  dilution (0.3). The cross-match then ran on the 64 batch stars only. It crashed once on a pandas 3 bug
+  (exactly two int64 Gaia ids become an overflowing RangeIndex in `set_index`), which is fixed in
+  `xmatch.context` with a test.
+- **R2: the record.** This section was committed at c86751b on the branch before the plan was sealed. The repo
+  does not accept tag pushes from here, so PR #46 will be merged with a merge commit, not a squash, which keeps
+  c86751b and the verdict commit in main's history. Before the reveal, the SHA-256 of the committed verdict file
+  is committed and pushed.
+- **R3: what is in-sample.** Only the 18 decoys and the 8 single-eclipse EB controls are new to this work. The
+  14 old controls, the 16 old real packets and the 8 tier-1 stars were in the calibration. None of the old
+  controls or old real packets was testable there, so for the single-dip flag the "≤ 1 of 14 old controls"
+  criterion is close to met by construction; only v3b's flag can fail it.
+- **R4: what this batch can measure.** Single-event recall is the measured quantity. "≥ 12 of 16" passes with
+  probability 0.98 at a true recall of 0.9, 0.63 at 0.75 and 0.17 at 0.6. Only 1 of the 8 single-eclipse EB
+  controls is testable, so the EB-control criterion says almost nothing. The flag's false-positive rate comes
+  from the calibration, with intervals:
+  - 0 of 15 testable physical-EB injections (95% 0–0.20);
+  - 0 of 2 testable DPAC EBs;
+  - 1 of 3 testable, quiet non-EB variables in the joint set (0.06–0.79), the SOLAR_LIKE star.
+
+  By class, the joint set has 7,564 stars, of which 1,161 show one event and 5 are testable and quiet: ECL 2,
+  SOLAR_LIKE 1, DSCT 1, no class 1. Unlike v3b's `aperiodic` flag (red-team R1), this flag rarely gets the
+  chance to fire on active stars, because testable single events on quiet stars are rare. When it does, activity
+  is its main false-positive class, and nothing here measures that rate well. Batch 5 cannot fix this; a
+  confirmatory set of active-star controls would.
+- **Secondary measure (reported, not used for the decision):** v4g = v3b or (`single_dip_flag` and the vetter
+  puts < 0.5 on eclipsing_binary + rotation_or_spots + pulsation_or_irregular + extragalactic). This is
+  red-team R1's gating applied to the single-dip flag.
+
 ### Step back: what limits single dips, and what to build for DR4 (written while batch 5 was being fetched)
 
 Cora asked to re-check the assumptions one or two levels up. Only 19% of injected single dips were testable, so
