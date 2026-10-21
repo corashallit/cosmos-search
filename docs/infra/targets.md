@@ -102,6 +102,18 @@ From the draft data model (2026-06-26):
 - `epoch_photometry_ccd` has the nine AF fluxes per transit. `ccd_consistency` gives the reduced χ² of the
   nine CCDs about their mean for each transit: a dip lasting hours is common to all nine CCDs (~40 s
   apart), while a cosmic ray or CCD defect is not. This is the per-CCD invariance test that DR3 cannot do.
+- `ccd_at_extremes(feat, ccd_long)` applies it where it matters, at each source's faintest and brightest
+  transits (`tid_min`, `tid_max`, carried by features since `features-v2`): `frac_ccd_low_min` is the
+  fraction of AF CCDs more than 3σ below the source's own per-CCD baseline at the faintest transit, and
+  `frac_ccd_high_max` its mirror at the brightest, with `chi2_ccd_*` alongside. An occultation gives ~1, a
+  cosmic ray or a neighbour 1–2 of 9. Each CCD carries about a third of the transit's S/N, so the count is
+  coarse below ~9σ per transit; `z_trim_min` (sum of CCD z with the 2 most negative dropped, over √(n−2))
+  and its mirror `z_trim_max` keep the power there, since a cosmic ray sits in the dropped CCDs and an
+  occultation shifts all of them. On DR3, G ≥ 16 has no FoV-confirmed power because bright spikes
+  match dips at every threshold, so this test is how those magnitudes become searchable. The draft lists
+  `epoch_photometry_ccd` as DataLink-only (`EPOCH_PHOTOMETRY_CCD`) and says nothing about bulk files, so plan
+  on pulling it for a selection (~1.5 sources/s at DR3 rates); choose that selection by |W| within each G bin,
+  never by the dim score alone, so the competition on the pulled set stays valid. 10⁴ sources (13.5 M CCD rows) take ~25 s here.
 - `vari_summary` gains flux-space moments, per-CCD G statistics (`*_gccd`) and G/BP/RP correlations
   (`pearson_mag_g_bp`, …). The v1 prefilter uses none of them so that DR3 can rehearse it; a v2 that adds
   per-CCD agreement is a candidate once DR4 is out.
