@@ -159,7 +159,9 @@ control P(unexplained) was 0.12. Decoys 3/4: the chirped box train got P(unexpla
 control, and both dust dips were called dust; the geometric grey train was put down to the background,
 because the host's own strongest dip sat on a scattered-light ramp. No expert cited an aperture or error
 tell this time, and several used the matching aperture depths as evidence for an on-target signal, so the
-injector fix works. Decoy hosts should be drawn from stars whose strongest pre-injection dip is clean.
+injector fix works. That decoy would have been vetoed in production, so it did not belong in the batch: an
+injected light curve must pass the same Stage 0 vetoes as real queue members, and is redrawn if it fails
+(an optional veto hook in `make_decoy`, from the vetting thread).
 
 ## Milestones
 
