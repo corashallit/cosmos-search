@@ -20,7 +20,7 @@ never into the repo.
 
 | Source | Release to use | Role | Coverage | Access | Auth | Limits / policy |
 |---|---|---|---|---|---|---|
-| **Gaia** | DR3 now; DR4 on 2026-12-02 | Astrometry, G/BP/RP, XP and RVS spectra, NSS, variability, AP | All sky, G ≲ 20.7 | ESA TAP+ (`gea.esac.esa.int/tap-server/tap`), DataLink; HATS copy at `data.lsdb.io/hats/gaia_dr3` | Optional account (Cora's email) raises quotas | Anonymous: async 3 × 10⁶ rows, 90 min; registered: unlimited rows, 120 min, 20 GB job space; DataLink ≤ 5,000 sources per call *(verify; from the older FAQ)*. Bulk catalogue download explicitly supported. |
+| **Gaia** | DR3 now; DR4 on 2026-12-02 | Astrometry, G/BP/RP, XP and RVS spectra, NSS, variability, AP | All sky, G ≲ 20.7 | ESA TAP+ (`gea.esac.esa.int/tap-server/tap`), DataLink; HATS copy at `data.lsdb.io/hats/gaia_dr3` | Account in env vars `GAIA_USER` / `GAIA_PASSWORD` (cookie login via `Gaia.login`) | Anonymous: async 3 × 10⁶ rows, 90 min; registered: unlimited rows, 120 min, 20 GB job space; DataLink ≤ 5,000 sources per call *(verify; from the older FAQ)*. Since the 2026-10-14 archive release: **≤ 5 jobs executing in parallel per user, queue of 50, excess rejected**; DataLink structures renamed RAW → `DATAMODEL_GAIA`, INDIVIDUAL → `DATAMODEL_STANDARD`; DataLink limits changed (see the Archive user guide). Bulk catalogue download explicitly supported. |
 | **Hipparcos** (van Leeuwen 2007) | I/311 | Astrometry for G ≲ 3 stars Gaia handles poorly | All sky, bright | VizieR TAP | none | CDS limits (below) |
 | **2MASS** PSC | final | JHK_s, epoch ~1998–2001 | All sky | IRSA TAP `fp_psc`; Gaia `tmass_psc_xsc_best_neighbour`; HATS `two_mass` | none | IRSA: none published; TAP async, avoid >2 GB per sync query |
 | **AllWISE** | final | W1–W4 | All sky | IRSA TAP `allwise_p3as_psd` | none | as IRSA |
@@ -40,7 +40,7 @@ never into the repo.
 | **DESI** | DR1 (DR2 expected early 2027) | Spectra of MWS targets | DESI footprint | NOIRLab Data Lab `desi_dr1.*`, SPARCL for spectra | Anonymous TAP; account for MyDB | Data Lab limits not documented |
 | **SIMBAD** | live | Identifiers, types, bibliography | — | TAP (`simbad.cds.unistra.fr/simbad/sim-tap`) | none | **> 6 queries/s from one IP gets a temporary blacklist.** Upload tables to TAP instead of looping. |
 | **VizieR** | live | Published catalogues | — | TAPVizieR, X-Match | none | same CDS policy |
-| **ADS** | live | Literature record per object | — | ADS API | **API token (account, Cora's email)** | 5,000 search queries/day per token, resets 00:00 UTC; limits in response headers |
+| **ADS** | live | Literature record per object | — | ADS API | Token is a proxy-injected bearer secret for `api.adsabs.harvard.edu`; send no Authorization header ourselves | 5,000 search queries/day per token, resets 00:00 UTC; limits in response headers |
 
 ## Supporting sources
 

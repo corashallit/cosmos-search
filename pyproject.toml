@@ -3,7 +3,7 @@ name = "cosmos-search"
 version = "0.0.1"
 description = "Explain every object within 100 pc"
 requires-python = ">=3.11"
-dependencies = ["numpy", "pyyaml", "pyrage"]
+dependencies = ["numpy", "pyyaml", "pyrage", "requests", "pyvo", "astroquery", "astropy", "pyarrow"]
 
 [project.optional-dependencies]
 dev = ["pytest"]

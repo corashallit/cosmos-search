@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: cosmos-search
+Version: 0.0.1
+Summary: Explain every object within 100 pc
+Requires-Python: >=3.11
+Requires-Dist: numpy
+Requires-Dist: pyyaml
+Requires-Dist: pyrage
+Requires-Dist: requests
+Requires-Dist: pyvo
+Requires-Dist: astroquery
+Requires-Dist: astropy
+Requires-Dist: pyarrow
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"

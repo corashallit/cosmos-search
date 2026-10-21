@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+cosmos_search/__init__.py
+cosmos_search.egg-info/PKG-INFO
+cosmos_search.egg-info/SOURCES.txt
+cosmos_search.egg-info/dependency_links.txt
+cosmos_search.egg-info/requires.txt
+cosmos_search.egg-info/top_level.txt
+cosmos_search/inject/__init__.py
+cosmos_search/inject/__main__.py
+cosmos_search/inject/sealed.py
+tests/test_inject.py

@@ -1,0 +1,11 @@
+numpy
+pyyaml
+pyrage
+requests
+pyvo
+astroquery
+astropy
+pyarrow
+
+[dev]
+pytest
