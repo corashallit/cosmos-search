@@ -3,7 +3,7 @@ name = "cosmos-search"
 version = "0.0.1"
 description = "First look at Gaia DR4 for technosignature-style anomalies"
 requires-python = ">=3.11"
-dependencies = ["numpy", "pyyaml", "pyrage", "requests", "pyvo", "astroquery", "astropy", "pyarrow"]
+dependencies = ["numpy", "pyyaml", "pyrage", "requests", "pyvo", "astroquery", "astropy", "pyarrow", "pandas"]
 
 [project.optional-dependencies]
 dev = ["pytest"]

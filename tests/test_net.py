@@ -286,3 +286,11 @@ def test_cache_prunes_least_recently_used(tmp_path):
         cache.put(cache.key(i), b"x" * 1000)
     assert cache.size() <= 10_000
     assert cache.get(cache.key(29)) is not None
+
+
+def test_storage_options_carry_user_agent_and_respect_blind(monkeypatch):
+    from cosmos_search.net import storage_options
+    assert storage_options()["headers"]["User-Agent"] == USER_AGENT
+    monkeypatch.setenv("COSMOS_BLIND", "1")
+    with pytest.raises(BlindModeError):
+        storage_options()
