@@ -15,7 +15,9 @@ Steps, on the visible epochs only (the packet's holdout is applied first):
    run of TESS bins). Each event is represented by its deepest epoch.
 3. Search: over a log-spaced frequency grid from 2/span to 1/P_MIN and a few window widths, find the most events
    that fall in one phase window. Then, for the best few alignments, count the epochs at normal brightness in
-   the phase range the aligned events span (purity = in-dip epochs / all epochs in it). An alignment counts only if purity >= MIN_PURITY.
+   the phase range the aligned events span (purity = in-dip epochs / (in-dip + normal-brightness epochs) in it;
+   epochs fainter than FLAT_SIGMA but short of the dip threshold, as in ingress, count for neither). An alignment
+   counts only if purity >= MIN_PURITY.
 4. At that period, a second pure window may hold more events (a secondary eclipse at another phase). Report the
    number of events, how many one strict period explains with up to two pure windows (n_aligned = n_primary +
    n_secondary), that period, the primary window's purity and the aligned fraction. An EB gives aligned_fraction
@@ -26,12 +28,15 @@ Steps, on the visible epochs only (the packet's holdout is applied first):
 import numpy as np
 
 DIP_SIGMA = 4.0
+FLAT_SIGMA = 2.0               # an epoch less than this many robust sigma low is at normal brightness
 SKIP_BANDS = ("BP", "RP")
 EVENT_GAP = 1.0                 # days
 P_MIN = 0.2                     # days; contact binaries go lower but do not dip in isolated events
 WIDTHS = (0.05, 0.15, 0.5, 1.5, 5.0)   # trial eclipse durations, days
 MIN_PURITY = 0.8
 MIN_EVENTS = 4
+APERIODIC_UNALIGNED = 2         # rule v3's flag: at least this many events no single period explains,
+APERIODIC_FRACTION = 0.6        # and at most this share explained (calibrated in docs/dayone.md)
 MIN_SECONDARY = 3              # two events line up at some phase of almost any period
 TOP_K = 200                     # alignments per count level checked against every epoch
 LEVEL_CAP = 2000
@@ -101,14 +106,16 @@ def _max_in_window(phases, q):
     return best, start
 
 
-def _purity(t, in_dip, f, s, end):
-    """In-dip share of all epochs whose phase (from start s) is within [0, end]."""
+def _purity(t, in_dip, flat, f, s, end):
+    """In-dip share of the epochs whose phase (from start s) is within [0, end], counting only epochs that are
+    either in dip or clearly at normal brightness: an epoch caught in ingress or egress is fainter than normal but
+    short of the dip threshold, and is evidence for neither reading."""
     inside = ((t * f - s) % 1.0) <= end + 1e-9
-    n_in = int(inside.sum())
-    return in_dip[inside].sum() / n_in if n_in else 0.0
+    n_dip, n_flat = int(in_dip[inside].sum()), int(flat[inside].sum())
+    return n_dip / (n_dip + n_flat) if n_dip + n_flat else 0.0
 
 
-def _secondary(te, t, in_dip, f, q, taken):
+def _secondary(te, t, in_dip, flat, f, q, taken):
     """Most of the remaining events that one more pure window at the same frequency holds (a second eclipse)."""
     rest = te[~taken]
     if len(rest) < 1:
@@ -118,7 +125,7 @@ def _secondary(te, t, in_dip, f, q, taken):
     c, s2 = int(c[0]), float(s2[0])
     x = (rest * f - s2) % 1.0
     end = x[x <= q + 1e-12].max()
-    if c < MIN_SECONDARY or _purity(t, in_dip, f, s2, end) < MIN_PURITY:
+    if c < MIN_SECONDARY or _purity(t, in_dip, flat, f, s2, end) < MIN_PURITY:
         return 0, np.nan
     return c, s2
 
@@ -134,6 +141,7 @@ def search(t, in_dip, z, widths=WIDTHS, p_min=P_MIN, top_k=TOP_K):
     span = t[-1] - t[0]
     f_min, f_max = 2.0 / span, 1.0 / p_min
     te = ev[:, 0]
+    flat = z < FLAT_SIGMA
     best = {"n_aligned": 1, "n_primary": 1, "n_secondary": 0, "period": np.nan, "purity": np.nan,
             "width": np.nan, "n_cycles": 0}
     for w in widths:
@@ -165,10 +173,10 @@ def search(t, in_dip, z, widths=WIDTHS, p_min=P_MIN, top_k=TOP_K):
                 q = w * f
                 x = (te * f - s) % 1.0
                 taken = x <= q + 1e-12
-                purity = _purity(t, in_dip, f, s, x[taken].max())
+                purity = _purity(t, in_dip, flat, f, s, x[taken].max())
                 if purity < MIN_PURITY:
                     continue
-                c2, _ = _secondary(te, t, in_dip, f, q, taken)
+                c2, _ = _secondary(te, t, in_dip, flat, f, q, taken)
                 total = c + c2
                 if total > best["n_aligned"] or (total == best["n_aligned"] and purity > np.nan_to_num(best["purity"])):
                     best = {"n_aligned": int(total), "n_primary": int(c), "n_secondary": int(c2),
@@ -176,6 +184,8 @@ def search(t, in_dip, z, widths=WIDTHS, p_min=P_MIN, top_k=TOP_K):
                             "n_cycles": int(len(np.unique(np.floor(te[taken] * f - s))))}
     out.update({k: (round(v, 6) if isinstance(v, float) else v) for k, v in best.items()})
     out["aligned_fraction"] = round(best["n_aligned"] / n_ev, 4)
+    out["aperiodic"] = bool(out["testable"] and n_ev - best["n_aligned"] >= APERIODIC_UNALIGNED
+                            and out["aligned_fraction"] <= APERIODIC_FRACTION)
     depths = ev[:, 3]
     out["event_depth_cv"] = round(float(np.std(depths) / np.mean(depths)), 4)
     return out
@@ -189,7 +199,9 @@ def test(lcs):
         "n_aligned of them fall in one or two pure phase windows (n_primary, n_secondary: two eclipses) at one "
         "strict period (period, d); purity = share of epochs in the primary window that are in dip; "
         "aligned_fraction = n_aligned / n_events. Eclipses give aligned_fraction near 1, dips that do not recur "
-        "at one period give a small one. "
+        "at one period give a small one. aperiodic is true when at least 2 events are left unexplained and "
+        "aligned_fraction <= 0.6; in calibration no injected strict-period train and 1 of 63 Gaia eclipsing "
+        "binaries met it, against about half of injected aperiodic trains with 4 or more events. "
         "testable is false with fewer than 4 events, where any dips can be aligned by chance.")
     r["visible_only"] = True
     return r

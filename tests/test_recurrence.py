@@ -43,3 +43,15 @@ def test_gaia_colour_bands_are_not_counted_twice():
     k = np.where(np.isin(np.arange(len(t)), [10, 50, 90]), 0.8, 1.0)
     lcs = [_lc(t, k, rng, b) for b in ("G", "BP", "RP")]
     assert recurrence.test(lcs)["n_events"] == 3
+
+
+def test_aperiodic_flag():
+    rng = np.random.default_rng(4)
+    t = _nightly(rng)
+    k = np.ones_like(t)
+    for c in np.cumsum(rng.exponential(12.0, 80)):
+        k[np.abs(t - c) < 0.4] = 0.85
+    assert recurrence.test([_lc(t, k, rng)])["aperiodic"]
+    p = 2.37
+    k = 1 - 0.15 * (np.abs(((t - 0.2) / p + 0.5) % 1 - 0.5) * p < 0.15)
+    assert not recurrence.test([_lc(t, k, rng)])["aperiodic"]

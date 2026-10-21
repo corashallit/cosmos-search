@@ -298,6 +298,57 @@ pulsator (long secondary period or RVb) over an occulting disk; it is still a kn
 3. Report how many of the real candidates have external epochs in dip, so the conditional recall can be scaled
    to DR4.
 
+## Recurrence test and rule v3 (pre-registered 2026-10-21, before batch 4's decoy plan was drawn)
+
+**The test** (`vetting.recurrence`, in every packet with two or more dip events as test `recurrence`). On the
+visible epochs of every survey (Gaia G, ZTF, TESS; BP and RP share G's epochs and are left out), an epoch is in
+dip when it is ≥ 4 robust σ low and deeper than the band's largest brightening (a mirror test: noise outliers
+come in both signs, occultations in one). Dip epochs within 1 d form one event. A search over periods from 0.2 d
+to half the span and window widths of 0.05–5 d finds the most events one strict period puts in up to two phase
+windows (primary and secondary eclipse) whose epochs are in dip, counting against a window only epochs at
+normal brightness (< 2 σ low) so that ingress and egress do not. It reports `n_events`, `n_aligned`, the period,
+`aligned_fraction` = n_aligned / n_events, and `testable` (n_events ≥ 4). The pipeline flag is
+
+    aperiodic = testable and n_events − n_aligned ≥ 2 and aligned_fraction ≤ 0.6
+
+**Calibration** (`dayone.recurrence_cal`, ZTF and TESS epochs only), done before this rule was written:
+
+| population | n | flagged aperiodic |
+|---|---|---|
+| Poisson, prime and geometric dip trains injected into 35 quiet decoy hosts, redrawn until ≥ 4 external dip events | 319 | 51% (Poisson 63%, prime 43%, geometric 39%) |
+| strict-period dip trains, same hosts and condition | 122 | 0 |
+| Gaia DR3 eclipsing binaries with ZTF light curves (`vari_eclipsing_binary`, G 11–15.5, random subset) | 63 (32 testable) | 1 (4 events) |
+| batch 3's real candidates and controls with external data | 25 (11 testable) | 0 |
+
+The Gaia EBs' recovered periods match DPAC's or a factor of 2 from it. Separation grows with the number of
+events: with 15 or more, aperiodic trains align ≤ 0.5 of them and strict-period trains ≥ 0.94; with 4–5 events
+the two overlap and the flag rarely fires. Two calibration fixes came from these runs: ZTF's heavy-tailed outliers
+made one-epoch events in quiet hosts (fixed by the mirror test), and partly sampled eclipses failed purity
+(fixed by not counting ingress epochs against it). 16 of the 51 hosts dip on their own (one is an unknown EB)
+and were left out of the injection measure. Most trains under the injection priors leave fewer than 4 external
+events: unconditioned, 0–10% are testable, which bounds what this test can do for a given survey overlap.
+The IRSA light-curve service returned 504s through the run, so the EB sample stopped at 63 of 286; the rest are
+reported out of sample when they arrive.
+
+**Rule v3.** Two variants, scored on the same batch:
+
+- v3a: unchanged S ≥ 0.35 on packets that now carry the recurrence test (does the agent use it?).
+- v3b: S ≥ 0.35 or `aperiodic` (the pipeline flag can shortlist on its own).
+
+**Batch 4.** 20 new decoys on batch 3's unused hosts (with external data), families fixed in advance: Poisson,
+prime and geometric dip trains 4 each (12 trains, the primary measure), each redrawn until it leaves ≥ 4 dip
+events in the external epochs as well as moving a visible G epoch by ≥ 5σ (`decoys plan --min-external-events
+4`); grey dips 2, blue dip 1, chromatic flip 1 (4 single events, scored separately: recurrence cannot help them);
+strict-period trains 2 (also ≥ 4 external events), dust dip 1, step 1 (4 other). Batch 3's 16 real packets and
+14 controls again. Plan sealed as before.
+
+**Measures and decision.** For v3a and v3b: recall on the 12 trains, controls flagged, other decoys flagged,
+real packets flagged, AUC(S) and AUC(P(u)) for trains vs controls; single-event recall; how many real packets
+are testable. Adopt v3b for the D2 freeze if train recall ≥ 0.5 and at most 1 of 14 controls is flagged.
+Calibration puts the flag alone at about 0.5 on such trains, so the agent's S has to add some. If v3b fails on
+recall alone, the next step is more overlap (ATLAS, ASAS-SN) rather than a lower threshold. v3a is reported to
+learn whether the agents act on the test.
+
 ## Keep rule v2 (after the rehearsal)
 
 The stream keeps a light curve when the source's G3 `single` or `fov` |W| reaches 0.6 × the |W| at which G3
