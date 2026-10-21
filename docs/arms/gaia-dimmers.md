@@ -57,10 +57,18 @@ sources per call with 5 jobs in parallel. So:
    statistics that respond to a one-sided faint tail: skewness, the minimum relative to the median in units
    of the per-source noise, and the number of low points. The exact query is prepared on DR3's
    `vari_summary` and adapted to DR4's draft data model before release (milestone G7).
-2. **Random controls**: pull ~10⁵ random sources' full epoch photometry alongside. Injecting into those
-   measures the prefilter's recall, so the prefilter's built-in assumptions are checked rather than trusted.
+2. **Random full-light-curve channel**: pull ~10⁵ sources' full epoch photometry, including transits DPAC
+   rejected, drawn with known inclusion probabilities (`stats.audit`). This is a search channel as well as a
+   control. `vari_summary` statistics exclude rejected transits, so the prefilter cannot see a dip that
+   DPAC's variability processing threw out. On DR3 so far, 7.9% of sources have a rejected point ≥ 3σ faint
+   in an otherwise quiet light curve, and the prefilter recalls 0.3% of them (docs/infra/targets.md). DR4's
+   `vari_epoch_flags` is DataLink-only, so the channel can only be reached by pulling light curves. Most of
+   these points will be cosmic rays and CCD defects, which the per-CCD G test separates from real dips, so
+   sources in this channel with a rejected faint point also get per-CCD G. Injecting into the same sample
+   measures the prefilter's recall, and Horvitz–Thompson weights turn what the channel finds into an
+   all-sky rate.
 3. **DataLink pull** for the top ~10⁵–10⁶ by prefilter score, per-CCD G for the top ~10⁵.
-4. Run detectors, calibrate against nulls, rank, and send the top ~10³ to vetting.
+4. Run detectors on both channels, calibrate against nulls, rank, and send the top ~10³ to vetting.
 
 The DR3 rehearsal (G1–G6) runs the same chain on DR3's 11.75 M variable sources. DR3 has only per-transit G,
 so the per-CCD test is DR4-only.
@@ -76,3 +84,8 @@ threshold so we can estimate what the ranking misses (statistics.md §5).
 ## Log
 
 Record changes of approach here, with the evidence that prompted them.
+
+- **2026-10-21.** The random-controls pull became a search channel too. The archive thread found that the
+  `vari_summary` prefilter is blind to dips in DPAC-rejected transits (7.9% of DR3 sources processed so far
+  have a quiet light curve with a ≥ 3σ faint rejected point; the prefilter recalls 0.3% of them). Sampling
+  is with known inclusion probabilities so the channel's yield extrapolates to the whole sky.
