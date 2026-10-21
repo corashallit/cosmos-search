@@ -306,6 +306,55 @@ inside the floor computed from the *observed* duration, which covers R* and M* e
 parallax. On the pilot-2 dwarf hosts about 1 draw in 250 qualifies, which is 20 times the timing probes. The
 subgiant hosts give no tension, as the physics says they should.
 
+## 11. Pilot 3 (Gaia DR3, 2026-10-21)
+
+The fixes from §10 were in place, plus `duration_tension`, on fresh sources (`--after 1500000000`). There were 24
+packets. 12 were controls drawn through the detector: it fired on 17/20 ECL and on 3/20 for each of YSO, LPV, RS,
+SOLAR_LIKE and AGN. The one RCB past this point in `random_index` had no detected dip, so the pilot has none. 12
+were decoys: 2 `duration_tension`, 1 prime train, 1 geometric train, 2 chromatic flips, 2 G-only dips, 2 dust dips
+and 2 periodic grey trains. Every packet had detected dips, against 2/14 controls in pilot 2. Every transcript
+shows one Read and the reply.
+
+| Measure | Pilot 3 | Pilots 2 + 3 pooled |
+|---|---|---|
+| False "unexplained" on controls (argmax) | 0 / 12 | 0 / 26 (95% upper bound 0.11) |
+| P(unexplained) AUC, probes vs controls | 0.95 (p = 0.006) | 0.97 (p = 0.0005), 8 probes vs 26 controls |
+| Flagged at P(u) ≥ 0.25 | probes 2 / 4, controls 0 / 12 | probes 4 / 8, controls 0 / 26 (upper bound 0.09) |
+| Incoherent decoys given a natural story | 0 / 4 (both flips seen as BP down with RP up) | |
+| Rare-natural decoys in an acceptable group | 3 / 4 | 6 / 8 |
+| Held-out tail minimum, 80% intervals | 75% (controls 67%) | controls 64–67% in both pilots: too narrow |
+
+**The vetter.** The ranking result held up against harder, detector-selected controls. With these decoys,
+confabulation fell from a rubric 3/4 to 0/4. The flip vetters argued it from first principles: "a real occultation
+cannot brighten RP". One `duration_tension` probe drew the intended argument: "a 14.6 d dip on a dwarf would need an
+occulter on a very wide orbit", with P(u) 0.28 as the top leaf. The other was read as an eclipse, with the long dip
+taken for a partial one. The prime train drew the timing argument (P(u) 0.38). Control tail intervals were too
+narrow in both pilots (64% and 67% against 80%). The recalibration in `scoring.isotonic` should be applied to them
+before they are used as a confabulation measure.
+
+**The labels, this time on the controls.** 4 of the 9 non-EB controls were called instrumental, and the vetters'
+evidence was specific: a G-only dip with BP and RP normal at the same transit, a G error 30 times the median at the
+dip epoch, a 63% G dip with BP and RP flat, and a RUWE-1.5 star whose G-only plateaus come and go between visits.
+BP and RP together cover the G passband, so these are most likely real DR3 artefacts. DPAC's class labels the
+*star*, but the detector fired on an *artefact*, so "rotation_or_spots" was the wrong answer key for those dips.
+Two consequences follow:
+
+1. **Control labels must describe the detected dip, not the star.** A control's class is its answer only when the
+   class explains the dip: an EB dip at an eclipse phase of the DPAC period, or an LPV or AGN dip inside the smooth
+   variation in all three bands. Detected dips that fail band consistency are not known answers, and are left out
+   of calibration or labelled instrumental.
+2. **Stage 0 should test band consistency.** A G deficit d_G with BP and RP flat at the same transit, each measured
+   to better than d_G / 3, is instrumental. So is a dip epoch whose G error is far above the star's median. Both
+   tests are cheap and need no model. Here they would have removed about half of the detector's non-EB triggers
+   before any vetter saw them. G-only decoys then belong in the veto's own injection test, not in Stage A.
+
+**Decoy hosts.** The audit gave AUC 0.81 (p = 0.008). The cause was cadence: decoys showed a median of 47 epochs
+against the controls' 31. The host pool was better sampled (median 67 against 40), and acceptance favours
+well-sampled hosts on top of that. The second part is legitimate, since real anomalies are also easier to see
+there. The first part is a pool mismatch: `vetting_pilot.py fetch` now matches one host to each control in
+log(epochs). Two dust dips were read as blends on hosts with `ipd_frac_multi_peak` = 1, in pilot 2 and again here.
+Under §10's veto rule a blend-flagged host should not carry decoys.
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -322,3 +371,7 @@ subgiant hosts give no tension, as the physics says they should.
   prompt names the detected dips as the thing to classify.
 - 2026-10-21. Added the `duration_tension` anomaly-probe family: per-event physics that sparse cadence can show,
   where timing cannot.
+- 2026-10-21. Pilot 3 (§11): with detector-selected controls and the fixed decoys, P(unexplained) still separates
+  probes from controls (pooled AUC 0.97; at P(u) ≥ 0.25, 4/8 probes and 0/26 controls), and confabulation is 0/4.
+  Half the detector's non-EB triggers were most likely DR3 artefacts (G-only dips), so control labels must be
+  dip-level, and Stage 0 needs a band-consistency test. Decoy hosts are now matched to the controls' cadence.

@@ -74,6 +74,22 @@ def detected(c):
     return any(d["t_min"] < cut for d in simple_dips(cand))
 
 
+def n_epochs(c):
+    return len(c["lightcurves"][0]["time"])
+
+
+def match_cadence(targets, pool, n):
+    """n pool members whose epoch counts follow the targets': greedy nearest neighbour in log(epochs)."""
+    free, out = list(pool), []
+    want = [n_epochs(targets[i % len(targets)]) for i in range(n)] if targets else []
+    for w in want:
+        if not free:
+            break
+        j = min(range(len(free)), key=lambda k: abs(np.log(n_epochs(free[k]) / w)))
+        out.append(free.pop(j))
+    return out
+
+
 def fetch(out, after=0, pool=10):
     """Controls are drawn through the detector, as real candidates are; pilot 2's random class members mostly had
     no detected dips while every decoy did, so calibration on them would not transfer to the queue."""
@@ -86,11 +102,14 @@ def fetch(out, after=0, pool=10):
         rates[cls] = f"{len(hit)}/{len(cands)}"
         for c in hit[:n]:
             controls.append({**c, "label": label, "acceptable": acceptable, "aliases": [], "dpac_class": cls})
-    # Hosts from classes that also appear among the controls, so planted packets are not a separate population.
-    hosts = []
+    # Hosts from classes that also appear among the controls, so planted packets are not a separate population,
+    # and matched to the controls' cadence: pilot 3's unmatched hosts had a median of 67 epochs against the
+    # controls' 40, which the audit picked up (AUC 0.81). One host per control, nearest in log(epochs).
+    pool = []
     for cls, n in HOST_CLASSES.items():
-        rows = select(cls, n + 3, "AND s.phot_g_mean_mag BETWEEN 12 AND 17", after=after)
-        hosts += candidates(rows, datalink_epoch_photometry([int(s) for s in rows["source_id"]]))[:n]
+        rows = select(cls, n * 4, "AND s.phot_g_mean_mag BETWEEN 12 AND 17", after=after)
+        pool += candidates(rows, datalink_epoch_photometry([int(s) for s in rows["source_id"]]))
+    hosts = match_cadence(controls, pool, sum(HOST_CLASSES.values()))
     (out / "controls.jsonl").write_text("\n".join(json.dumps(c) for c in controls))
     (out / "hosts.jsonl").write_text("\n".join(json.dumps(h) for h in hosts))
     print(f"{len(controls)} controls, {len(hosts)} hosts; detector fired on {rates}")
