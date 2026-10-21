@@ -9,6 +9,12 @@ testable: an EB repeats at a fixed period with a fixed depth, other occulters ne
 light-curve service, latest data release) objects are normalised to their own median per field, CCD quadrant
 and filter; TGLC per sector. ZTF keeps catflags == 0 epochs; TGLC keeps unflagged cadences (`tess.tglc.clean`).
 
+Which TESS sectors: a dip Gaia caught on one visit can only be argued with photometry taken during or near it, so
+sectors are ranked by how close they come to the dip (`t_deepest` in the queue; the whole Gaia span when the
+queue has no dip time) before `max_sectors` cuts the list. DR4 ends 2020-01-20 (BTJD 1868.5), so its concurrent
+sectors are 1-20; TESScut lists sectors in numerical order, which put them first only by luck. Sector times are
+in `tess/sectors.csv`, measured from one light curve per sector.
+
 The output is a long table (source_id, band, t, flux, err), with bands named as in
 `inject.lightcurve.BAND_WAVELENGTH_UM` (ztf_g, ztf_r, ztf_i, TESS), so `apply` can inject the same sealed signal
 into them that the Gaia epochs received.
@@ -17,6 +23,8 @@ into them that the Gaia epochs received.
 import argparse
 import json
 import sys
+from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -29,6 +37,8 @@ ZTF_MIN_EPOCHS = 20
 TESSCUT_SECTORS = "https://mast.stsci.edu/tesscut/api/v0.1/sector?ra={ra:.6f}&dec={dec:.6f}"
 TESS_BIN_DAYS = 1 / 48       # 30 min: TGLC's slowest FFI cadence, so every sector reads the same
 COLUMNS = ["source_id", "band", "t", "flux", "err"]
+GAIA_DR4_SPAN = (-136.06, 1868.5)   # BTJD: 2014-07-25 10:31 to 2020-01-20 (DR4's epoch-photometry span)
+SECTORS_CSV = Path(__file__).resolve().parent.parent / "tess" / "sectors.csv"
 
 
 def _empty():
@@ -71,6 +81,42 @@ def tess_sectors(ra, dec):
     return [(int(r["sector"]), int(r["camera"]), int(r["ccd"])) for r in json.loads(body)["results"]]
 
 
+@lru_cache(maxsize=1)
+def sector_times():
+    """{sector: (btjd_start, btjd_end)} for every sector in tess/sectors.csv."""
+    df = pd.read_csv(SECTORS_CSV)
+    return {int(r.sector): (float(r.btjd_start), float(r.btjd_end)) for r in df.itertuples()}
+
+
+def sector_gap(sector, times):
+    """Days between a sector's observing interval and the nearest of times (0 if one falls inside); inf for a
+    sector not in the table (newer than it)."""
+    span = sector_times().get(int(sector))
+    if span is None:
+        return np.inf
+    t = np.atleast_1d(np.asarray(times, float))
+    t = t[np.isfinite(t)]
+    if not len(t):
+        return np.inf
+    return float(np.min(np.clip(span[0] - t, 0, None) + np.clip(t - span[1], 0, None)))
+
+
+def rank_sectors(sectors, near=None, span=GAIA_DR4_SPAN):
+    """(sector, camera, ccd) ordered for testing a Gaia dip: nearest to the dip epochs `near` first; without dip
+    times, those overlapping the Gaia span first; ties (and sectors far from both) by sector number."""
+    near = np.atleast_1d(np.asarray(near, float)) if near is not None else np.array([])
+    near = near[np.isfinite(near)]
+
+    def key(s):
+        if len(near):
+            return (sector_gap(s[0], near), s[0])
+        lo, hi = span
+        mid = np.clip(np.mean(sector_times().get(int(s[0]), (np.inf, np.inf))), lo, hi)
+        return (sector_gap(s[0], mid), s[0])
+
+    return sorted(sectors, key=key)
+
+
 def _bin(t, f, width):
     """Mean flux in fixed-width bins with the scatter of the mean as the error (TGLC gives no per-point errors)."""
     key = np.floor((t - t.min()) / width).astype(np.int64)
@@ -80,12 +126,13 @@ def _bin(t, f, width):
     return agg.t.to_numpy(), agg.f.to_numpy(), (agg.s / np.sqrt(agg.n)).to_numpy()
 
 
-def tess(source_id, ra, dec, max_sectors=None):
-    """TGLC aperture photometry for every sector that has it, binned to TESS_BIN_DAYS and normalised per sector."""
+def tess(source_id, ra, dec, max_sectors=None, near=None):
+    """TGLC aperture photometry, binned to TESS_BIN_DAYS and normalised per sector, for up to max_sectors sectors
+    ranked by `rank_sectors` (closest to the dip epochs `near` first)."""
     from cosmos_search.tess import tglc
 
     out = []
-    for sector, cam, ccd in tess_sectors(ra, dec)[:max_sectors]:
+    for sector, cam, ccd in rank_sectors(tess_sectors(ra, dec), near)[:max_sectors]:
         lc = tglc.fetch(sector, cam, ccd, int(source_id))
         if lc is None:
             continue
@@ -102,10 +149,13 @@ def tess(source_id, ra, dec, max_sectors=None):
 
 
 def fetch(queue, max_sectors=None, log=print):
-    """External light curves for every star in the queue (source_id, ra, dec), as one long table."""
+    """External light curves for every star in the queue (source_id, ra, dec, optional t_deepest), as one long
+    table."""
     parts = []
+    near = queue["t_deepest"].astype(float) if "t_deepest" in queue else pd.Series(np.nan, index=queue.index)
     # Not iterrows: on an all-numeric frame it casts source_id to float64 and corrupts it.
-    for sid, ra, dec in zip(queue["source_id"].astype("int64"), queue["ra"].astype(float), queue["dec"].astype(float)):
+    for sid, ra, dec, td in zip(queue["source_id"].astype("int64"), queue["ra"].astype(float),
+                                queue["dec"].astype(float), near):
         sid, ra, dec = int(sid), float(ra), float(dec)
         z, s = _empty(), _empty()
         try:
@@ -113,7 +163,7 @@ def fetch(queue, max_sectors=None, log=print):
         except Exception as exc:  # a survey that fails for one star is missing data, not a reason to stop
             log(f"{sid}: ZTF failed ({type(exc).__name__})")
         try:
-            s = tess(sid, ra, dec, max_sectors)
+            s = tess(sid, ra, dec, max_sectors, near=td)
         except Exception as exc:
             log(f"{sid}: TESS failed ({type(exc).__name__})")
         parts += [z, s]
@@ -166,7 +216,8 @@ def main(argv=None):
     f.add_argument("--out", required=True)
     f.add_argument("--max-sectors", type=int)
     a = ap.parse_args(argv)
-    q = pd.read_parquet(a.queue, columns=["source_id", "ra", "dec"]).drop_duplicates("source_id")
+    q = pd.read_parquet(a.queue)
+    q = q[[c for c in ("source_id", "ra", "dec", "t_deepest") if c in q]].drop_duplicates("source_id")
     ext = fetch(q, a.max_sectors)
     ext.to_parquet(a.out)
     cov = coverage(ext) if len(ext) else pd.DataFrame()

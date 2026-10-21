@@ -21,3 +21,4 @@ markers = ["network: needs live archive access; skipped in CI"]
 
 [tool.setuptools.package-data]
 "cosmos_search.vetting" = ["*.md"]
+"cosmos_search.tess" = ["*.csv"]
