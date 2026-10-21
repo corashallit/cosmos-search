@@ -154,7 +154,10 @@ def evaluate(ctx, lc_dir, external, plan_map=None, n_draws=None):
         sid = int(c["candidate_id"].split(":")[1])
         cand = Candidate.from_dict(c)
         lcs = visible(cand)
-        se = single_event.test(lcs, cand.source, cand.context, **({"n_draws": n_draws} if n_draws else {})) or {}
+        try:
+            se = single_event.test(lcs, cand.source, cand.context, **({"n_draws": n_draws} if n_draws else {})) or {}
+        except Exception as exc:  # recorded, so one odd light curve does not stop a calibration run
+            se = {"error": f"{type(exc).__name__}: {exc}"}
         rows.append({"source_id": sid, "population": pop.get(sid), "injected": bool(plan_map and sid in plan_map),
                      "family": plan_map[sid]["family"] if plan_map and sid in plan_map else None,
                      "single": bool(se), **{f"se_{k}": (str(v) if isinstance(v, list) else v)
@@ -181,14 +184,16 @@ def run(d, rounds, rng):
     return pd.concat(parts, ignore_index=True)
 
 
-def joint(lc_path, ctx_path, work, n=None, rng=None, batch=300, log=print):
+def joint(lc_path, ctx_path, work, n=None, rng=None, batch=300, log=print, shard=(0, 1)):
     """The single-event test on a joint Gaia + ZTF set (the EB-filter thread's /mnt/project-files/ebfilter/):
     real stars with their DPAC class, and DPAC's eclipsing-binary period where it has one."""
-    work = Path(work)
-    (work / "lightcurves").mkdir(parents=True, exist_ok=True)
     from cosmos_search.vetting import stage0
 
+    work = Path(work) / f"shard{shard[0]}"
+    (work / "lightcurves").mkdir(parents=True, exist_ok=True)
     ctx = pd.read_parquet(ctx_path).drop_duplicates("source_id")
+    have = pq.read_table(lc_path, columns=["source_id"])["source_id"].unique().to_numpy()
+    ctx = ctx[ctx["source_id"].isin(have)].sort_values("source_id").iloc[shard[0]::shard[1]]
     for col in stage0.BLEND_COLS:
         if col not in ctx:
             ctx[col] = np.nan
@@ -317,6 +322,7 @@ def main(argv=None):
     j.add_argument("--context", required=True)
     j.add_argument("--work", required=True)
     j.add_argument("--n", type=int)
+    j.add_argument("--shard", default="0/1")
     j.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     rng = np.random.default_rng(int.from_bytes(os.urandom(16), "little"))
@@ -332,7 +338,8 @@ def main(argv=None):
     elif a.cmd == "fetch":
         fetch(pd.read_parquet(a.sample), a.out, log=lambda m: print(m, flush=True), external=not a.no_external)
     elif a.cmd == "joint":
-        res = joint(a.lightcurves, a.context, a.work, a.n, rng, log=lambda m: print(m, flush=True))
+        res = joint(a.lightcurves, a.context, a.work, a.n, rng, log=lambda m: print(m, flush=True),
+                    shard=tuple(int(x) for x in a.shard.split("/")))
         res.to_parquet(a.out)
         print(summary(res).to_string())
     else:

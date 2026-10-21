@@ -17,10 +17,13 @@ is the wrong explanation: the dip did not recur where an orbit says it must.
 
 The test is a Monte Carlo over that hypothesis, conditioned on the observed event:
 
-1. Epochs and the event, as `recurrence` defines them (in-dip: >= 4 robust sigma low and deeper than the band's
-   largest brightening; Gaia BP/RP left out; events merged within 1 d). The test applies only when all surveys
-   together show exactly one event. Its in-dip epochs bound the eclipse duration from below; the nearest epochs
-   at normal brightness (< 2 sigma low) on either side bound it from above.
+1. Epochs and the event. In-dip as in `recurrence` (>= 4 robust sigma low and deeper than the band's brightenings,
+   here the second-largest, so one bright outlier does not blind a band; Gaia BP/RP left out); a lone in-dip epoch
+   in another survey, with no other in that band within a day, is set aside as an outlier. In-dip epochs form one
+   event unless an epoch at normal brightness (< 2 sigma low) that would have shown the dip lies between them, or
+   they come from different surveys more than a day apart. The
+   test applies only when all surveys together show exactly one event. Its in-dip epochs bound the eclipse
+   duration from below; the nearest normal-brightness epochs on either side bound it from above.
 2. Draw companions from a mundane population: stars (period log-normal, mean 10^5.03 d, sigma 2.28 dex, for
    solar-type binaries; mass ratio uniform 0.1-1; main-sequence radius and G-band light from the mass) and dark
    bodies (planets and brown dwarfs, 0.03-0.2 Rsun, log-uniform period 0.5-10^4 d), eccentricity uniform to 0.7,
@@ -34,7 +37,7 @@ The test is a Monte Carlo over that hypothesis, conditioned on the observed even
    A draw fits the event if every in-dip epoch of the event is within 25% (+3 sigma) of the depth it predicts
    there, and every normal-brightness epoch in the same eclipse is predicted shallower than 5 sigma. Among
    fitting draws, the ones that predict a detectable depth (above the band's in-dip threshold, x1.2) at any
-   epoch of another cycle have been refuted by the data.
+   epoch of another cycle (and by at least 2 sigma) have been refuted by the data.
 
     p_eb = weight of fitting draws that predict no detectable repeat / weight of all fitting draws
 
@@ -67,13 +70,18 @@ P_MIN = 0.2                                  # days; anything faster is a contac
 R_SCATTER_DEX = 0.15
 BROAD_R, BROAD_M = (0.3, 30.0), (0.3, 3.0)   # host prior when the parallax is too poor for stellar_params
 DETECT_MARGIN = 1.2
+DETECT_SIGMA = 2.0
 FIT_REL, FIT_SIGMA = 0.25, 3.0
 FLAT_TOL_SIGMA = 5.0
 MAX_T_DAYS = 3000.0
 N_DRAWS = 40000
+COLOUR_EXCLUDE_SIGMA = 3.0                   # BP and RP moving opposite ways, each this significant
 B_SHORTLIST = 2.5                            # single-dip flag: log10(one-off / eclipse) at least this (rule v4)
-MIN_IN_DIP = 2                               # and the event on at least two epochs
+MIN_IN_DIP = 2                               # and the event on at least two epochs, at least one of them Gaia G,
+QUIET_MAX = 3.0                              # on a star whose other G epochs scatter <= this x their errors,
+                                             # with normal-brightness epochs on both sides of the event
 CHUNK = 2000
+GAIA_BANDS = ("G", "BP", "RP")
 T_FLOOR = 0.01                               # days: shortest eclipse drawn
 TESS_DILUTION_UNKNOWN = 0.3
 
@@ -84,7 +92,7 @@ def _band_epochs(lcs, dilution=None):
     Same in-dip rule as `recurrence.epochs`; dilution (band -> fraction of the aperture's flux from other stars,
     e.g. TESS contamination) scales the depth an eclipse would show in that band."""
     dilution = dilution or {}
-    out = {k: [] for k in ("t", "band", "sigma", "thresh", "z", "depth", "dil")}
+    out = {k: [] for k in ("t", "band", "sigma", "thresh", "z", "depth", "dil", "err", "ignore")}
     for lc in lcs:
         if lc.band in recurrence.SKIP_BANDS:
             continue
@@ -97,9 +105,21 @@ def _band_epochs(lcs, dilution=None):
         if not s > 0:
             continue
         z = (1 - f / med) / s
-        k = max(recurrence.DIP_SIGMA, float(np.max(-z)))
+        # Mirror test as in `recurrence`, but against the second-largest brightening, so one bright outlier
+        # (a cosmic ray, a neighbour in the window) does not raise the dip threshold for the whole band.
+        bright = np.sort(-z)
+        k = max(recurrence.DIP_SIGMA, float(bright[-2]))
         d = float(dilution.get(lc.band, 0.0) or 0.0)
         n = len(t)
+        dip = z > k
+        # Other surveys' photometry has heavy-tailed one-epoch outliers (ZTF, TESS bins); a lone low epoch there,
+        # with no other low epoch of that band within a day, is neither a dip nor evidence against one.
+        lone = np.zeros(n, bool)
+        if lc.band not in GAIA_BANDS and dip.any():
+            td = t[dip]
+            near = np.array([np.sum(np.abs(td - x) <= recurrence.EVENT_GAP) > 1 for x in td])
+            lone[np.flatnonzero(dip)[~near]] = True
+        out["ignore"].append(lone)
         out["t"].append(t)
         out["band"].append(np.full(n, lc.band, dtype=object))
         out["sigma"].append(np.full(n, s))
@@ -107,6 +127,8 @@ def _band_epochs(lcs, dilution=None):
         out["z"].append(z)
         out["depth"].append(1 - f / med)
         out["dil"].append(np.full(n, min(max(d, 0.0), 0.99)))
+        e = lc.flux_err[ok] / med
+        out["err"].append(np.where(np.isfinite(e), e, np.nan))
     if not out["t"]:
         return None
     ep = {k: np.concatenate(v) for k, v in out.items()}
@@ -172,7 +194,7 @@ def _event(ep):
     between them; a gap in the data does not split an event (a dip lasting days, seen on Gaia visits days apart,
     is one event). Returns (event or None, number of events)."""
     t = ep["t"]
-    in_dip = ep["z"] > ep["thresh"] / ep["sigma"]
+    in_dip = (ep["z"] > ep["thresh"] / ep["sigma"]) & ~ep["ignore"]
     idx = np.flatnonzero(in_dip)
     if not len(idx):
         return None, 0
@@ -180,7 +202,12 @@ def _event(ep):
     # A flat epoch bounds the event only if the observed depth would have shown there.
     flat = (ep["z"] < recurrence.FLAT_SIGMA) & (deep * (1 - ep["dil"]) >= FLAT_TOL_SIGMA * ep["sigma"])
     n_flat_before = np.cumsum(flat)
-    splits = np.flatnonzero(n_flat_before[idx[1:]] - n_flat_before[idx[:-1]] > 0)
+    # Across a gap with no informative epoch, in-dip epochs of one survey stay one event (a long dip seen on Gaia
+    # visits weeks apart); epochs of different surveys more than a day apart do not, since nothing says they belong
+    # to the same dip.
+    survey = np.where(np.isin(ep["band"], GAIA_BANDS), "gaia", ep["band"])
+    cross = (survey[idx[1:]] != survey[idx[:-1]]) & (np.diff(t[idx]) > recurrence.EVENT_GAP)
+    splits = np.flatnonzero((n_flat_before[idx[1:]] - n_flat_before[idx[:-1]] > 0) | cross)
     if len(splits):
         return None, len(splits) + 1
     t_a, t_b = t[idx].min(), t[idx].max()
@@ -211,7 +238,9 @@ def eb_probability(ep, event, source, n_draws=N_DRAWS, rng=None):
     b = rng.uniform(0, 1 + k)
     # The event's in-dip epochs may sit in different cycles of a short orbit (gaps without data do not split an
     # event), so durations below the event's span are drawn too.
-    t_floor = min(T_FLOOR, span_lo)
+    t_floor = min(T_FLOOR, span_lo, 0.5 * span_hi)
+    if not (np.isfinite(span_hi) and np.isfinite(t_floor) and 0 < t_floor < span_hi):
+        return {"n_draws": int(n_draws), "n_fit": 0, "p_eb": None}
     logT = rng.uniform(np.log(t_floor), np.log(span_hi), n_draws)
     T = np.exp(logT)
     ecc = np.sqrt(1 - e**2) / (1 + e * np.sin(w_peri))
@@ -253,7 +282,8 @@ def eb_probability(ep, event, source, n_draws=N_DRAWS, rng=None):
         good_dip = np.all(np.abs(pred[:, idx] - d_obs) <= tol, axis=1)
         bad_flat = np.any(same & flat_near[None, :] & (pred > FLAT_TOL_SIGMA * sig[None, :]), axis=1)
         fit[j] = good_dip & ~bad_flat
-        det = (~same) & (pred >= DETECT_MARGIN * thresh[None, :])
+        # A repeat counts as missed only if it would have cleared the in-dip threshold with room for noise.
+        det = (~same) & ~ep["ignore"][None, :] & (pred >= np.maximum(DETECT_MARGIN * thresh, thresh + DETECT_SIGMA * sig)[None, :])
         repeat[j] = det.any(axis=1)
         n_rep[j] = det.sum(axis=1)
     wf = w * fit
@@ -264,6 +294,10 @@ def eb_probability(ep, event, source, n_draws=N_DRAWS, rng=None):
            "duration_max_days": round(float(span_hi), 4) if np.isfinite(span_hi) else None}
     if not tot > 0 or fit.sum() < 20:
         out["p_eb"] = None
+        # Too few eclipse draws fit to estimate the rate; an upper bound (three draws of the typical physical
+        # weight) still lets a one-off that does fit be ranked against eclipses.
+        if live.size:
+            out["eb_rate_upper"] = float((tot + 3.0 * np.median(w[live])) / n_draws * log_range)
         return out
     surv = wf * ~repeat
     out["p_eb"] = float(surv.sum() / tot)
@@ -321,8 +355,21 @@ def _wquantile(x, w, q):
     return x[o][min(np.searchsorted(c, q * c[-1]), len(x) - 1)]
 
 
-def colour(lcs, t_a, t_b, pad=0.01):
-    """RP depth / BP depth over the Gaia epochs of the event, with a 1-sigma error, or None."""
+def quiet_ratio(ep, event, band="G"):
+    """Robust scatter of the band's epochs outside the event over their median error. The test has no model of
+    the star's own variability, so a dip on a variable star can be the variability (a long low state of an AGN or a
+    spotted star reads as a one-off dip); the flag needs a star that is otherwise quiet."""
+    m = (ep["band"] == band) & ~((ep["t"] >= event["t_before"]) & (ep["t"] <= event["t_after"]))
+    if m.sum() < 10:
+        return None
+    x = 1 - ep["depth"][m]
+    s = recurrence._robust_sigma(x)
+    e = np.nanmedian(ep["err"][m])
+    return round(float(s / e), 2) if e > 0 else None
+
+
+def _bp_rp_depths(lcs, t_a, t_b, pad=0.01):
+    """Mean fractional depth and its 1-sigma error in BP and RP over the Gaia epochs of the event, or None."""
     by = {lc.band: lc for lc in lcs}
     if "BP" not in by or "RP" not in by:
         return None
@@ -338,11 +385,31 @@ def colour(lcs, t_a, t_b, pad=0.01):
             return None
         d[band] = float(np.mean(1 - f[m] / med))
         e[band] = s / np.sqrt(m.sum())
+    return d, e
+
+
+def colour(lcs, t_a, t_b, pad=0.01):
+    """RP depth / BP depth over the Gaia epochs of the event, with a 1-sigma error, or None."""
+    de = _bp_rp_depths(lcs, t_a, t_b, pad)
+    if de is None:
+        return None
+    d, e = de
     if not abs(d["BP"]) > 2 * e["BP"]:
         return None
     r = d["RP"] / d["BP"]
     err = abs(r) * np.hypot(e["RP"] / max(abs(d["RP"]), 1e-9), e["BP"] / abs(d["BP"]))
     return round(r, 3), round(float(err), 3)
+
+
+def colour_excludes_occultation(lcs, t_a, t_b, pad=0.01):
+    """True when one of BP and RP dims and the other brightens, each at COLOUR_EXCLUDE_SIGMA or more. Blocking
+    light removes it in every band (an occulter's own glow is constant across the event), so no eclipse, transit
+    or dust occultation does this; a temperature change of the star itself, or an instrumental colour error, can."""
+    de = _bp_rp_depths(lcs, t_a, t_b, pad)
+    if de is None:
+        return False
+    z = {b: de[0][b] / de[1][b] for b in ("BP", "RP")}
+    return bool(max(z.values()) >= COLOUR_EXCLUDE_SIGMA and min(z.values()) <= -COLOUR_EXCLUDE_SIGMA)
 
 
 def speed_check(ep, event, source):
@@ -378,9 +445,11 @@ def test(lcs, source=None, context=None, n_draws=N_DRAWS, rng=None):
     if event is None:
         return None
     res = eb_probability(ep, event, source, n_draws, rng)
-    if res.get("eb_rate"):
+    eb = res.get("eb_rate") or res.pop("eb_rate_upper", None)
+    if eb:
         one = oneoff_rate(ep, event, n_draws, rng)
-        res["log10_oneoff_vs_eb"] = round(float(np.log10(max(one, 1e-300) / res["eb_rate"])), 2) if one > 0 else None
+        res["log10_oneoff_vs_eb"] = round(float(np.log10(one / eb)), 2) if one > 0 else None
+        res["oneoff_vs_eb_is_lower_bound"] = res.get("eb_rate") is None
     n_in = int(len(event["idx"]))
     out = {"n_in_dip": n_in, "bands_in_dip": sorted(set(ep["band"][event["idx"]].tolist())),
            "depth": round(event["depth"], 4), **res}
@@ -391,8 +460,14 @@ def test(lcs, source=None, context=None, n_draws=N_DRAWS, rng=None):
     sp = speed_check(ep, event, source)
     if sp:
         out["v_required_km_s"], out["v_escape_km_s"] = sp
+    out["quiet_ratio_g"] = quiet_ratio(ep, event)
+    out["bracketed"] = bool(np.isfinite(event["t_before"]) and np.isfinite(event["t_after"]))
     bf = out.get("log10_oneoff_vs_eb")
-    out["single_dip_flag"] = bool(bf is not None and bf >= B_SHORTLIST and n_in >= MIN_IN_DIP)
+    q = out["quiet_ratio_g"]
+    out["colour_excludes_occultation"] = colour_excludes_occultation(lcs, event["t_a"], event["t_b"])
+    out["single_dip_flag"] = bool(((bf is not None and bf >= B_SHORTLIST) or out["colour_excludes_occultation"])
+                                  and n_in >= MIN_IN_DIP and "G" in out["bands_in_dip"].split(",")
+                                  and out["bracketed"] and q is not None and q <= QUIET_MAX)
     out["description"] = (
         "Single-event test, for stars whose epochs in all surveys show exactly one dip event. An eclipse of the "
         "observed duration on this star implies an orbital period (Kepler), and that period predicts more eclipses. "
@@ -404,10 +479,17 @@ def test(lcs, source=None, context=None, n_draws=N_DRAWS, rng=None):
         "ephemeris). n_in_dip: epochs carrying the event (one epoch alone is often an artefact). colour_ratio_rp_bp: "
         "RP depth / BP depth (1 grey, < 1 dust-like reddening, < 0 one band brightened). v_required_km_s: transverse "
         "speed the fastest flux change needs; v_escape_km_s: the host's surface escape speed, which no bound occulter "
-        "exceeds. log10_oneoff_vs_eb: log10 of how much better a one-off occulter of unknown duration, depth and "
+        "exceeds. colour_excludes_occultation: one of BP and RP dimmed and the other brightened, each at >= 3 sigma, "
+        "which no occulting body can do (a temperature change of the star, or an instrumental colour error, can). "
+        "log10_oneoff_vs_eb: log10 of how much better a one-off occulter of unknown duration, depth and "
         "ingress (log-uniform priors) explains the event and the absence of repeats than the eclipsing-companion "
         "population does (large: an eclipse is a poor explanation, because eclipses that fit are rarely caught "
-        "once and never again; it says nothing about which non-eclipse cause, astrophysical or instrumental). "
-        "single_dip_flag: log10_oneoff_vs_eb >= 2.5 with the event on at least two epochs.")
+        "once and never again; it says nothing about which non-eclipse cause, astrophysical or instrumental; "
+        "oneoff_vs_eb_is_lower_bound: too few eclipse draws fit at all, so the value is a lower bound). "
+        "quiet_ratio_g: scatter of the other G epochs over their errors (the test has no model of the star's own "
+        "variability, so on a variable star a low state can pass for a one-off dip). bracketed: normal-brightness "
+        "epochs on both sides of the event. single_dip_flag: log10_oneoff_vs_eb >= 2.5 or "
+        "colour_excludes_occultation, with at least two in-dip epochs, at least one of them in Gaia G, bracketed, "
+        "and quiet_ratio_g <= 3.")
     out["visible_only"] = True
     return out

@@ -93,3 +93,19 @@ def test_speed_bound_flags_an_impossibly_fast_change_on_a_giant():
     k = lambda t: 1 - 0.3 * (np.abs(t - tg[i]) < 0.01)      # in one field of view, gone 106 min later
     r = single_event.test(_lcs(k, rng, tg, tz), giant, n_draws=4000)
     assert r["v_required_km_s"] > r["v_escape_km_s"]
+
+
+def test_opposite_colour_change_excludes_occultation():
+    """BP dims while RP brightens across a two-epoch event: no occulter does that, so the flag can fire on colour."""
+    rng = np.random.default_rng(7)
+    tg, tz = _gaia_times(rng), _nightly(rng, 1300, 2500)
+    i = 14
+    win = lambda t: np.abs(t - tg[i] - 0.037) < 0.06
+    lcs = []
+    for band, depth in (("G", 0.03), ("BP", 0.08), ("RP", -0.03)):
+        lcs.append(LightCurve(band, tg, 1 - depth * win(tg) + 0.002 * rng.standard_normal(len(tg)),
+                              np.full(len(tg), 0.002)))
+    lcs.append(LightCurve("ztf_r", tz, 1 + 0.01 * rng.standard_normal(len(tz)), np.full(len(tz), 0.01)))
+    r = single_event.test(lcs, SUN_LIKE, n_draws=4000)
+    assert r is not None and r["colour_excludes_occultation"]
+    assert r["colour_ratio_rp_bp"] < 0
