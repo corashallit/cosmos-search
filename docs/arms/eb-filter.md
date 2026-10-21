@@ -97,6 +97,12 @@ period); anomaly loss per target family and pooled (Gaia, joint); `eb_host` loss
 real DPAC EB recall on ZTF alone (no leak: DPAC's labels come from the Gaia epochs) and on joint data
 (agreement, not independent); the share of queued non-DPAC-EB stars the filter explains.
 
+*Changes before half A was scored,* found by the unit tests (synthetic cases, not calibration data), and the
+half-A run restarted: (1) only periods within 10 bits of the best (odds ≥ 2^−10) may explain the target, because
+a 1-in-several alias 170 bits worse than the true period could cover an extra dip by chance; (2) the duration
+bound uses the whole run of dip epochs touching a window (no flat between, gaps < min(1.5 d, P/2)), because a
+narrow window inside a 4-day dip otherwise claims a short eclipse.
+
 **Decision.** Use the filter in ranking for the D2 freeze if, on half B, the pooled target-family loss has a
 95% upper bound ≤ 3% and joint synthetic-EB recall is ≥ 0.5. Otherwise revise and test on fresh injections.
 

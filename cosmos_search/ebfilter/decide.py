@@ -36,7 +36,9 @@ from . import search as S
 DELTA_BITS = 10.0
 DEPTH_FACTOR = 1.5
 DEPTH_SLACK = 0.05      # mag
-SAME_EVENT_D = 1.0      # dips this close to the target are its own event, not another cycle       # pre-registered in docs/arms/eb-filter.md before the held-out half was scored
+SAME_EVENT_D = 1.0      # dips this close to the target are its own event, not another cycle
+ALIAS_MARGIN = 10.0     # bits: periods this much worse than the best are 2^-10 as likely; not used to explain
+EVENT_GAP_D = 1.5       # dip epochs with no flat between them and closer than this (and than P/2) are one eclipse       # pre-registered in docs/arms/eb-filter.md before the held-out half was scored
 E_MAX = 0.9             # as vetting.physics.min_period_days
 G_SI = 6.674e-11
 M_SUN = 1.989e30
@@ -61,7 +63,9 @@ def decide(lcs, source=None, t_target=None, delta_bits=DELTA_BITS, **search_kw):
     out.update({"explained": False, "periodic_unphysical": False, "duration_ok": None, "target_covered": None,
                 "r_star": sp[0] if sp else np.nan, "m_star": sp[1] if sp else np.nan, "p_null_bound":
                 float(min(1.0, 2.0 ** -res["delta_bits"])), "bands": names})
-    good = [s for s in res.get("solutions", []) if s["delta_bits"] >= delta_bits]
+    sols = res.get("solutions", [])
+    floor = max(delta_bits, sols[0]["delta_bits"] - ALIAS_MARGIN) if sols else delta_bits
+    good = [s for s in sols if s["delta_bits"] >= floor]
     if not good:
         return out
     keep = lab >= 0
@@ -70,10 +74,7 @@ def decide(lcs, source=None, t_target=None, delta_bits=DELTA_BITS, **search_kw):
         cov_target = None
         if t_target is not None:
             cov_target = target_explained(t, lab, frac, t_target, s)
-        # Duration lower bound from this solution's primary window.
-        ph = (tk / s["period"]) % 1.0
-        x = ((ph - s["s1"]) % 1.0)[(labk == 1) & (((ph - s["s1"]) % 1.0) <= s["q1"])]
-        dur_lo = float((x.max() - x.min()) * s["period"]) if len(x) > 1 else 0.0
+        dur_lo = duration_lo(tk, labk, s)
         dur_ok = None
         if sp:
             dmax = max(max_duration_days(s["period"], *sp), max_duration_days(2 * s["period"], *sp))
@@ -89,6 +90,30 @@ def decide(lcs, source=None, t_target=None, delta_bits=DELTA_BITS, **search_kw):
     s = good[0]
     out["target_covered"] = None if t_target is None else target_explained(t, lab, frac, t_target, s)
     return out
+
+
+def duration_lo(t, lab, sol):
+    """Lower bound on the eclipse duration under a solution: the longest run of dip epochs (consecutive among the
+    labelled epochs, no flat between, gaps under min(EVENT_GAP_D, P/2)) that touches a window, or the phase extent
+    of the dips in the primary window, whichever is longer."""
+    p = sol["period"]
+    cov = S.covered(t, p, sol["s1"], sol["q1"], sol["s2"], sol["q2"])
+    ph = (t / p) % 1.0
+    x = ((ph - sol["s1"]) % 1.0)[(lab == 1) & (((ph - sol["s1"]) % 1.0) <= sol["q1"])]
+    best = float((x.max() - x.min()) * p) if len(x) > 1 else 0.0
+    gap = min(EVENT_GAP_D, 0.5 * p)
+    i, n = 0, len(t)
+    while i < n:
+        if lab[i] != 1:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and lab[j + 1] == 1 and t[j + 1] - t[j] <= gap:
+            j += 1
+        if cov[i:j + 1].any():
+            best = max(best, float(t[j] - t[i]))
+        i = j + 1
+    return best
 
 
 def _mag(frac):
