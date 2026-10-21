@@ -79,16 +79,27 @@ def tail_p(stat, null, min_exceed=10, tail_fraction=0.01, min_tail=100, conserva
         m = max(min_tail, int(np.ceil(tail_fraction * n)))
         if m >= n:
             raise ValueError(f"null of {n} draws is too small for a {m}-point tail fit")
-        u = null[n - m - 1]
-        excess = null[n - m:] - u
-        xi, sigma = gpd_fit(excess)
-        if conservative:
-            xi = max(_xi_upper(excess, xi_quantile), 0.0)
-            # Refit the scale at that shape so the tail still matches the excesses' mean.
-            sigma = max(np.mean(excess) * (1 - xi), 1e-300) if xi < 1 else sigma
         # Below min_exceed exceedances the empirical count is mostly noise; the fitted tail is smoother.
-        p[far] = (m / n) * gpd_sf(s[far] - u, xi, sigma)
+        p[far] = gpd_tail_p(s[far], null[n - m - 1:], n, conservative, xi_quantile)
     return p.reshape(np.shape(stat)), far.reshape(np.shape(stat))
+
+
+def gpd_tail_p(stat, top, n, conservative=True, xi_quantile=0.9):
+    """Tail p-values from the m + 1 largest of n null draws, sorted ascending.
+
+    The smallest of them is the threshold u and the other m are the excesses' source, so the
+    fitted tail is P(X > u) = m / n times the GPD survival function. See tail_p for the
+    conservative option.
+    """
+    top = np.asarray(top, dtype=float)
+    u, m = top[0], top.size - 1
+    excess = top[1:] - u
+    xi, sigma = gpd_fit(excess)
+    if conservative:
+        xi = max(_xi_upper(excess, xi_quantile), 0.0)
+        # Refit the scale at that shape so the tail still matches the excesses' mean.
+        sigma = max(np.mean(excess) * (1 - xi), 1e-300) if xi < 1 else sigma
+    return (m / n) * gpd_sf(np.asarray(stat, dtype=float) - u, xi, sigma)
 
 
 def stratified_p(stat, strata, null, null_strata, min_null=1000, **tail_kw):

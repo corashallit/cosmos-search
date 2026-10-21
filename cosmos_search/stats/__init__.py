@@ -6,10 +6,11 @@ statistics, and get back calibrated p-values, false-alarm counts and estimates.
 
 from .audit import audit_inclusion, horvitz_thompson, poisson_sample
 from .multiple import bh, cauchy_combine, expected_false_alarms, storey_pi0, storey_q
-from .nulls import empirical_p, gpd_fit, gpd_sf, stratified_p, tail_p
+from .nulls import empirical_p, gpd_fit, gpd_sf, gpd_tail_p, stratified_p, tail_p
+from .sketch import TailSketch
 
 __all__ = [
     "audit_inclusion", "horvitz_thompson", "poisson_sample",
     "bh", "cauchy_combine", "expected_false_alarms", "storey_pi0", "storey_q",
-    "empirical_p", "gpd_fit", "gpd_sf", "stratified_p", "tail_p",
+    "empirical_p", "gpd_fit", "gpd_sf", "gpd_tail_p", "stratified_p", "tail_p", "TailSketch",
 ]

@@ -73,9 +73,10 @@ no longer a selection: it only decides what we look at first. So:
    kept (storage.md):
    - a feature row for every source above a loose cut, plus full light curves for a random sample drawn with
      known inclusion probabilities (`stats.audit`), which give injection hosts and recall measurements;
-   - per-stratum **tail sketches** for the null. Each stratum keeps every dimming and brightening statistic
-     above its 10⁻⁴ quantile exactly, with a fine histogram below. The mirror null then stays exact where
-     thresholds are set (statistics.md §2), without keeping 1.8 × 10⁹ rows.
+   - per-stratum **tail sketches** for the null (`stats.TailSketch`). Each stratum keeps its largest
+     dimming and brightening statistics exactly (up to a fixed count, by default 10⁵) and a fine histogram
+     of the rest. The mirror null then stays exact where thresholds are set (statistics.md §2), sketches
+     from different files and sessions merge exactly, and nothing near 1.8 × 10⁹ rows is kept.
    - The stream must resume after a container is reclaimed, so it records which files it has processed.
 4. **Fallback if DR4 has no bulk files at release.** The random full-light-curve channel then goes through
    DataLink at ~10⁵ sources per ~18 h, which is still large enough to measure the rejected-transit channel
