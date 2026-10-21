@@ -43,7 +43,10 @@ span more than the signals we expect, because they measure how agnostic each det
 | Non-astrophysical structure | Step changes, regularly spaced dips at intervals no orbit produces, number-theoretic spacings, chromatic oddities (BP dims while RP brightens) |
 | Astrometric | Constant thrust, impulsive velocity changes, radiation-pressure accelerations correlated with flux |
 
-Hosts are drawn from the real sample with matched magnitude, colour and sky distributions. Report
+The light-curve families are implemented in `cosmos_search/inject/lightcurve.py`, shared by every arm.
+Occultations are parametrised physically (covering fraction × (1 − e^−τ(λ)), τ ∝ λ^−β), so grey, reddened
+and blue dips come from one model. Hosts are drawn from the real sample with matched magnitude, colour and
+sky distributions. Report
 completeness as maps over the family's parameters. Split injections into a visible **tuning** set and a
 **sealed** set made by the truth repo; final numbers come only from the sealed set (blinding.md).
 
