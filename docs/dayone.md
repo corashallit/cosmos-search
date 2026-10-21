@@ -14,7 +14,7 @@ many injections survived each stage, and what to change before the D2 freeze. Co
 | Prefilter | `python -m cosmos_search.targets run` (α = 10⁻⁴) | DataLink order |
 | DataLink | `python -m cosmos_search.dayone.datalink --select … --inject plan.json.age` | the same features through the other route |
 | G3 | `python scripts/dr3_g3.py <features> <out> <aux> [MIN_ABS_W]` | per-source q for `single`, `fov`, `single_raw` |
-| Ranking v0 | `python -m cosmos_search.dayone.rank` | `ranked.parquet`, `queue.parquet` (30 ranked, 6 audit, 8 EB controls) |
+| Ranking v0 | `python -m cosmos_search.dayone.rank` | `ranked.parquet`, `queue.parquet` (30 ranked, 6 audit, 8 EB controls), `summary.json` with the urandom seed of the audit and control draw |
 | Cross-match | `python -m cosmos_search.xmatch --context` | 11-survey context for the queue |
 | Packets | `python -m cosmos_search.dayone.vet build [--no-sso]` | 44 packets with tail holdout, prompts |
 | Stage A | one blind subagent per packet (Read the prompt, Write the reply) | 44 replies |
