@@ -12,11 +12,16 @@ from .scoring import auc, auc_permutation_p
 
 
 def features(packet):
-    """Numeric fingerprint of a packet: cadence, noise, field presence. No class-specific physics on purpose."""
-    f = {"n_dips": len(packet["dips"]), "n_tests": len(packet["tests"]), "n_scores": len(packet["scores"]),
-         "n_context": len(packet["context"]), "n_bands": len(packet["bands"]), "text_len": len(packet["text"])}
+    """Fingerprint of a packet from fields that should carry no signal: cadence, errors, which fields exist.
+
+    Flux scatter, dip counts and text length are excluded on purpose: an injected
+    signal changes them legitimately, and a planted packet *should* differ there.
+    The question is whether anything else gives it away (blinding.md §4).
+    """
+    f = {"n_tests": len(packet["tests"]), "n_scores": len(packet["scores"]), "n_context": len(packet["context"]),
+         "n_bands": len(packet["bands"]), "n_source_fields": len(packet["source"])}
     for band, s in packet["summaries"].items():
-        for k in ("n_epochs", "span_days", "median_flux_err", "robust_sigma"):
+        for k in ("n_epochs", "span_days", "median_flux_err"):
             v = s.get(k)
             f[f"{band}_{k}"] = float(v) if isinstance(v, (int, float)) else np.nan
     return f

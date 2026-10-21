@@ -1,4 +1,5 @@
 import json
+import re
 
 import numpy as np
 import pytest
@@ -68,9 +69,12 @@ def test_leak_scan_passes_ordinary_packet_text():
 def test_packet_is_rezeroed_and_clean():
     packet, key = build(gaia_like(dip_at=2457500.0))
     assert key["candidate_id"].startswith("gaia_dr3")
-    assert "2457" not in packet["text"]
+    # Every rendered time is on the packet clock (the light curve spans ~1000 d), never a JD.
+    assert not re.search(r"(?<![\d.])24[5-6]\d{4}\.\d", packet["text"])
+    t_col = [float(line.split()[0]) for line in packet["text"].splitlines() if re.match(r"^\d+\.\d{4} ", line)]
+    assert t_col and max(t_col) < 1001
     assert packet["summaries"]["G"]["n_epochs"] == 120
-    assert leak_scan(packet["text"]) == []
+    assert leak_scan(packet["text"].replace(packet["packet_id"], "")) == []
 
 
 def test_packet_refuses_leaky_context():
@@ -91,7 +95,7 @@ def test_holdouts_withhold_data_and_record_truth():
     assert key["truths"]["dip_colour_ratio"] == pytest.approx(1, abs=0.2)  # injected grey dip
     assert packet["summaries"]["G"]["span_days"] < 0.85 * 1000
     for t in packet["targets"]:
-        assert "2457" not in t["question"]
+        assert all(float(x) < 1001 for x in re.findall(r"t = (-?[\d.]+) d", t["question"]))
 
 
 def test_batch_harmonises_fields_and_shuffles():
@@ -114,7 +118,7 @@ def test_every_decoy_spec_injects(spec):
     cand, extra, truth = make_decoy(host, spec, np.random.default_rng(1))
     assert extra["kind"] == "decoy" and extra["label"] in taxonomy.LEAVES
     assert truth["host"] == host.candidate_id
-    assert truth["snr"] >= 7
+    assert truth["visibility"]["max_dev"] >= 4
     assert any(not np.allclose(a.flux, b.flux) for a, b in zip(cand.lightcurves, host.lightcurves))
 
 
@@ -306,3 +310,62 @@ def test_audit_catches_a_field_only_decoys_lack():
     assert audit(packets, planted, n_perm=200)["auc"] > 0.9
     fair = [build(gaia_like(seed=100 + i))[0] for i in range(60)]
     assert audit(fair, planted, n_perm=200)["p"] > 0.01
+
+
+def test_test_descriptions_are_rendered():
+    cand = gaia_like()
+    cand.tests["z_bkg"] = {"statistic": 4.2, "description": "in-dip background excess in its own scatter"}
+    packet, _ = build(cand)
+    assert packet["tests"]["z_bkg"]["description"].startswith("in-dip")
+    assert "in-dip background excess" in packet["text"]
+
+
+def test_tail_dip_target_skipped_for_large_amplitude_stars():
+    cand = gaia_like()
+    for lc in cand.lightcurves:
+        lc.flux = 1 + 0.4 * np.sin(lc.time / 30.0)
+    packet, key = build(cand, holdout=("tail",))
+    assert [t["id"] for t in packet["targets"]] == ["tail_min_flux"]
+    assert "withheld" in packet["targets"][0]["question"]
+
+
+def test_decoys_are_visible_before_the_tail_cut():
+    from cosmos_search.inject.classes.vetting_decoys import visibility
+    from cosmos_search.inject import lightcurve as lcinj
+    host = gaia_like(seed=7)
+    t0, t1 = host.time_span()
+    cut = t0 + 0.8 * (t1 - t0)
+    for spec in ("grey_dip", "step", "chromatic_flip", "single_band_dip"):
+        cand, extra, truth = make_decoy(host, spec, np.random.default_rng(3), t_cut=cut)
+        assert truth["visibility"]["max_dev"] >= 4 and truth["visibility"]["n_dev3"] >= 2
+    # A dip placed entirely in the withheld tail is not visible.
+    hidden = lcinj.Dip(t0=t1 - 5, covering=0.5, ingress=1, egress=1, flat=3)
+    assert not visibility(host, hidden, None, cut, "rare_natural")[0]
+
+
+def test_anomaly_probes_must_defeat_every_single_period():
+    from cosmos_search.inject.classes.vetting_decoys import single_period_fits
+    t = np.sort(np.random.default_rng(0).uniform(0, 1000, 150))
+    per = 37.3
+    in_dip = t[np.abs(((t - t[5]) / per + 0.5) % 1 - 0.5) * per < 0.3]
+    out = np.setdiff1d(t, in_dip)
+    assert single_period_fits(in_dip, out, 0.3, 1000)
+    primes = np.array([2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47])
+    ev = 10 + 4.0 * np.cumsum(primes)
+    t2 = np.sort(np.concatenate([t, ev]))
+    in2 = ev[ev < 1000]
+    assert not single_period_fits(in2, np.setdiff1d(t2, in2), 0.3, 1000)
+
+
+def test_anomaly_probe_decoys_pass_the_identifiability_check():
+    host = gaia_like(seed=11, n=150)
+    cand, extra, truth = make_decoy(host, "grey_primes", np.random.default_rng(5))
+    assert extra["role"] == "anomaly_probe" and truth["visibility"]["n_events"] >= 3
+
+
+def test_random_packet_ids_never_trip_the_leak_scan():
+    cand = gaia_like()
+    for _ in range(300):
+        packet, _ = build(cand)
+        assert leak_scan(packet["text"]) == []
+    assert leak_scan("source 4567890123456789") == ["long_integer"]

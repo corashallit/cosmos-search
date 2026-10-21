@@ -32,6 +32,14 @@ class LeakError(ValueError):
     pass
 
 
+# No digits and no hex letters, so an id can never look like a catalogue number ("cd0f...", "b243172978...").
+ID_ALPHABET = "ghjkmnpqrstvwxyz"
+
+
+def new_packet_id(n=16):
+    return "".join(secrets.choice(ID_ALPHABET) for _ in range(n))
+
+
 def robust_sigma(x):
     x = np.asarray(x, dtype=float)
     x = x[np.isfinite(x)]
@@ -112,13 +120,15 @@ def _tail_targets(cand, t_cut):
         return targets, truths, None
     med, s = float(np.nanmedian(ref.flux[vis])), robust_sigma(ref.flux[vis])
     thresh = med - DIP_SIGMA * s
-    targets.append({"id": "tail_dip", "kind": "binary",
-                    "question": f"The last {HOLDOUT_TAIL:.0%} of the time span ({hid.sum()} {ref.band} epochs after t = "
-                                f"{t_cut:.1f} d) is withheld. Probability that at least one withheld {ref.band} epoch "
-                                f"has flux below {thresh:.4f} ({DIP_SIGMA:g} robust sigma below the visible median)?"})
-    truths["tail_dip"] = bool(np.nanmin(ref.flux[hid]) < thresh)
+    window = f"The last {HOLDOUT_TAIL:.0%} of the time span ({hid.sum()} {ref.band} epochs after t = {t_cut:.1f} d) is withheld."
+    # Stars that vary by tens of per cent (R CrB, Miras) would need a dip below zero flux; ask only the interval there.
+    if thresh > 0:
+        targets.append({"id": "tail_dip", "kind": "binary",
+                        "question": f"{window} Probability that at least one withheld {ref.band} epoch has flux below "
+                                    f"{thresh:.4f} ({DIP_SIGMA:g} robust sigma below the visible median)?"})
+        truths["tail_dip"] = bool(np.nanmin(ref.flux[hid]) < thresh)
     targets.append({"id": "tail_min_flux", "kind": "interval",
-                    "question": f"Central 80% interval for the minimum {ref.band} flux among the withheld epochs."})
+                    "question": f"{window} Central 80% interval for the minimum {ref.band} flux among the withheld epochs."})
     truths["tail_min_flux"] = float(np.nanmin(ref.flux[hid]))
     return targets, truths, t_cut
 
@@ -164,7 +174,7 @@ HOLDOUTS = ("tail", "colour", "ir")
 def build(candidate, holdout=(), packet_id=None):
     """Return (packet, key). `holdout` is a subset of HOLDOUTS; the targets that apply are added."""
     cand = candidate if isinstance(candidate, Candidate) else Candidate.from_dict(candidate)
-    packet_id = packet_id or secrets.token_hex(8)
+    packet_id = packet_id or new_packet_id()
     t0, t1 = cand.time_span()
 
     targets, truths = [], {}
@@ -205,7 +215,9 @@ def build(candidate, holdout=(), packet_id=None):
         "dips": dips,
         # Detector outputs were computed on the full light curve, so a tail holdout would leak through them.
         "tests": {} if t_cut is not None else
-                 {k: {kk: sig(vv, 3) for kk, vv in v.items() if isinstance(vv, (int, float))} for k, v in cand.tests.items()},
+                 {k: {kk: (sig(vv, 3) if isinstance(vv, (int, float)) else vv) for kk, vv in v.items()
+                      if isinstance(vv, (int, float)) or (kk == "description" and isinstance(vv, str))}
+                  for k, v in cand.tests.items()},
         "scores": {} if t_cut is not None else
                   {k: sig(v, 3) for k, v in cand.scores.items() if isinstance(v, (int, float))},
         "context": {k: (sig(v, 3) if isinstance(v, (int, float)) else v) for k, v in cand.context.items()
@@ -237,8 +249,9 @@ def render(packet, lcs):
         out += ["## Context", json.dumps(packet["context"], sort_keys=True), ""]
     if packet["tests"] or packet["scores"]:
         out += ["## Detector scores and false-positive tests",
-                "Scores are calibrated false-alarm probabilities unless named otherwise; tests give the statistic and "
-                "the p-value of the null 'this false-positive class does not explain the dip'.",
+                "Scores are calibrated false-alarm probabilities unless named otherwise. Tests give a statistic, a "
+                "description of it where the pipeline supplies one, and, where available, the p-value of the null "
+                "'this false-positive class does not explain the dip'.",
                 json.dumps({"scores": packet["scores"], "tests": packet["tests"]}, sort_keys=True), ""]
     if packet["dips"]:
         out += ["## Detected dips", *(json.dumps(d, sort_keys=True) for d in packet["dips"]), ""]
