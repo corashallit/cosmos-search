@@ -57,3 +57,11 @@ def test_every_family_samples_and_serialises(family):
 def test_unknown_band_is_an_error():
     with pytest.raises(ValueError):
         lc.Dip(t0=0, covering=0.1).factor(T, "K")
+
+
+@pytest.mark.parametrize("span", [27.0, 2000.0])
+@pytest.mark.parametrize("family", [f for f in lc.FAMILIES if f.startswith("dip_train_")])
+def test_dip_trains_fit_short_and_long_spans(family, span):
+    rng = np.random.default_rng(2)
+    counts = [len(lc.sample(rng, family, 0.0, span).parts) for _ in range(200)]
+    assert np.median(counts) >= 3
