@@ -54,7 +54,7 @@ decoys. See [blinding.md](blinding.md).
 | Durable storage, ~250 GB (options in storage.md) | Deferred; needed before DR4 |
 | Truth repo with the Claude GitHub App *not* installed (blinding.md §1) | Set up, smoke run passed; Cora removing Claude's access |
 | `age` key pairs (Cora's, reveal); public keys committed to `keys/` | Done |
-| Expert budget: queue of ~10³ objects is plausible, ~10⁴ is expensive (statistics.md §6) | Open |
+| Expert budget (statistics.md §6) | Decided: plan for a queue of ~10³ objects; ~10⁴ is plausible but near the limit. The classical tier must explain ≳ 99.7% of the sample |
 | Scope of "everything": stars, brown dwarfs, compact objects and their companions/disks. Solar-system bodies are modelled as contaminants; the ISM and the Local Bubble are context | Proposed |
 
 ## Milestones

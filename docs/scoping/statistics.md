@@ -123,7 +123,8 @@ Score accuracy per decoy type, and require experts to state a probability; check
 scores and reliability curves. An expert verdict is only usable if its calibration on decoys is acceptable.
 
 **Budget.** At ~4 × 10⁵ objects, a classical tier that explains 99% leaves ~4,000 for experts; 99.9% leaves
-~400. The DR3 rehearsal should tell us which regime we are in before we commit expert time to DR4.
+~400. Decided budget: ~10³ objects (≈ 99.7% explained classically), with ~10⁴ as the outer limit. The DR3
+rehearsal should tell us which regime we are in before we commit expert time to DR4.
 
 ## 7. DR3 rehearsal → DR4
 
