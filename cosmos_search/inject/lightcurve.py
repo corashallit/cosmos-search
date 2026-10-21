@@ -210,11 +210,16 @@ def _loguniform(rng, lo, hi):
     return float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
 
 
-def sample(rng, family, t_min, t_max, t_ext=None):
+class HeldOutError(ValueError):
+    """A held-out family was requested by code that is not drawing a confirmatory batch."""
+
+
+def sample(rng, family, t_min, t_max, t_ext=None, allow_held_out=False):
     """Draw one signal from a named family over the light curve's time span.
 
     With t_ext > t_max, dip trains keep running to t_ext under the same law (same rate, period or spacing),
-    so another survey's later epochs see the same process; priors still scale with t_max - t_min."""
+    so another survey's later epochs see the same process; priors still scale with t_max - t_min.
+    HELD_OUT_FAMILIES are refused unless allow_held_out is set, which only a confirmatory batch's plan does."""
     span = t_max - t_min
     t_end = t_max if t_ext is None else max(t_ext, t_max)
     if family == "grey_dip":
@@ -247,6 +252,9 @@ def sample(rng, family, t_min, t_max, t_ext=None):
                 for t0 in event_times(rng, kind, t_min, t_end, **kw)]
         return Composite(dips)
     if family in HELD_OUT_FAMILIES:
+        if not allow_held_out:
+            raise HeldOutError(f"{family!r} is held out for the confirmatory batch; calibration and tuning may not "
+                               "draw it (docs/dayone.md, review fixes)")
         return _held_out(rng, family, t_min, t_end, span)
     if family == "secular_fade":
         return SecularTrend(rate_per_year=-_loguniform(rng, 1e-3, 5e-2), t_ref=(t_min + t_max) / 2,
@@ -277,8 +285,9 @@ FAMILIES = (
 )
 
 # Families no detector, flag or rule was calibrated or tuned on. They exist to measure recall on structure the
-# rules were not designed around (docs/plan.md, principle 3; review finding R5), so no calibration script may
-# draw them; tests/test_inject.py checks the calibration modules' family lists. Use them only in confirmatory
+# rules were not designed around (docs/plan.md, principle 3; review findings R5, R20), so sample() refuses them
+# unless the caller is drawing a confirmatory plan, and tests/test_inject_lightcurve.py checks the calibration
+# modules' family lists. Use them only in confirmatory
 # batches, and once a rule has been adjusted after seeing their results, they are no longer held out.
 HELD_OUT_FAMILIES = ("dip_train_clustered", "dip_train_drifting", "dip_swarm", "dip_irregular")
 

@@ -67,7 +67,7 @@ def test_dip_trains_fit_short_and_long_spans(family, span):
     assert np.median(counts) >= 3
 
 
-def test_held_out_families_draw_and_stay_out_of_calibration():
+def test_held_out_families_refused_unless_confirmatory_and_out_of_calibration():
     import importlib
 
     from cosmos_search.inject import lightcurve as lc
@@ -75,8 +75,10 @@ def test_held_out_families_draw_and_stay_out_of_calibration():
     rng = np.random.default_rng(11)
     t = np.linspace(0.0, 1000.0, 4000)
     for fam in lc.HELD_OUT_FAMILIES:
+        with pytest.raises(lc.HeldOutError):
+            lc.sample(rng, fam, 0.0, 1000.0)
         for _ in range(20):
-            sig = lc.sample(rng, fam, 0.0, 1000.0, t_ext=1500.0)
+            sig = lc.sample(rng, fam, 0.0, 1000.0, t_ext=1500.0, allow_held_out=True)
             k = sig.factor(t, "G")
             assert np.all(np.isfinite(k)) and np.all(k > 0) and np.all(k <= 1)
             json.dumps(lc.truth(sig))
