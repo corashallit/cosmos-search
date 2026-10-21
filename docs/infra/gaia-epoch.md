@@ -66,10 +66,15 @@ applies to faint and bright statistics alike, so the mirror null stays symmetric
 the same path (`clean=True` is the default). Per source it adds `stage0_n_<verdict>` counts and the
 uncleaned extremes `min_z_raw` and `max_z_raw`. The DR3 pass on the share predates this (`dr3-features-v0`).
 
-On one DR3 chunk of 2,000 sources, cleaning removed 6 of 381 dips ≤ −8σ but 29 of 160 bright spikes ≥ +8σ.
-Faults are not symmetric between the two sides, so a null drawn from uncleaned bright tails would be too
-wide. Cleaning triples the CPU cost per source: 3.3 s instead of 1.1 s per 2,000 sources, mostly in
-`clean_long`'s per-source loop, which is the part to vectorise before the DR4 stream.
+Stage 0 needs each source's BP/RP blended-transit fraction (gaia_source `phot_{bp,rp}_n_blended_transits`
+over `phot_{bp,rp}_n_obs`); without it a quiet source is left untested. `dr3_pass --blend PARQUET` takes a
+table of `source_id` + `stage0.BLEND_COLS` and passes the fractions per chunk.
+
+On one DR3 chunk of 2,000 LMC-field sources (with blend fractions, and the dilution-aware test of #30), cleaning
+moved 4 of 381 dips ≤ −8σ and 6 of 160 bright spikes ≥ +8σ under the threshold, all by a few tenths of a σ
+through the robust scale. The two eclipsing binaries the first version removed (4659822847978414848,
+4659737665861241088) now keep their eclipses. `clean_long` is vectorised over sources (0.6 s per 2,000
+sources, 4× the per-source loop, with identical verdicts), so cleaning adds about half to the cost of features.
 
 ## What the DR3 pass keeps
 
