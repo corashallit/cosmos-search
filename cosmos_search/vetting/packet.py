@@ -32,6 +32,14 @@ class LeakError(ValueError):
     pass
 
 
+# No digits and no hex letters, so an id can never look like a catalogue number ("cd0f...", "b243172978...").
+ID_ALPHABET = "ghjkmnpqrstvwxyz"
+
+
+def new_packet_id(n=16):
+    return "".join(secrets.choice(ID_ALPHABET) for _ in range(n))
+
+
 def robust_sigma(x):
     x = np.asarray(x, dtype=float)
     x = x[np.isfinite(x)]
@@ -166,7 +174,7 @@ HOLDOUTS = ("tail", "colour", "ir")
 def build(candidate, holdout=(), packet_id=None):
     """Return (packet, key). `holdout` is a subset of HOLDOUTS; the targets that apply are added."""
     cand = candidate if isinstance(candidate, Candidate) else Candidate.from_dict(candidate)
-    packet_id = packet_id or secrets.token_hex(8)
+    packet_id = packet_id or new_packet_id()
     t0, t1 = cand.time_span()
 
     targets, truths = [], {}
