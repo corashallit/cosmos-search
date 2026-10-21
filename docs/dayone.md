@@ -539,3 +539,54 @@ inside the D2 freeze.
   magnitude fainter than the real candidates.
 - **Calibration overlap.** The tier-1 stars and the batch 4 controls were in the calibration, and none of them
   was flagged there.
+
+### Step back: what limits single dips, and what to build for DR4 (written while batch 5 was being fetched)
+
+Cora asked to re-check the assumptions one or two levels up. Only 19% of injected single dips were testable, so
+the question is whether the limit sits in the rule or in the framing (one star at a time, argued not to be an EB).
+
+**The limit is Gaia's visit structure, and DR4 does not change it.** On the real cadences of 300 calibration
+stars:
+
+- Half of consecutive G epochs are ≤ 0.18 d apart and a quarter are ≥ 29 d apart. Gaia sees a star in short
+  visits (one transit pair, sometimes two or three scans 6 h apart) separated by weeks.
+- A dip that lasts 0.5–10 d and is caught at all is caught on a single transit pair 72–75% of the time,
+  whatever its length. Only dips longer than about a month reach multiple visits: 36% are testable at 30 d and
+  84% at 100 d.
+- DR4 doubles the baseline, not the visit structure. It will catch about twice as many dips and refute eclipse
+  repeats over a longer span, but the testable share of caught dips stays near a quarter.
+
+A one-pair dip bounds its duration only between 106.5 min and the neighbouring visits, so no per-star argument
+from Gaia alone can separate it from an eclipse (calibration above). This is a property of the instrument, not of
+the rule.
+
+**Two levers do change it.**
+
+1. **Concurrent external data, which DR3 lacked and DR4 has.**
+   - **ZTF.** DR4 ends in January 2020, and 34% of its span overlaps ZTF (from March 2018). For calibration stars
+     with ZTF in that window, a dip of 1, 5 or 10 d gets ≥ 2 ZTF epochs inside it 10%, 26% and 33% of the time.
+   - **TESS.** It covers most stars for one or two 27-d sectors between July 2018 and January 2020 and resolves
+     any dip longer than an hour when it overlaps. In the calibration fetch, though, TESS epochs inside that
+     window are almost absent (about 1 per star), because the fetch keeps the first sectors TGLC returns.
+   - **Before DR4:** the external fetch should take the TESS sectors and ZTF epochs that overlap Gaia's span
+     first, and TGLC's coverage of sectors 1–20 needs checking. The per-star test already uses concurrent epochs
+     as in-dip or refuting evidence.
+2. **Population statistics for the one-look dips.** Most single dips will be one-look dips that no single star
+   can argue. Their rate can still be tested.
+   - **The EB expectation.** The single-event test already computes `eb_rate`, a per-star probability that a
+     mundane companion produces such an event. Summed over stars in a bin (colour–magnitude, distance, sky
+     position), it gives the expected count from eclipses.
+   - **The artefact expectation.** The coincidence test (stars sharing a scan) and FoV/CCD splits give it.
+   - **Activity.** The calibration's false-positive class, it can be modelled per DPAC class from DR4's own
+     variable-star tables.
+   - **The search.** An excess over the expectation that clusters in a way stellar physics does not predict
+     would be a population signal. One example is a 3D scan statistic over position and distance, with
+     permutations within CMD bins for the look-elsewhere effect.
+   - **Verification.** DR4 offers a built-in check: find in one half of the epochs and replicate in the other.
+   - **Follow-up.** Members of a significant cluster become TESS and ground follow-up targets, which makes the
+     find individually verifiable afterwards.
+
+**Batch 5 is still worth finishing, but it is confirmatory.** The flag's recall on testable dips is already
+measured, so the batch mainly checks Stage A's behaviour and the controls. Its data are mostly fetched, and the
+rule was pre-registered against it. The larger DR4 investments for single dips are the two levers above: a
+concurrent-coverage fetch, and a one-look dip-rate census built on `eb_rate` (shared census tooling).
