@@ -127,3 +127,20 @@ def test_max_duration_grows_with_period_and_eccentricity():
     a = D.max_duration_days(1.0, 1.0, 1.0, e_max=0.0)
     assert D.max_duration_days(10.0, 1.0, 1.0, e_max=0.0) > a
     assert D.max_duration_days(1.0, 1.0, 1.0, e_max=0.9) == pytest.approx(a * math.sqrt(1.9 / 0.1))
+
+
+def test_cli_verdicts_on_candidate_dicts():
+    from cosmos_search.ebfilter.__main__ import verdicts
+
+    rng = np.random.default_rng(7)
+    t = _cadence(rng)
+    eb = _eb()
+    tg = np.sort(rng.uniform(t[0], t[-1], 60))
+    tg = np.r_[tg, t[np.argmin(eb.factor(t, "G"))] + 1e-3]       # Gaia caught one eclipse
+    g = _lc(np.sort(tg), eb.factor(np.sort(tg), "G"), rng, band="G")
+    z = _lc(t, eb.factor(t, "ztf_r"), rng)
+    cand = {"candidate_id": "gaia_dr3:42", "source": SUN_AT_100PC,
+            "lightcurves": [dict(g.to_dict(), meta={"flags": [0] * len(g.time)}), z.to_dict()]}
+    out = verdicts([cand])
+    assert out.source_id.iloc[0] == 42
+    assert bool(out.explained.iloc[0]) and bool(out.target_covered.iloc[0])
