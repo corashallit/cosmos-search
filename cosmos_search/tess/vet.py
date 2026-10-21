@@ -26,7 +26,7 @@ from cosmos_search.vetting.batch import build_batch
 from cosmos_search.vetting.candidate import Candidate, LightCurve
 
 from . import qlp
-from .analyse import CLASSES, calibrated_p, event_class, tmag_stratum
+from .analyse import CLASSES, calibrated_p, event_class, tmag_stratum, veto_reasons
 from .controls import jobs
 
 # Candidate meta channel <-> dimming aux name.
@@ -102,15 +102,36 @@ def to_dimming(cand):
 
 
 class Detector:
-    """The bake-off detector as a vetting hook: dips, a mirror-null p-value, and per-dip systematics tests."""
+    """The bake-off detector as a vetting hook: dips, a mirror-null p-value, and per-dip systematics tests.
+
+    Sets cand.dips, cand.scores and cand.tests in place and returns the dips (make_decoy's detector contract)."""
 
     def __init__(self, null):
         self.null = null
 
-    def __call__(self, cand):
+    def _strongest(self, cand):
+        """(lc, top events by SNR, their p-values, the event with the smallest p) for a candidate."""
         lc = to_dimming(cand)
-        traces = scan(lc)
-        events = sorted(find_events(lc, traces, threshold=5.0), key=lambda e: -e.snr)[:MAX_DIPS]
+        events = sorted(find_events(lc, scan(lc), threshold=5.0), key=lambda e: -e.snr)[:MAX_DIPS]
+        if not events:
+            return lc, events, [], None
+        stratum = tmag_stratum([cand.source.get("tmag", 12.0)])
+        ps = [calibrated_p([e.snr], stratum, self.null[c].values, self.null.stratum.values)[0]
+              for e, c in zip(events, event_class([e.scale for e in events]))]
+        return lc, events, ps, events[int(np.argmin(ps))]
+
+    def veto(self, cand):
+        """Stage 0 vetoes on the dip the packet presents (make_decoy's veto hook): a list of reasons, empty if
+        it passes. Common mode needs the whole CCD's light curves, so it is not checked here."""
+        lc, _, _, e = self._strongest(cand)
+        if e is None:
+            return []
+        row = {**event_diagnostics(lc, e), "variant": "real", "sector": 0, "camera": 0, "ccd": 0,
+               "t_start": e.t_start, "t_end": e.t_end, "edge_dist": e.edge_dist}
+        return [w for w in veto_reasons(pd.DataFrame([row]), {}, {})[0].split(";") if w]
+
+    def __call__(self, cand):
+        lc, events, ps, e = self._strongest(cand)
         cand.dips = [{"t_min": e.t_peak, "t_start": e.t_start, "t_end": e.t_end, "depth": e.depth,
                       "duration": e.t_end - e.t_start, "n_points": e.n_points} for e in events]
         # Every packet carries every test name (None when it cannot be computed), because the batch keeps only
@@ -119,36 +140,43 @@ class Detector:
         cand.context["tests"] = TEST_CONTEXT
         if not events:
             cand.scores["dip_false_alarm_p"] = 1.0
-            return cand
-        stratum = tmag_stratum([cand.source.get("tmag", 12.0)])
-        ps = [calibrated_p([e.snr], stratum, self.null[c].values, self.null.stratum.values)[0]
-              for e, c in zip(events, event_class([e.scale for e in events]))]
-        e = events[int(np.argmin(ps))]
+            return cand.dips
         cand.scores["dip_false_alarm_p"] = float(min(1.0, len(CLASSES) * min(ps)))
         diag = event_diagnostics(lc, e)
         for k in TEST_KEYS:
             v = diag.get(k)
             if v is not None and np.isfinite(v):
                 cand.tests[k] = {"statistic": float(v)}
-        return cand
+        return cand.dips
 
 
 def cmd_build(args):
     run = Path(args.out)
-    vet = run / "vet"
+    vet = run / args.vet_dir
     vet.mkdir(exist_ok=True)
     rng = np.random.default_rng(secrets.randbits(64))
     null = pd.read_parquet(run / "null.parquet")
+    detector = Detector(null)
     cand = pd.read_parquet(run / "candidates.parquet")
     targets = pd.read_parquet(run / "targets.parquet")
     entries = []
-    for r in cand.head(args.n_real).itertuples():
+    for r in cand.iloc[args.real_offset:args.real_offset + args.n_real].itertuples():
         lc = qlp.fetch(int(r.sector), int(r.tic))
         if lc is not None:
             entries.append((to_candidate(qlp.clean(lc), f"tic:{int(r.tic)}:s{int(r.sector)}"), {"kind": "real"}))
     if args.controls:
         ctl = pd.read_csv(args.controls)
-        ev = [(i, s) for i, s, state in jobs(ctl, max_event=1, max_quiet=0) if state == "event"]
+        ev = [(i, s) for i, s, state in jobs(ctl, max_event=3, max_quiet=0) if state == "event"]
+        # Stage A calibration only transfers if controls pass the same detector as real candidates, so use
+        # event sectors in which the detector fired (controls.evaluate writes controls_results.parquet).
+        res = run / "controls_results.parquet"
+        if res.exists():
+            r = pd.read_parquet(res)
+            r = r[r.state.eq("event") & r.flag_either]
+            fired = set(zip(r.ctl, r.sector))
+            ev = [(i, s) for i, s in ev if (i, s) in fired]
+        else:
+            print("no controls_results.parquet: run `python -m cosmos_search.tess.controls` first; using all event sectors")
         for k in rng.permutation(len(ev))[:args.n_controls]:
             i, sector = ev[k]
             r = ctl.loc[i]
@@ -171,12 +199,12 @@ def cmd_build(args):
         host = to_candidate(qlp.clean(lc), f"tic:{int(r.tic)}:s{int(r.sector)}")
         spec = str(rng.choice(TESS_DECOYS))
         try:
-            dec, extra, truth = make_decoy(host, spec, rng)
+            dec, extra, truth = make_decoy(host, spec, rng, detect=detector, veto=detector.veto)
         except RuntimeError:
             continue
         entries.append((dec, extra))
         truths.append(truth)
-    packets, keys = build_batch(entries, rng, detect=Detector(null))
+    packets, keys = build_batch(entries, rng, detect=detector)
     for k in keys:
         if k.get("kind") == "decoy":
             k["candidate_id"] = "decoy"
@@ -193,6 +221,8 @@ def main(argv=None):
     b = sub.add_parser("build")
     b.add_argument("--out", required=True)
     b.add_argument("--n-real", type=int, default=24)
+    b.add_argument("--real-offset", type=int, default=0, help="skip this many top candidates (already vetted)")
+    b.add_argument("--vet-dir", default="vet", help="batch directory inside the run")
     b.add_argument("--controls")
     b.add_argument("--n-controls", type=int, default=12)
     b.add_argument("--decoy-frac", type=float, default=0.15)
