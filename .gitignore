@@ -1,11 +1,11 @@
-# Data never goes in git; see docs/scoping/storage.md
+# Data never goes in git; see docs/storage.md
 data/
 cache/
 *.parquet
 *.fits
 *.fits.gz
 *.h5
-# Blinding: plaintext truth must never be committed; see docs/scoping/blinding.md
+# Blinding: plaintext truth must never be committed; see docs/blinding.md
 truth/
 *.truth.*
 !*.truth.*.age
@@ -14,3 +14,5 @@ venv/
 __pycache__/
 *.pyc
 .env
+*.egg-info/
+build/
