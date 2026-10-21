@@ -89,7 +89,7 @@ def null_model(stars, y, e, test_ecl=True, ridge=1.0):
     return lam, info, terms
 
 
-def search(stars, y, e, win=None, n_null=scan.N_NULL, rng=None, test_ecl=True, terms=None):
+def search(stars, y, e, win=None, n_null=scan.N_NULL, rng=None, test_ecl=True, terms=None, k_max=5):
     """Half-A search: GLM, cells, scan, max-null, greedy candidates."""
     if terms is None:
         lam, info, terms = null_model(stars, y, e, test_ecl)
@@ -102,7 +102,7 @@ def search(stars, y, e, win=None, n_null=scan.N_NULL, rng=None, test_ecl=True, t
     obs, lc = scan.cell_sums(px, sh, y), scan.cell_sums(px, sh, lam)
     null = scan.null_max(win, lc, n=n_null, rng=rng)
     phi, phi_scale = scan.dispersion(win, obs, lc)
-    cands, top = scan.candidates(win, obs, lc, null, phi=phi)
+    cands, top = scan.candidates(win, obs, lc, null, phi=phi, k_max=k_max)
     cands_poisson, top_poisson = scan.candidates(win, obs, lc, null)
     info.update(phi_per_scale=phi_scale.round(3).tolist(), candidates_poisson_only=cands_poisson,
                 max_llr_poisson=top_poisson,_lam=lam, n_events=float(y.sum()), expected=float(lam.sum()), max_llr=top,

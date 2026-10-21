@@ -65,8 +65,11 @@ def cmd_run(a):
             tr.append({"source_ids": inj.source_id.astype(int).tolist(), "n_injected_sov_A": int(len(inj)),
                        "n_dips": int(len(dips))})
         cands, info, _, _ = analysis.search(stars, y, stars.E_gen_A.to_numpy(), win=win, n_null=a.n_null,
-                                            rng=np.random.default_rng(a.seed + uni["universe"]), terms=terms)
+                                            rng=np.random.default_rng(a.seed + uni["universe"]), terms=terms,
+                                            k_max=20)
         info.pop("_lam", None)
+        # The pre-registered list is the first five; up to 20 are kept so the scoring can tell an injected region
+        # that ranked sixth or lower behind the real windows from one the search could not see at all.
         results.append({"universe": uni["universe"], "candidates": cands, "max_llr": info["max_llr"],
                         "n_events": info["n_events"], "null_q95": info["null_quantiles"][0.95]})
         truth.append({"universe": uni["universe"], "regions": tr})
@@ -91,6 +94,7 @@ def cmd_score(a):
         if u not in cands:
             continue
         cs = cands[u]["candidates"]
+        k5 = 5
         members = [analysis.window_members(stars, win, c) for c in cs]
         matched = set()
         for reg, tr in zip(uni["regions"], truth[u]["regions"]):
@@ -104,6 +108,7 @@ def cmd_score(a):
             if rec:
                 matched.add(best_k)
             rows.append({"universe": u, "radius_deg": reg["radius_deg"], "shells": reg["shells"],
+                         "recovered_top5": bool(rec and best_k is not None and best_k < k5), "rank": best_k,
                          "n_members": reg["n_members"], "n_target": reg["n_target"],
                          "n_injected_sov_A": tr["n_injected_sov_A"], "best_share": best, "recovered": rec,
                          "candidate": cs[best_k] if best_k is not None else None})

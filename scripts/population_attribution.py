@@ -42,7 +42,3 @@ print("sky mirror/SOV ratio", mirA.sum() / yA.sum(), "sov1/SOV", sov1A.sum() / y
 for r in res:
     print(json.dumps(r))
 json.dump(res, open("/home/user/pop/attribution.json", "w"), indent=1, default=float)
-
-
-# --- model refits with DPAC class and source density (attribution only) ---
-
