@@ -40,6 +40,9 @@ COUNTS = {"dip_train_poisson": 3, "dip_train_primes": 3, "dip_train_geometric": 
 # Batch 4 (docs/dayone.md, rule v3): dip trains are the primary measure.
 COUNTS4 = {"dip_train_poisson": 4, "dip_train_primes": 4, "dip_train_geometric": 4, "grey_dip": 2, "blue_dip": 1,
            "chromatic_flip": 1, "dip_train_periodic": 2, "dust_dip": 1, "step": 1}
+# The confirmatory batch (docs/dayone.md, review fixes): the held-out families only, 12 each. The only plan that
+# may draw them.
+COUNTS_CONFIRM = {f: 12 for f in lcinj.HELD_OUT_FAMILIES}
 MIN_SIGMA = 5.0
 MAX_DRAWS = 200
 MAX_DRAWS_EXTERNAL = 3000   # most trains leave < 4 external events, so the conditioned draw needs more tries
@@ -112,7 +115,8 @@ def _external_events(ext_star, rec, contamination):
     return len(recurrence.events(*recurrence.epochs(lcs)))
 
 
-def plan(host_ctx, lc_dir, external, rng, counts=COUNTS, min_external_events=0, half="batch3", contamination=None):
+def plan(host_ctx, lc_dir, external, rng, counts=COUNTS, min_external_events=0, half="batch3", contamination=None,
+         allow_held_out=False):
     """One sealed-plan record per decoy, in gaia_stream's format, with signals that continue past DR3.
 
     min_external_events > 0 also requires dip trains (TRAINS) to leave that many dip events in the external
@@ -139,7 +143,7 @@ def plan(host_ctx, lc_dir, external, rng, counts=COUNTS, min_external_events=0, 
             t, _, s, span = vis
             ext_star = external[external["source_id"] == sid]
             for _ in range(MAX_DRAWS_EXTERNAL if min_external_events and fam in TRAINS else MAX_DRAWS):
-                sig = lcinj.sample(rng, fam, *gaia_stream.DR3_SPAN, t_ext=t_ext)
+                sig = lcinj.sample(rng, fam, *gaia_stream.DR3_SPAN, t_ext=t_ext, allow_held_out=allow_held_out)
                 if np.max(np.abs(1 - sig.factor(t, "G"))) < MIN_SIGMA * s:
                     continue
                 if min_external_events and fam in TRAINS and _external_events(
@@ -175,7 +179,7 @@ def main(argv=None):
     p.add_argument("--recipient-file", action="append", required=True)
     p.add_argument("--min-external-events", type=int, default=0, help="dip trains must leave this many external dip events")
     p.add_argument("--half", default="batch3", help="label stored in each plan record")
-    p.add_argument("--counts", choices=("batch3", "batch4"), default="batch3")
+    p.add_argument("--counts", choices=("batch3", "batch4", "confirm"), default="batch3")
     p.add_argument("--context", help="parquet with source_id, blend_tess_contamination (TESS dilution)")
     a = ap.parse_args(argv)
     rng = np.random.default_rng(int.from_bytes(os.urandom(32), "little"))
@@ -199,8 +203,9 @@ def main(argv=None):
             ctx = pd.read_parquet(a.context, columns=["source_id", "blend_tess_contamination"])
             contamination = dict(zip(ctx["source_id"].astype("int64"), ctx["blend_tess_contamination"]))
         records = plan(pd.read_parquet(a.hosts), a.lightcurves, pd.read_parquet(a.external), rng,
-                       counts=COUNTS4 if a.counts == "batch4" else COUNTS, min_external_events=a.min_external_events,
-                       half=a.half, contamination=contamination)
+                       counts={"batch4": COUNTS4, "confirm": COUNTS_CONFIRM}.get(a.counts, COUNTS),
+                       min_external_events=a.min_external_events, half=a.half, contamination=contamination,
+                       allow_held_out=a.counts == "confirm")
         digest = write_sealed(records, a.out, a.recipient_file)
         # Counts only. Never print anything derived from the plan beyond its size.
         print(f"sealed {len(records)} decoys to {a.out} (sha256 {digest})")

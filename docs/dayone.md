@@ -416,15 +416,18 @@ was also nearly all eclipsing binaries, while the DR4 queue will be mostly spott
   them.
 - *Held-out families (R5).* `inject.lightcurve.HELD_OUT_FAMILIES`: clustered (Neyman–Scott) trains, nearly
   periodic trains with a drifting period, swarms with widely scattered depths, and a few complex Boyajian-like
-  events. No calibration, decoy plan or rule has used them; a test checks that the calibration modules' family
-  lists exclude them. Nobody, including this thread, has looked at how any flag responds to them.
+  events. No calibration, decoy plan or rule has used them. `inject.lightcurve.sample` refuses them unless the
+  caller passes `allow_held_out`, which only the confirmatory plan (`decoys plan --counts confirm`) does, and a
+  test checks that the calibration modules' family lists exclude them. Nobody, including this thread, has looked at how any flag responds to them.
 - *A reserved control pool (R3).* `dayone.controls` drew `prereg/controls/dayone-controls-v1`: 15 stars in each of
   9 DPAC classes (SOLAR_LIKE, RS, ACV|CP, ECL, LPV, DSCT|GDOR|SXPHE, YSO, BE|GCAS, AGN), 135 in all. 105 are
   G3-selected stars from the rehearsal's ranked list; the ACV and AGN strata come from the archive, not
   G3-selected. Every star used before was excluded (25,083: all queues, decoy hosts, rehearsal injections, the
   EB sample, the EB filter and single-dip calibration sets, the review's 4,746, and the 560 tier-1 one-episode
-  stars). The pool is sealed to the reveal key and Cora's key; salted hashes of its ids are public, and
-  `dayone.controls.reserved()` lets any draw leave it out (`dayone.decoys.hosts` does). It is used once.
+  stars). The pool is sealed to the reveal key and Cora's key; hashes of its ids with a public salt are in the repo, and
+  `dayone.controls.reserved()` lets any draw leave it out (`dayone.decoys.hosts` does). Membership of a given
+  star is therefore checkable by anyone; what protects the pool is the rule that nothing is tuned on it. It is
+  used once.
 - *Power (R4).* `vetting.power` computes how often a criterion passes. The old point criteria could not separate
   a good rule from a mediocre one: "≥ 6 of 12 trains" passes a rule with recall 0.40 33% of the time, and
   "≤ 1 of 14 controls" passes a rule that flags 10% of controls 58% of the time.
