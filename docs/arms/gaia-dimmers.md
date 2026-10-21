@@ -154,6 +154,10 @@ Record changes of approach here, with the evidence that prompted them.
     fix to plan for: a cosmic ray or a neighbour's crossing hits one or two of the 9 CCDs of a transit, while
     an occultation lasting more than ~45 s dims all 9. Requiring all-CCD consistency on both sides of the
     mirror should remove most of the bright tail at faint G and restore symmetry where the search needs it.
-    It needs testing on the DR4 data model (G7) and on injections before it is relied on.
+    It needs testing on the DR4 data model (G7) and on injections before it is relied on. The June draft data
+    model puts per-CCD G (`epoch_photometry_ccd`) in DataLink only, so on day one the test runs on a pull of the
+    top ~10⁴ by |W| in each G ≥ 16 bin, ~9 h at DR3 rates. The pull is chosen by |W| regardless of sign, so
+    each source's dim/bright coin stays fair and knockoff+ on the CCD-cleaned W of the pulled set stays valid.
+    Choosing by the dim score alone would bias it.
   - **The floor binds.** At q ≤ 0.01 each G bin needs 100 discoveries, so `fov` reports none. Lists for
     vetting use q ≤ 0.1.
