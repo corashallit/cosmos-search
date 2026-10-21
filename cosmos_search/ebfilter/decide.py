@@ -35,7 +35,7 @@ from cosmos_search.vetting import physics
 
 from . import search as S
 
-DELTA_BITS = 10.0
+DELTA_BITS = 7.0        # set on half A by the pre-registered rule, scored on held-out half B (docs/arms/eb-filter.md)
 DEPTH_FACTOR = 1.5
 DEPTH_SLACK = 0.05      # mag
 MIN_PURITY = 0.8        # an eclipse window's labelled epochs are dips (flats only from mislabelled ingress)

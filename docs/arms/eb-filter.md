@@ -116,4 +116,85 @@ this change. So half B stays a clean held-out test, while half A has been used t
 
 ## Results
 
-(After the runs.)
+**Threshold.** On half A (second run, fresh injections) the rule gives **7 bits**, the floor: no target-family
+injection was explained at any threshold from 7 up (0 of 887). The first half-A run, before the purity condition,
+gave 8 bits.
+
+**Half B, held out** (outputs in `/mnt/project-files/ebfilter/cal_*.parquet`; seed 5042850157261289888; 2,876 non-EB hosts and 633 DPAC EBs with ≥ 100 ZTF epochs),
+at 7 bits:
+
+| population | Gaia G only | ZTF only | Gaia + ZTF |
+|---|---|---|---|
+| synthetic EBs, recall | 6/846 (0.7%) | 502/846 (59%, 56–63) | 508/846 (60%, 57–63) |
+| real DPAC EBs that would be queued, recall | 4/187 (2%) | 116/187 (62%, 55–69) | 119/187 (64%, 57–70) |
+| nine target anomaly families, loss | 1/916 (0.1%) | | **4/916 (0.4%, 0.2–1.1)** |
+| strict-period dip trains, removed | 3/128 | | 76/128 (59%) |
+| dips injected into real EBs, explained | 1/129 | | 22/129 (17%, 12–25) |
+| queued non-DPAC-EB stars, explained | 1/54 | | 10/54 (19%) |
+
+95% Wilson intervals in brackets. **Decision: adopted.** The pooled loss's upper bound (1.1%) is under 3% and joint
+synthetic recall (60%) is over 0.5.
+
+Per target family (joint): grey 0/141, dust 1/126, blue 0/103, chromatic flip 1/51, Poisson trains 0/131, prime
+trains 0/128, geometric trains 1/133, step 0/102, secular fade 1/1 (fades rarely make a single epoch the deepest
+by 5σ, so this family is barely tested). Two of the four losses are the same host
+(1751776151969594752), which has its own 17.9-day dip pattern in ZTF that the injection's deepest epoch happened
+to fall in.
+
+Recall by true period (synthetic, joint): 0.3–1 d 75%, 1–3 d 72%, 3–10 d 63%, 10–30 d 50%, 30–100 d 35%,
+100–300 d 17%. It falls with period because longer periods give fewer eclipses in ZTF's ~6 years, and a period
+needs about six. By G (real DPAC EBs, joint): **87% at G < 16** (39/45, where G3 has power), 67% at 16–18,
+42% at 18–21. Synthetic recall is ~60% at every G below 18; it is set by eclipse count, not noise.
+
+**Gaia DR3 alone explains almost nothing (≤ 2%).** That is the information limit, not a tuning choice: with
+~40 epochs, a period-and-phase description costs ~30 bits and the dip pattern can't repay it unless ~10 epochs are
+in eclipse. DPAC finds EBs in the same data by fitting fluxes with a light-curve model, which uses more of the
+information than dip/flat labels do. On DR4 day one, our filter works where ZTF (dec > −30°) or TESS covers the
+star; elsewhere DPAC's DR4 eclipsing-binary table is the only Gaia-only source, and it labels stars, not dips.
+
+**The v3b recurrence flag on real EBs.** On half B's 187 queued DPAC EBs, `vetting.recurrence` found 162 testable
+and flagged 13 aperiodic (8%, against 6% in the rehearsal). The filter explains 2 of the 13 and finds a strong
+period (Δ > 20 bits) in 2 more, whose selected Gaia dip falls outside the eclipses. The other 9 are faint
+(G 16.7–19.7) with 4–14 dip epochs, from which neither test can determine a period. The flag treats "no period
+found" as evidence of aperiodicity; the compression test treats it as "not enough information". So the EB filter
+in ranking removes some of v3b's false EB flags but not most of them. The direct fix is for the flag to require
+the EB code to fail *and* the star to have enough dips that an EB would have compressed. That is a change to
+the D2 rule, for the rule's owner to pre-register.
+
+**Weak spot: dips on real EBs.** 17% of dips injected into real EBs are explained, because the queue's target is
+the deepest Gaia epoch, and an injected dip that coincides with an eclipse is the likeliest to be deepest. The
+depth check (target ≤ 1.5× the window's other dips + 0.05 mag) is loose enough to pass the sum. The fix is to
+fit the eclipse profile and test the target's *residual* from the eclipse depth predicted at its phase, rather than
+comparing to the deepest dip in the window. With Gaia's few in-window epochs per star that needs the ZTF
+profile, scaled for colour.
+
+## Step back: do we need per-object EB rejection?
+
+EBs matter to us for two reasons only: they take expert slots (budget ~10³) and they trip the v3b flag. Neither
+needs a hard per-object cut. In the rehearsal, Stage A agents already called EBs correctly once they could see
+external light curves, and the shortlist rule kept 13 of 14 controls off. So removing EBs before vetting mostly
+saves cheap Stage A runs. What it costs is the 0.4% of anomalies it removes, plus anomalies on EB hosts (17%
+here), and a cut gives no partial credit. Two framings look better from one step back:
+
+1. **Evidence in ranking.** Use Δ as a likelihood term: the eclipse model is 2^Δ times more probable than random
+   dips, so rank by value × P(not an eclipse) rather than cutting. An EB-explained star then drops down the
+   queue but stays reachable, and the audit draw still samples it with known probability. That keeps the
+   budget saving without a hard loss.
+2. **Explain away, then search the residual.** The real question for a technosignature search is not "is this an
+   EB?" but "what is left once every simple model has been subtracted?". The same description-length machinery
+   generalises. Score each star by the bits that no simple model (constant, strict-period eclipse, single event,
+   trend) can compress, and run the dip detector on the residual after the best model. EB rejection becomes one
+   model in that class. An EB with an extra dip then scores on the extra dip, which removes the weak spot above.
+   It also asks the anomaly question directly instead of through a list of known classes.
+
+For the D2 freeze, use the filter as specified (it passes its test, and it is the cheaper change), as a demotion
+to the control pool rather than a deletion, and keep the audit draw over it. Framing 2 is the better design for
+after D2.
+
+## Next
+
+- Ranking v1 (owner: the day-one chain): run `python -m cosmos_search.ebfilter` on the queue after
+  `dayone.external fetch`, and move `explained` rows to the control pool.
+- Residual depth test for targets inside an eclipse window (the 17% above).
+- TESS epochs in the calibration: this set had none, because the TGLC route needs per-star fetches.
+- A dip-independent binarity covariate (RUWE, NSS orbits) for the population test's null model.
