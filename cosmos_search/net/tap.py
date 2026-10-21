@@ -104,8 +104,9 @@ def _votable_bytes(table):
 
 def _parse(raw):
     """Parse a VOTable. Column names are lower-cased (ADQL identifiers are case-insensitive, and Gaia
-    returns SOURCE_ID from async jobs but source_id from sync ones)."""
-    table = votable.parse_single_table(io.BytesIO(raw)).to_table()
+    returns SOURCE_ID from async jobs but source_id from sync ones). FIELD names win over IDs, since IRSA
+    sets ID="col_N" alongside the real name."""
+    table = votable.parse_single_table(io.BytesIO(raw)).to_table(use_names_over_ids=True)
     table.rename_columns(table.colnames, [c.lower() for c in table.colnames])
     return table
 
