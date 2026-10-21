@@ -62,6 +62,8 @@ def injected_jobs(ext, host_ids, draws, rng):
         raw = ext[ext.source_id == sid]
         if raw.empty:
             continue
+        # The host as observed: a host that dips on its own (an unknown EB, outliers) is left out of the measure.
+        yield ("host", int(sid), "none", None, raw)
         for fam in FAMILIES:
             for _ in range(draws):
                 sig = lcinj.sample(rng, fam, *gaia_stream.DR3_SPAN, t_ext=t_ext)

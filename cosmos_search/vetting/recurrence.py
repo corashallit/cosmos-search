@@ -8,7 +8,8 @@ at normal brightness fall in the same window. A blind vetter reading tables of e
 
 Steps, on the visible epochs only (the packet's holdout is applied first):
 
-1. In-dip epochs: per band, flux below the median by DIP_SIGMA robust sigma. Gaia's BP and RP are left out
+1. In-dip epochs: per band, flux below the median by DIP_SIGMA robust sigma and by more than the band's largest
+   brightening (a mirror test: noise outliers come in both signs, occultations in one). Gaia's BP and RP are left out
    because they share G's epochs; other surveys count as separate bands.
 2. Events: in-dip epochs closer than EVENT_GAP days are one event (Gaia's two fields of view, a night of ZTF, a
    run of TESS bins). Each event is represented by its deepest epoch.
@@ -56,8 +57,11 @@ def epochs(lcs):
         if not s > 0:
             continue
         z = (1 - f / med) / s
+        # Photometric outliers come in both signs; dips from an occulter only in one. A dip epoch must be deeper
+        # than the band's largest brightening, so heavy-tailed noise (ZTF's) does not add one-epoch events.
+        k = max(DIP_SIGMA, float(np.max(-z)))
         ts.append(t)
-        dips.append(z >= DIP_SIGMA)
+        dips.append(z > k)
         zs.append(z)
     if not ts:
         return np.array([]), np.array([], bool), np.array([])
@@ -181,7 +185,7 @@ def test(lcs):
     """Packet test dict for a list of visible light curves (vetting.candidate.LightCurve)."""
     r = search(*epochs(lcs))
     r["description"] = (
-        "Recurrence across all surveys: n_events distinct dips (epochs >= 4 robust sigma low, merged within 1 d); "
+        "Recurrence across all surveys: n_events distinct dips (epochs >= 4 robust sigma low and deeper than the largest brightening in their band, merged within 1 d); "
         "n_aligned of them fall in one or two pure phase windows (n_primary, n_secondary: two eclipses) at one "
         "strict period (period, d); purity = share of epochs in the primary window that are in dip; "
         "aligned_fraction = n_aligned / n_events. Eclipses give aligned_fraction near 1, dips that do not recur "
