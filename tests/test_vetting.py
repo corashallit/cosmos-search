@@ -450,3 +450,17 @@ def test_duration_tension_probes_recur_inside_their_period_floor():
     v = truth["visibility"]
     assert extra["role"] == "anomaly_probe" and v["n_events"] >= 2 and v["d_obs"] >= 0.25
     assert 3 * v["spacing"] < v["period_floor"]
+
+
+def test_decoys_must_pass_the_queue_veto():
+    host = gaia_like(seed=9, n=150)
+    seen = []
+
+    def veto(cand):  # rejects the first two otherwise acceptable draws
+        seen.append(1)
+        return ["systematic"] if len(seen) <= 2 else []
+
+    make_decoy(host, "grey_dip", np.random.default_rng(4), veto=veto)
+    assert len(seen) == 3
+    with pytest.raises(RuntimeError):
+        make_decoy(host, "grey_dip", np.random.default_rng(4), max_tries=50, veto=lambda c: ["always"])

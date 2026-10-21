@@ -316,7 +316,7 @@ def _detected(cand, signal, t_cut, detect):
     return False
 
 
-def make_decoy(host, spec, rng, t_cut=np.inf, max_tries=500, detect=simple_dips):
+def make_decoy(host, spec, rng, t_cut=np.inf, max_tries=500, detect=simple_dips, veto=None):
     """Draw a decoy that the packet will actually show, and that is what its label says at this cadence.
 
     Sparse cadences (Gaia: ~40-150 epochs over years) miss most short events, and
@@ -334,6 +334,11 @@ def make_decoy(host, spec, rng, t_cut=np.inf, max_tries=500, detect=simple_dips)
     detector cannot see never reaches vetting. detect=None skips the detector
     requirement (for families a dip detector is not meant to find, such as steps
     and slow fades).
+
+    veto(cand) is the queue's Stage 0 veto: anything truthy (e.g. a list of
+    reasons) rejects the draw. An injected candidate has to pass the same vetoes
+    as every real queue member, or its host population differs from the queue's
+    (TESS batch 2: a train on a host whose own dip was a scattered-light ramp).
     """
     family, role, label, acceptable, mode = DECOY_SPECS[spec]
     t0, t1 = host.time_span()
@@ -345,7 +350,7 @@ def make_decoy(host, spec, rng, t_cut=np.inf, max_tries=500, detect=simple_dips)
         ok, info = visibility(host, signal, bands, t_cut, role, spec)
         if ok:
             cand = inject_candidate(host, signal, bands, rng)
-            if detect is None or _detected(cand, signal, t_cut, detect):
+            if (detect is None or _detected(cand, signal, t_cut, detect)) and not (veto and veto(cand)):
                 break
     else:
         raise RuntimeError(f"no visible {spec} decoy in {max_tries} draws on {host.candidate_id}")
@@ -356,9 +361,10 @@ def make_decoy(host, spec, rng, t_cut=np.inf, max_tries=500, detect=simple_dips)
     return cand, extra, truth
 
 
-def vetting_batch(cfg, rng, detect=None):
+def vetting_batch(cfg, rng, detect=None, veto=None):
     """Packets, truth rows and scoring keys. detect is the batch's candidate detector (simple_dips if None),
-    run on every packet and required to fire on every decoy."""
+    run on every packet and required to fire on every decoy; veto is the queue's Stage 0 veto, which every
+    decoy must pass (make_decoy)."""
     detect = detect or simple_dips
     entries, truths = [], []
     for d in _read_jsonl(cfg.get("real")):
@@ -387,7 +393,8 @@ def vetting_batch(cfg, rng, detect=None):
             t0, t1 = host.time_span()
             t_cut = t0 + (1 - HOLDOUT_TAIL) * (t1 - t0) if "tail" in holdout else np.inf
             try:
-                cand, extra, truth = make_decoy(host, spec, rng, t_cut=t_cut, max_tries=max_tries, detect=detect)
+                cand, extra, truth = make_decoy(host, spec, rng, t_cut=t_cut, max_tries=max_tries, detect=detect,
+                                                veto=veto)
                 break
             except RuntimeError:
                 continue
