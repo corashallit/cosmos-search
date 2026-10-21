@@ -105,3 +105,12 @@ Record changes of approach here, with the evidence that prompted them.
 - **2026-10-21.** DataLink caps at 50 IDs per call (~1.5 sources/s), while bulk CDN streaming runs at ~29 MB/s.
   Day one becomes a DataLink pull of the prefilter's top ~10⁴ plus a full bulk stream, so the prefilter only
   sets the order of work. The random DataLink channel stays as the fallback if DR4 has no bulk files.
+- **2026-10-21.** DR3 pass complete (11,754,237 sources). The `vari_summary` prefilter, which selects 1.1% of
+  sources, recalls 37% of deep dips confirmed in both fields of view (70% at G < 13), 21% of dips with no
+  partner transit, and 0.3% of dips only in DPAC-rejected transits. Controls pass at 1.2%. So even on the
+  dips it was built for, a prefilter-only search would miss most of them; the full stream is the search and
+  the prefilter only orders it. Rejected-faint-point rates rise with the number of transits (4.0% at
+  n_g < 20 to 8.5% at 80+) and double at G < 13, so a fallback random pull is stratified by G × n_g. The
+  rate is also high at Galactic |b| 10–20° (8.9%, against 4.8–6.1% elsewhere), within every n_g bin and
+  more so in the south. Until a sky map explains it, treat rejected-dip candidates from that band with
+  suspicion.
