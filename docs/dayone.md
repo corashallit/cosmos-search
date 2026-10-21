@@ -550,7 +550,7 @@ stars:
 
 - Half of consecutive G epochs are ≤ 0.18 d apart and a quarter are ≥ 29 d apart. Gaia sees a star in short
   visits (one transit pair, sometimes two or three scans 6 h apart) separated by weeks.
-- A dip that lasts 0.5–10 d and is caught at all is caught on a single transit pair 72–75% of the time,
+- A dip that lasts 0.5–10 d and is caught at all is caught on a single transit pair 71–76% of the time,
   whatever its length. Only dips longer than about a month reach multiple visits: 36% are testable at 30 d and
   84% at 100 d.
 - DR4 doubles the baseline, not the visit structure. It will catch about twice as many dips and refute eclipse
