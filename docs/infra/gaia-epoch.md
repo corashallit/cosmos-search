@@ -7,7 +7,7 @@ Milestone I2: Gaia DR3 epoch photometry streamed to per-source features, plus th
 | Route | Use | Notes |
 |---|---|---|
 | Bulk CDN (`gaia.dr3_pass`) | All 11,754,237 DR3 sources with epoch photometry | 3,386 `csv.gz` files, 74 GB, named by HEALPix-8 range, MD5-checked. Median file 16 MB, largest 2.2 GB (Galactic bulge), so files are parsed in 2,000-source chunks |
-| DataLink (`epoch.datalink_epoch_photometry`) | Targeted pulls of ≤ 5,000 sources per call | `DATA_STRUCTURE=DATAMODEL_GAIA` (the old `INDIVIDUAL`/`RAW` now return 500); about 5 s for 5 sources, so it is for follow-up lists, not sky-wide work |
+| DataLink (`epoch.datalink_epoch_photometry`) | Targeted pulls, ≤ 50 sources per call | `DATA_STRUCTURE=DATAMODEL_GAIA` (the old `INDIVIDUAL`/`RAW` now return 500). The archive rejects more than 50 IDs per call since the 2026-10-14 release. Measured 2026-10-21: ~11 s per call plus ~1.1 s per source, and 4 parallel calls were no faster than one (1.5 sources/s overall). That is ~2 h for 10⁴ sources and ~8 days for 10⁶, so DataLink is for short lists |
 
 Both go through `cosmos_search.net` and produce the same table.
 

@@ -41,7 +41,8 @@ Why this shape rather than a fixed nσ cut on skewness or depth:
 - **Controls independent of the prefilter**, so the prefilter's recall can be measured on DR4 itself by
   injecting into the controls' light curves.
 - **Budget sets α.** About 2·α·N sources pass. The default α = 1.2 × 10⁻³ gives ~10⁶ on DR4's
-  4.0 × 10⁸ `vari_summary` rows, the size of the DataLink pull planned in docs/arms/gaia-dimmers.md.
+  4.0 × 10⁸ `vari_summary` rows. That suits a bulk stream. DataLink now serves ≤ 50 sources per call at
+  ~1.5 sources/s (docs/infra/gaia-epoch.md), so a day-one DataLink pull needs α ≈ 10⁻⁵ (~10⁴ sources).
 
 The Gaia archive's ADQL rejects `CASE`, `LEAST`, `UNION` and expressions in `GROUP BY`, so bins come from
 `FLOOR` inside a subquery and per-bin thresholds from an `OR` chain.
