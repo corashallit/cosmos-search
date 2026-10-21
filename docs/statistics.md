@@ -28,6 +28,15 @@ Nulls are built from the data so that they keep its systematics:
   Power has a cliff: a dimmer is only found once it is deeper than nearly every bright winner in the
   set, so it is run per arm and per channel, not on everything pooled. Code: `cosmos_search.stats.mirror`,
   with `tail_ratio` to measure the symmetry first.
+- **Compete within strata whose noise is alike.** The per-source coin is fair only where the source's own
+  noise is symmetric, and pooled competition compares every source against one threshold. On DR3, faint
+  stars cannot dip by many robust σ (the dip is capped by S/N), but cosmic rays and neighbours spike them
+  freely. Their bright winners filled the top of the pooled list and cancelled every bright star's dip, so 0 of
+  11.75 M sources passed q ≤ 0.1. `stratified_knockoff_q` runs knockoff+ in each stratum (G bins for Gaia)
+  and takes the union. The pooled estimate is a ratio of sums, which is bounded by the largest per-stratum
+  ratio, so it stays ≤ α. Under a global null a stratum selects anything with probability ~2^(−1/α), so the
+  union over many strata stays controlled (measured in tests/test_stats.py). The cost is the knockoff+ floor
+  of 1/α discoveries in each stratum, so keep strata few and use α = 0.1 for lists that go on to vetting.
 - **Strata must include the number of epochs.** Statistics that take an extreme over a light curve
   (minimum flux, largest gap, longest run) have nulls that widen with the number of points, roughly as
   √(2 ln n) for near-Gaussian noise. Gaia's epoch count follows the scanning law, mostly ecliptic latitude,

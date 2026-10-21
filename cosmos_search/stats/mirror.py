@@ -53,6 +53,31 @@ def knockoff_q(dim, bright, offset=1):
     return q
 
 
+def stratified_knockoff_q(dim, bright, strata, offset=1):
+    """knockoff+ q-values computed separately in each stratum; select the union at the target level.
+
+    Pooled competition needs the per-source coin to be fair at the *same threshold* in every source. Where
+    the noise is asymmetric in some strata (faint stars: a dip in robust sigma is capped by S/N, while
+    cosmic rays and neighbours spike freely), their bright winners swamp the top of the pooled list and cancel
+    real dimmers elsewhere. Per-stratum thresholds confine that to the strata where it happens.
+
+    Selecting {q <= alpha} here gives, in each stratum s, FDP-hat_s = (offset + N_s^-) / N_s^+ <= alpha, so the
+    pooled estimate sum(offset + N_s^-) / sum(N_s^+) <= alpha too (a ratio of sums is bounded by its largest
+    ratio). Under a pure null a stratum selects anything only if its top 1/alpha winners are all dim, with
+    probability ~ 2^(-1/alpha), so the union over many null strata stays controlled
+    (tests/test_stats.py measures it). Each stratum still pays the knockoff+ floor of 1/alpha discoveries.
+    """
+    dim = np.asarray(dim, dtype=float)
+    bright = np.asarray(bright, dtype=float)
+    _, code = np.unique(np.asarray(strata), return_inverse=True)
+    q = np.ones(dim.shape)
+    order = np.argsort(code, kind="stable")
+    bounds = np.flatnonzero(np.diff(code[order])) + 1
+    for idx in np.split(order, bounds):
+        q[idx] = knockoff_q(dim[idx], bright[idx], offset)
+    return q
+
+
 def tail_ratio(dim, bright, strata, thresholds):
     """Symmetry diagnostic: per stratum and threshold, counts of dim >= t and bright >= t.
 

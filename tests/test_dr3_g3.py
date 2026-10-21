@@ -30,14 +30,14 @@ def test_g3_finds_fov_confirmed_dimmers_and_reports_symmetry():
     f = fake_features(np.random.default_rng(1))
     sym, q = g3.run(f)
     assert set(sym["statistic"]) == {"single", "fov"}
-    found = q["q_fov"] <= 0.01
-    # knockoff+ cannot report q below 1 / (number of discoveries), so 200 real dimmers are needed for q <= 0.01.
+    found = q["q_fov"] <= 0.1
+    # ~20 real dimmers per G bin, above the knockoff+ floor of 10 discoveries per bin at q <= 0.1.
     assert found[:200].all()
-    assert found[200:].sum() <= 2
+    assert found[200:].sum() <= 0.15 * found.sum()
     # Sources with too few transits get no statistic.
     assert np.isnan(q.loc[f["n_g"] < 10, "w_fov"]).all()
     text = g3.summary(sym, q, f)
-    assert "FoV-confirmed dimmers at q ≤ 0.01" in text
+    assert "FoV-confirmed dimmers at q ≤ 0.1" in text
 
 
 def test_g3_compares_raw_and_cleaned_extremes():
@@ -52,3 +52,16 @@ def test_g3_compares_raw_and_cleaned_extremes():
     # Faults on the bright side shrink the dim winners' margin, so the raw statistic finds fewer.
     assert (q["q_single"] <= 0.1).sum() > (q["q_single_raw"] <= 0.1).sum()
     assert "`single_raw`" in g3.summary(sym, q, f)
+
+
+def test_g3_competes_within_g_bins_so_faint_spikes_cannot_cancel_bright_dips():
+    rng = np.random.default_rng(3)
+    f = fake_features(rng)
+    g = 25.6874 - 2.5 * np.log10(f["med_flux_g"])
+    faint = (g > 18) & (np.arange(len(f)) >= 200)
+    # Faint stars: dips capped by S/N, bright spikes (cosmic rays, neighbours) unbounded, in both fields of view.
+    f.loc[faint, "max_z_rob"] = f.loc[faint, "max_partner_z"] = 60.0
+    sym, q = g3.run(f)
+    assert (q["qpool_fov"] <= 0.1).sum() == 0
+    assert (q.loc[:199, "q_fov"] <= 0.1).sum() >= 150
+    assert "by G bin" in g3.summary(sym, q, f)
