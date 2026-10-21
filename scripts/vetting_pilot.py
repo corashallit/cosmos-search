@@ -16,6 +16,9 @@ import numpy as np
 from cosmos_search.gaia.archive import tap
 from cosmos_search.gaia.epoch import datalink_epoch_photometry
 from cosmos_search.inject.classes.vetting_decoys import vetting_batch
+from cosmos_search.vetting.batch import simple_dips
+from cosmos_search.vetting.candidate import Candidate
+from cosmos_search.vetting.packet import HOLDOUT_TAIL
 
 # DPAC class -> (our label, acceptable groups, how many)
 CONTROLS = {
@@ -63,13 +66,25 @@ def candidates(rows, lc):
     return out
 
 
-def fetch(out, after=0):
+def detected(c):
+    """The batch detector fires before the withheld tail: the condition every real candidate meets."""
+    cand = Candidate.from_dict(c)
+    t0, t1 = cand.time_span()
+    cut = t0 + (1 - HOLDOUT_TAIL) * (t1 - t0)
+    return any(d["t_min"] < cut for d in simple_dips(cand))
+
+
+def fetch(out, after=0, pool=10):
+    """Controls are drawn through the detector, as real candidates are; pilot 2's random class members mostly had
+    no detected dips while every decoy did, so calibration on them would not transfer to the queue."""
     out.mkdir(parents=True, exist_ok=True)
-    controls = []
+    controls, rates = [], {}
     for cls, (label, acceptable, n) in CONTROLS.items():
-        rows = select(cls, n + 2, after=after)
-        lc = datalink_epoch_photometry([int(s) for s in rows["source_id"]])
-        for c in candidates(rows, lc)[:n]:
+        rows = select(cls, n * pool, after=after)
+        cands = candidates(rows, datalink_epoch_photometry([int(s) for s in rows["source_id"]]))
+        hit = [c for c in cands if detected(c)]
+        rates[cls] = f"{len(hit)}/{len(cands)}"
+        for c in hit[:n]:
             controls.append({**c, "label": label, "acceptable": acceptable, "aliases": [], "dpac_class": cls})
     # Hosts from classes that also appear among the controls, so planted packets are not a separate population.
     hosts = []
@@ -78,12 +93,12 @@ def fetch(out, after=0):
         hosts += candidates(rows, datalink_epoch_photometry([int(s) for s in rows["source_id"]]))[:n]
     (out / "controls.jsonl").write_text("\n".join(json.dumps(c) for c in controls))
     (out / "hosts.jsonl").write_text("\n".join(json.dumps(h) for h in hosts))
-    print(f"{len(controls)} controls, {len(hosts)} hosts")
+    print(f"{len(controls)} controls, {len(hosts)} hosts; detector fired on {rates}")
 
 
 def build(out):
     cfg = {"controls": str(out / "controls.jsonl"), "hosts": str(out / "hosts.jsonl"), "holdout": ["tail"],
-           "decoys": DECOYS}
+           "decoys": DECOYS, "max_tries": 6000}
     rng = np.random.default_rng(int.from_bytes(__import__("os").urandom(16), "little"))
     packets, truth, keys = vetting_batch(cfg, rng)
     (out / "products.json").write_text(json.dumps(packets))
