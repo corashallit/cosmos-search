@@ -66,7 +66,7 @@ Signals are drawn over DR3's whole span, so most dips fall between epochs, as re
 | Stage | Injections | Note |
 |---|---|---|
 | In the stream | 6,000 | |
-| Light curve kept (\|z\| ≥ 8 or control) | 603 (10%) | background keeps 9.2%: the rule does not prefer injected sources |
+| Light curve kept (\|z\| ≥ 8 or control) | 603 (10%) | 9.2% of the background; most injections have no sampled dip, and of those sampled above 30σ the rule kept 97% |
 | Prefilter (α = 10⁻⁴) | 18 | |
 | G3 selected (q ≤ 0.1, `single` or `fov`) | 54 | ~10 expected by chance from host variability (background rate 0.17%) |
 | of which a dip was sampled | 24 | the other 30 have no epoch inside the injected signal: selected for the host's own variability |
@@ -140,12 +140,11 @@ two highest scores of the 44 are injections.
 
 ## Changes to make before the D2 freeze
 
-1. **Keep rule.** Replace "|z| ≥ 8 either side" (9% of sources, ~0.4 TB at DR4 scale, no preference for
-   injections) with the G3 statistics computed in the stream and a per-G-bin keep threshold set from DR3,
-   and store features for every source as now.
-2. **Shortlist rule v1.** Pre-register a rule on 1 − P(common classes), or rank by P(u) relative to the
-   controls, and test it on a fresh blind batch, because the post-hoc numbers above were chosen after seeing
-   the labels.
+1. **Keep rule.** Replace "|z| ≥ 8 either side" (9% of sources, ~0.4 TB at DR4 scale) with the G3
+   statistics computed in the stream and a per-G-bin keep threshold set from DR3, and store features for
+   every source as now. Done after the rehearsal: see "Keep rule v2" below.
+2. **Shortlist rule.** v1 (S = P(rare astrophysical) + P(u) ≥ 0.35) was pre-registered and failed on a fresh
+   blind batch: 0/11 target decoys (below). The packets need external light curves before a rule can work.
 3. **Grey and non-EB first.** Ranking v1 should sort on the `grey` flag within tier 1 and 2 and remove VSX/
    ASAS-SN eclipsing types before vetting.
 4. **G3 power.** A per-source scale from a quiet reference (or a variability-class-specific null) would let
@@ -155,3 +154,84 @@ two highest scores of the 44 are injections.
    sources/s a 10⁴ pull takes most of a day.
 6. **SSO fallback.** Cache a Miriade route or a local ephemeris for the dip epochs.
 7. Run V3's calibration batch before December, so the shortlist FP figure has real precision.
+
+## Shortlist rule v1 (pre-registered 2026-10-21, before batch 2 was built)
+
+Written after the rehearsal batch and committed before the second batch's packets exist, so the rehearsal
+numbers that suggested it do not count as its test.
+
+- **Score.** S = P(disk_occultation) + P(debris_transit) + P(other_astrophysical) + P(unexplained), from each
+  Stage A reply's leaf probabilities (`dayone.vet.interesting_score`). YSO dippers stay among the common
+  classes, because they are frequent in star-forming regions and would flood the list.
+- **Rule.** Shortlist = real packets with S ≥ 0.35 (`S_SHORTLIST`). On the rehearsal batch this would have
+  taken 2 of 5 injections, 0 of 31 real packets and 0 of 8 controls; that is where 0.35 comes from.
+- **Batch 2.** All injection-driven G3 selections not vetted yet (dip sampled, and not selected when pulled
+  again without the injection); the 3 real grey selections outside tier 3; further tier-1 sources in ranking-v0
+  order, excluding injected hosts, up to 16 real packets; 8 new tier-3 EB controls labelled at the dip; 6
+  tier-2 controls with a non-EB DPAC class, labelled by star (an instrumental reading of their dip is also
+  accepted). One blind subagent per packet, transcripts audited, verdicts committed before the reveal.
+- **Measures** (`dayone.vet.score_v1`). Recall on target-family decoys (grey, blue, Poisson, prime and
+  geometric dip trains, chromatic flip, secular fade); the flagged rate on controls, on the other decoys
+  (periodic trains, dust dips, steps, G-only) and on real packets; AUC of S and of P(u) for target decoys
+  against controls. All with 95% Wilson intervals.
+- **Decision.** Adopt v1 for the D2 freeze if target recall ≥ 0.5, at most 1 of the 14 controls is flagged,
+  and AUC(S) ≥ AUC(P(u)). Otherwise revise it and test again on another fresh batch. The batch is small, so
+  the result decides which rule goes forward, while the shortlist FP figure still waits for V3's calibration run.
+
+### Batch 2 result: v1 rejected
+
+47 packets (11 target-family decoys, 6 other decoys, 16 real, 14 controls), one blind subagent each. Every
+transcript shows exactly one Read of its prompt and one Write of its reply; verdicts committed at 830f1aa before
+the reveal.
+
+| measure | result | criterion |
+|---|---|---|
+| target-decoy recall | 0/11 (95% CI 0–0.26) | ≥ 0.5: fails |
+| controls flagged | 0/14 (0–0.22) | ≤ 1: passes |
+| AUC, target decoys vs controls | S 0.74, P(u) 0.85 | AUC(S) ≥ AUC(P(u)): fails |
+| other decoys flagged | 1/6 (the step, S 0.80, read as a disk) | |
+| real packets flagged | 1/16 | |
+
+v1 does not go forward, and neither does v0 (P(u) ≥ 0.25 flagged nothing; the highest P(u) in the batch was 0.14).
+
+**Why.** Eight of the 11 target decoys were called eclipsing binaries (the rest blends or a systematic), and on the evidence in the packet that is
+the right call. In 7 of 11 the packet shows one dip event (one field-of-view pair, one or two epochs); the other 4
+show a second dip, which an EB also explains. With ~35 epochs over ~760 d, an occulter that dips a few times
+and an EB eclipse look the same, and a careful vetter prefers the common class. The agents' own
+`discriminating_test` says what would separate them: denser photometry (ZTF, ATLAS, ASAS-SN, TESS) to look for
+recurrence at a fixed period and a secondary eclipse. A threshold on Stage A's class probabilities cannot add
+information the packet does not hold.
+
+**The one real hit** is Gaia DR3 3047786003881272448 (G 12.7, b = +3.4°): a year-long, 10–16% dimming, deeper in
+BP (17%) than RP (14%), read as an occulting disk (S 0.66). It is a known star: a Gaia DR3 SB1 (P = 39.8 d,
+K₁ = 58 km/s, e = 0.25), an ATLAS LPV and an RS CVn star in VSX. A spot cycle on an active K-type binary is the
+likelier cause, and a BP/RP depth ratio of 1.2 fits cool spots better than small-grain dust (≈ 1.7). The blind
+packet carries no catalogue classes, so the agent could not know.
+
+**Next (rule v2 needs more information in the packet, not a new threshold).**
+1. Add an external light-curve block for each queued star: ZTF and ATLAS forced photometry, ASAS-SN, and a
+   TESS cutout where the TESS arm has one, so "EB" becomes testable (recurrence, period, secondary).
+2. Add a known-variable block (VSX type, Gaia NSS orbit, ATLAS class) as context, kept separate from
+   the identifiers so recognition stays measurable.
+3. Pre-register rule v2 on the enlarged packet, then test it on a fresh batch built from injections into stars
+   that have external coverage.
+
+## Keep rule v2 (after the rehearsal)
+
+The stream keeps a light curve when the source's G3 `single` or `fov` |W| reaches 0.6 × the |W| at which G3
+selected on DR3, for its G bin and statistic (`features.keep_light_curve(table=…)`, table from
+`python -m cosmos_search.dayone.keep table --q g3/q.parquet`, stream flag `--keep-table`). Bins where G3
+selected nothing keep only the random controls, set to 0.05% for DR4 (~10⁶ sources, docs/storage.md).
+Measured on all of DR3's features, with the injections in them:
+
+| Rule | Sources kept | G3 selections kept | Injections sampled > 30σ kept | > 100σ kept |
+|---|---|---|---|---|
+| \|z\| ≥ 8 (rehearsal) | 8.25% | 100% | 97% | |
+| \|W\| ≥ 16, any G | 2.9% | 98.9% | 51% | |
+| v2, margin 0.6 | 0.37% (0.42% with controls) | 100% | 37% | 55% |
+
+v2 keeps all of G3's selections at a twentieth of the old volume, ~20 GB of light curves at DR4 scale
+against ~0.4 TB. The sampled injections it drops are ones G3 does not select either, so nothing downstream
+loses them; a more sensitive detector would need its own keep table. A two-file stream run kept 39 of 10,140
+sources (0.38%). DR4 thresholds will differ (about twice the epochs, other noise), so after G3 runs on DR4,
+`python -m cosmos_search.dayone.keep missing` lists selections without a light curve for a DataLink pull.
