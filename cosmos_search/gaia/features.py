@@ -12,11 +12,18 @@ These are ingredients for the dimmer detectors (docs/arms/gaia-dimmers.md), not 
   view (~106.5 min apart), and BP and RP in the same transit. DR4 adds per-CCD G.
 - DPAC's variability rejections are excluded from the scale but counted when they are faint outliers
   (`n_rej_low3`), because a rejection rule tuned for ordinary variables can throw away a real deep dip.
+- Measurements Stage 0 shows to be instrument faults (vetting.stage0: G outside what BP and RP allow, or a
+  BP/RP fault, or an inflated G error) are removed before every statistic, faint and bright alike, so the
+  mirror null stays symmetric; the per-source verdict counts (`stage0_n_*`) and the uncleaned extremes
+  (`min_z_raw`, `max_z_raw`) are kept, so what cleaning removed stays visible. DPAC does not flag these:
+  in vetting pilot 3 about half the non-EB triggers were G-only faults with reject flags 0.
 """
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+
+from cosmos_search.vetting import stage0
 
 from .epoch import BANDS, FLAG_VARI_REJECT
 
@@ -123,10 +130,37 @@ def _band_stats(lc, band_code, uniq):
                 tid=lc["transit_id"][m], row=lc["ccd_row"][m], nobs=lc["n_obs"][m])
 
 
-def source_features(table):
-    """Compute one row of features per source from a light-curve table (epoch.SCHEMA). Returns pandas."""
-    lc = {name: table[name].to_numpy() if name != "band" else
-          np.asarray(table["band"].combine_chunks().indices) for name in table.column_names}
+def _columns(table):
+    return {name: table[name].to_numpy() if name != "band" else
+            np.asarray(table["band"].combine_chunks().indices) for name in table.column_names}
+
+
+def _raw_extremes(table):
+    lc = _columns(table)
+    uniq = np.unique(lc["source_id"])
+    g = _band_stats(lc, 0, uniq)
+    ok = g["good"] & np.isfinite(g["z"])
+    lo = g["G"].arg(np.where(ok, g["z"], np.inf), ok)
+    hi = g["G"].arg(np.where(ok, g["z"], -np.inf), ok, largest=True)
+    return pd.DataFrame({"source_id": uniq, "min_z_raw": _take(g["z"], lo), "max_z_raw": _take(g["z"], hi)})
+
+
+def source_features(table, clean=True):
+    """Compute one row of features per source from a light-curve table (epoch.SCHEMA). Returns pandas.
+
+    clean=True (the default, and what injections must go through too) removes Stage 0 faults first."""
+    if clean:
+        raw = _raw_extremes(table)
+        table, counts = stage0.clean_long(table)
+        extra = raw.merge(counts, on="source_id", how="left")
+    df = _features(table)
+    if clean:
+        df = df.merge(extra, on="source_id", how="left")
+    return df
+
+
+def _features(table):
+    lc = _columns(table)
     uniq = np.unique(lc["source_id"])
     out = {"source_id": uniq}
     b = {code: _band_stats(lc, code, uniq) for code in range(len(BANDS))}
@@ -230,7 +264,7 @@ def keep_light_curve(feat):
 
 
 def features_schema_version():
-    return "dr3-features-v0"
+    return "features-v1-stage0"
 
 
 def to_arrow(df):
