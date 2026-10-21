@@ -64,13 +64,21 @@ Features for every source. Full light curves only where `keep_light_curve` is tr
 sources, because the DR3 sample is already DPAC's variables. Fractional-depth cuts are not used: at G ≈ 20,
 5% scatter is normal, and they kept ~80% of sources in a trial file.
 
-Outputs land in `data/gaia-dr3-epoch/{features,lightcurves}/` locally (one Parquet per bulk file, plus
-`manifest.jsonl`), and are consolidated into ~34 parts per kind under
-`/mnt/project-files/data/gaia-dr3-epoch/` so other threads can read them.
+Per file, the pass writes features, kept light curves and (optionally) a JSON sketch. With `--durable DIR`
+they are copied to `DIR/{features,lightcurves,sketches}/` and a done-marker is written to `DIR/done/`, after
+which local copies are deleted; files with a done-marker are skipped, so a reclaimed container or another
+session resumes where the last stopped. `--shard i/n` takes the files whose CRC-32 name hash is i mod n,
+so n sessions split the list without coordinating. `--feature-cut` keeps only feature rows matching a
+pandas query (default: all). Light-curve Parquet metadata records the control fraction and salt, so the
+random controls' inclusion probability (0.01) travels with the data.
 
 ```
-python -m cosmos_search.gaia.dr3_pass --out data/gaia-dr3-epoch --workers 5
-python -m cosmos_search.gaia.dr3_pass --out data/gaia-dr3-epoch --consolidate /mnt/project-files/data/gaia-dr3-epoch
+python -m cosmos_search.gaia.dr3_pass --out /tmp/work --durable /mnt/project-files/data/gaia-dr3-epoch --shard 0/2 --workers 5
+python -m cosmos_search.gaia.dr3_pass --durable /mnt/project-files/data/gaia-dr3-epoch --out x --consolidate /mnt/project-files/data/gaia-dr3-epoch/merged
 ```
 
-The run is resumable; files whose features exist are skipped.
+`cosmos_search.gaia.strata` tabulates the rate of a feature-defined class (default: quiet except for a
+DPAC-rejected faint point) by magnitude, colour and crowding, for sizing a stratified random pull.
+
+The pass is one process per file and mostly CPU-bound: on this 4-core container, 5 workers ran at ~70% CPU
+and ~29 MB/s of compressed input. More cores, or more sessions via `--shard`, is where speed comes from.
