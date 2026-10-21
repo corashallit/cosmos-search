@@ -121,3 +121,35 @@ def test_residual_lightcurves_drop_explained_epochs_and_their_bp_rp():
     assert len(out[1].time) == 19                                   # BP follows G's transit
     assert len(out[2].time) == 19 and 5.5 not in out[2].time
     assert abs(out[0].flux[list(out[0].time).index(7.0)] - 1.2) < 1e-12
+
+
+def test_requeue_demotes_to_controls_and_audits_them():
+    import pandas as pd
+
+    from cosmos_search.dayone import rank as R
+
+    n = 40
+    ranked = pd.DataFrame({"source_id": np.arange(n), "tier": [1] * 30 + [2] * 6 + [3] * 4,
+                           "w": np.linspace(10, 1, n), "fov": False, "grey": False, "tension": False,
+                           "bright": False})
+    ranked.loc[[5, 6], "grey"] = True
+    verdicts = pd.DataFrame({"source_id": np.arange(36), "demote": False, "eb_explained": False,
+                             "eb_residual": False})
+    verdicts.loc[[0, 1, 2], "demote"] = True
+    verdicts.loc[[0, 1, 2, 3], "eb_explained"] = True
+    verdicts.loc[[10], "eb_residual"] = True
+    v1 = R.apply_residual(ranked, verdicts, flag_eb_residual=True)
+    assert set(v1[v1.explained_by == "residual"].source_id) == {0, 1, 2}
+    assert (v1[v1.source_id.isin([0, 1, 2])].tier == 3).all()
+    assert v1[v1.tier < 3].source_id.iloc[:3].tolist() == [5, 6, 10]      # grey x2, then eb_residual
+    filt = R.apply_residual(ranked, verdicts, rule="filter")
+    assert set(filt[filt.explained_by == "ebfilter"].source_id) == {0, 1, 2, 3}
+    rng = np.random.default_rng(0)
+    seen = set()
+    for _ in range(200):
+        q = R.queue_v1(v1, n_vet=10, n_audit=8, n_controls=3, rng=rng)
+        assert (q[q.role == "ranked"].tier < 3).all() and q.source_id.is_unique
+        a = q[q.role == "audit"]
+        assert ((a.inclusion > 0) & (a.inclusion <= 1)).all()
+        seen |= set(a.source_id) & {0, 1, 2}
+    assert seen == {0, 1, 2}                                               # demoted stars stay reachable
