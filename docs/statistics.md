@@ -83,17 +83,27 @@ Inclusion probabilities lean towards higher scores but have a floor, so every so
 
 ## 6. Decoys and controls for vetting
 
-The main failure mode for LLM vetting is confabulation: a fluent, physical-sounding story for anything.
-Mix into the vetting queue, at a fixed hidden fraction (~10%):
+The main failure mode for LLM vetting is confabulation: a fluent, physical-sounding story for anything. Full
+design in [vetting.md](vetting.md); the statistical points:
 
-- **Incoherent decoys**: injected signals with no consistent explanation. Correct answer: "unexplained" or
-  "artefact". The rate of invented explanations is the confabulation rate.
-- **Coherent rare decoys**: physically consistent injections of rare natural scenarios.
-- **Known-answer positives**: real, studied dippers (KIC 8462852 and others) with identifiers stripped.
-- **Negative controls**: ordinary variables.
+- **Roles.** Known-answer controls (KIC 8462852 and other studied dippers, ordinary variables, known artefacts)
+  measure the false-"unexplained" rate per class. Injected decoys come in three scored roles: *incoherent*
+  (no single physical screen does this; a confident natural story is a confabulation), *anomaly probes*
+  (coherent, with no natural counterpart; they measure whether a real anomaly would survive), and *rare natural*
+  (they measure over-calling "unexplained").
+- **Stateless vetters change the mixing rule.** A Stage A agent sees one packet and no history, so a hidden
+  in-stream fraction does not change its behaviour; per-packet indistinguishability does. Most calibration runs
+  as a separate batch (~400 objects in V3), with ~5% drift checks in production. An audit classifier on packet
+  features must not beat chance at separating planted from real packets.
+- **Held-out prediction.** Part of each packet is withheld and the expert must predict it from its explanation.
+  Predictive skill measures confabulation on real candidates, where no decoy label exists.
+- **Reported figure.** The expected number of false shortlist entries, from the controls' confusion matrix under
+  label shift, with a predictive interval. With ~10³ objects and per-object error rates of a few per cent this is
+  tens of entries, so precision has to come from stacking filters with independent errors, measured jointly.
 
-Vetters state probabilities; score calibration with Brier scores and reliability curves. A vetting verdict
-counts only if the vetter's calibration on decoys is acceptable.
+Vetters state probabilities; calibration is scored with log and Brier scores and reliability curves, and
+recalibrated with a monotone map fitted on controls. A vetter configuration is accepted per class by Bayesian
+sequential stopping on its false-pass rate.
 
 ## 7. Recalibration and freezing
 

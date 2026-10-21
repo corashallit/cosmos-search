@@ -62,9 +62,9 @@ These apply to every arm and every thread.
 | A2 | Nested model fits (single, acceleration, 1–2 Keplerians) plus VIM and scan-angle terms | A1 | unassigned |
 | A3 | Injections of non-gravitational motion into real residuals | A2 | unassigned |
 | **Vetting** | | | |
-| V1 | Packet builder and anonymiser | G6 | Vetting thread |
-| V2 | Stage A / Stage B agents, decoys and known-answer controls (KIC 8462852 and other known dippers) | V1, truth repo ✓ | Vetting thread |
-| V3 | Vetting rehearsal on DR3 candidates; measure confabulation and calibration | V2, I4 | Vetting thread |
+| V1 | Packet builder, anonymiser and leak scan; FP-class catalogue; Stage 0 cross-candidate coincidence ✓. SSO (SkyBoT) check pending I1 | G6 for real input | Vetting thread |
+| V2 | Stage A / Stage B agents, decoy generator, commit-then-reveal, scoring, held-out targets ✓. Known-answer control lists (Gaia: vetting; TESS: `tess/controls.csv`) | V1, truth repo ✓ | Vetting thread |
+| V3 | Statistics ✓ (label-shift shortlist FP, recalibration, allocation, sequential acceptance, simulation). Calibration run of ~400 on DR3 controls and decoys; then rehearsal on DR3 candidates | V2, G6, I4 | Vetting thread |
 | **Decision and freeze** | | | |
 | D1 | Compare arms on equal footing: recovery on injections and vetting cost per surviving candidate; reallocate effort | G4, T4, A3, V3 | DR4 plan thread → Cora |
 | D2 | Freeze `dr4-day-one`: queries, thresholds, code, pre-registered analysis | D1, G7; before DR4 | DR4 plan thread |
