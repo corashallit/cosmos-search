@@ -26,7 +26,7 @@ from cosmos_search.vetting.batch import build_batch
 from cosmos_search.vetting.candidate import Candidate, LightCurve
 
 from . import qlp
-from .analyse import SHORT_SCALE, calibrated_p, tmag_stratum
+from .analyse import CLASSES, calibrated_p, event_class, tmag_stratum
 from .controls import jobs
 
 # Candidate meta channel <-> dimming aux name.
@@ -82,11 +82,11 @@ def to_candidate(lc, cid):
     m = lc.meta
     source = {"tmag": m.get("tmag"), "teff": m.get("teff"), "radius_rsun": m.get("radius"), "mass_msun": m.get("mass"),
               "ra": m.get("ra"), "dec": m.get("dec")}
-    return Candidate(cid, "tess", {k: v for k, v in source.items() if v is not None and np.isfinite(v)},
+    return Candidate(cid, "tess", {k: v for k, v in source.items() if v is not None and np.isfinite(v) and (k in ('ra', 'dec') or v > 0)},
                      [LightCurve("TESS", lc.t, lc.flux, lc.err, meta)],
                      context={"dip_false_alarm_p": "how often the mirror-image (brightening) light curves of 10^4 "
                                                    "stars of similar brightness give a dip this strong, x2 for the "
-                                                   "two duration classes searched",
+                                                   "two duration classes searched (up to 3 h, longer)",
                               "photometry": "MIT QLP simple-aperture flux, 200 s cadence, scattered-light cadences "
                                             "removed; one TESS sector"})
 
@@ -114,11 +114,11 @@ class Detector:
         if not events:
             cand.scores["dip_false_alarm_p"] = 1.0
             return cand
-        e = events[0]
-        cls = "short" if e.scale <= SHORT_SCALE else "long"
         stratum = tmag_stratum([cand.source.get("tmag", 12.0)])
-        p = calibrated_p([e.snr], stratum, self.null[cls].values, self.null.stratum.values)[0]
-        cand.scores["dip_false_alarm_p"] = float(min(1.0, 2 * p))
+        ps = [calibrated_p([e.snr], stratum, self.null[c].values, self.null.stratum.values)[0]
+              for e, c in zip(events, event_class([e.scale for e in events]))]
+        e = events[int(np.argmin(ps))]
+        cand.scores["dip_false_alarm_p"] = float(min(1.0, len(CLASSES) * min(ps)))
         diag = event_diagnostics(lc, e)
         for k in TEST_KEYS:
             v = diag.get(k)

@@ -55,3 +55,24 @@ def test_qlp_fetch_live():
     assert lc is not None and lc.meta["tic"] == 1533579 and len(lc) > 5000
     assert qlp.fetch(90, 1) is None
     assert qlp.fetch(78, 101644988) is not None   # a version-02 sector
+
+
+def test_veto_reasons():
+    import pandas as pd
+
+    from cosmos_search.tess.analyse import veto_reasons
+
+    base = dict(variant="real", sector=60, camera=1, ccd=1, t_start=10.0, t_end=10.5, edge_dist=2.0,
+                explained_bkg=0.0, z_bkg=0.0, depth_ratio_sml=np.nan, depth_ratio_lag=np.nan, dump_dist=5.0)
+    rows = [
+        base,
+        {**base, "explained_bkg": 0.9, "z_bkg": 4.0},   # background rose and explains the dip
+        {**base, "explained_bkg": 0.9, "z_bkg": -4.0},  # background fell with the flux: star's own light
+        {**base, "edge_dist": 0.0},                     # starts on a gap
+        {**base, "edge_dist": 0.05},                    # near a gap but both sides observed
+    ]
+    cm = {(60, 1, 1): {"bins": {40, 41}, "frac": {40: 0.1, 41: 0.1}}}  # 10.0-10.5 d covers bins 40-42
+    out = veto_reasons(pd.DataFrame(rows), cm, {})
+    assert out == ["common_mode", "common_mode;systematics", "common_mode", "common_mode;one_sided", "common_mode"]
+    out = veto_reasons(pd.DataFrame(rows), {}, {})
+    assert out == ["", "systematics", "", "one_sided", ""]

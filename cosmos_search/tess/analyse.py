@@ -26,17 +26,34 @@ SHORT_SCALE = 0.125     # d; events found at this scale or shorter are calibrate
 
 # Veto thresholds, v0. Each is checked against injection loss in summary["veto_loss"].
 VETO = {
+    "common_mode_coverage": 0.5,  # veto when at least this fraction of the event's 0.25 d bins are common-mode
     # Fraction of the dip predicted by background coupling (features._explained). Background only: when a
     # blended star dims, its flux-weighted centroid moves towards the neighbours, so centroid coupling
     # "explains" real on-target dips (it removed a third of known dimmers' dips in the control set).
     "explained": 0.5,
+    # ...and only when the background rose unusually during the dip (placement z). Over-subtracting a rising
+    # background makes the star look faint; a background that falls with the flux is the star's own light in
+    # the background annulus, i.e. evidence the dip is on target. Controls: 86% of background-"explained"
+    # dips in quiet sectors had a rising background, against 48% in documented event sectors.
+    "bkg_rise_z": 2.0,
     "alt_flux_max_duration": 0.1,  # d; aperture ratios only below this (QLP's alternate apertures are detrended)
     "depth_ratio": (0.5, 2.0),  # alternative-aperture depth ratio outside this range: not on target
-    "edge_dist": 0.1,      # d from a segment edge (residual ramps after scattered-light removal)
+    # Events that start or end on a segment edge are one-sided: with no baseline on one side a dip cannot be
+    # told from a ramp, and ramps after gaps are TESS's commonest systematic. 0.01 d is ~4 cadences. In the
+    # sector-78 run 70% of mirror and 24% of real detections touched an edge, and only 15 of 1355 real events
+    # (vs 4 mirror) sat 0.01-0.1 d away, so the first cut at 0.1 d cost recall for nothing.
+    "edge_dist": 0.01,
     "dump_dist": 0.05,     # d from a momentum dump, for events shorter than dump_max_dur
     "dump_max_dur": 0.3,
 }
-VETO_REASONS = ("common_mode", "systematics", "aperture", "segment_edge", "momentum_dump")
+VETO_REASONS = ("common_mode", "systematics", "aperture", "one_sided", "momentum_dump")
+# Short events are where mirrored flares live; long events are where Boyajian-like dips live. Calibrating each
+# against its own null keeps flares from setting the bar for day-long dips.
+CLASSES = ("short", "long")
+
+
+def event_class(scale):
+    return np.where(np.asarray(scale, float) <= SHORT_SCALE, "short", "long")
 
 
 TMAG_EDGES = (10.0, 12.0, 13.0, 14.0)    # coarse enough that each stratum holds ~10^3 nulls in a 10^4 run
@@ -69,17 +86,17 @@ def veto_reasons(ev, cm_dip, cm_burst):
         why = []
         cm = cm_burst if r.variant == "mirror" else cm_dip
         frac = in_common_mode(cm, (r.sector, r.camera, r.ccd), r.t_start, r.t_end)
-        if frac > 0:
+        if frac >= VETO["common_mode_coverage"]:
             why.append("common_mode")
-        if _get(r, "explained_bkg") > VETO["explained"]:
+        if _get(r, "explained_bkg") > VETO["explained"] and _get(r, "z_bkg") > VETO["bkg_rise_z"]:
             why.append("systematics")
+        if r.edge_dist < VETO["edge_dist"]:
+            why.append("one_sided")
         lo, hi = VETO["depth_ratio"]
         short = (r.t_end - r.t_start) < VETO["alt_flux_max_duration"]
         ratios = [_get(r, c, np.nan) if short else np.nan for c in ("depth_ratio_sml", "depth_ratio_lag")]
         if any(np.isfinite(x) and not lo <= x <= hi for x in ratios):
             why.append("aperture")
-        if r.edge_dist < VETO["edge_dist"]:
-            why.append("segment_edge")
         if _get(r, "dump_dist", np.inf) < VETO["dump_dist"] and (r.t_end - r.t_start) < VETO["dump_max_dur"]:
             why.append("momentum_dump")
         reasons.append(";".join(why))
@@ -120,23 +137,21 @@ def analyse(out):
     # (features.edge_kinematics). Too-fast events form a separate "sudden change" channel.
     det["fast_edge"] = det.get("fast_edge", pd.Series(False, index=det.index)).fillna(False).astype(bool)
     det["occ"] = det.ok & ~det.fast_edge
-    # Short events are where mirrored flares live; long events are where Boyajian-like dips live.
-    # Calibrating each against its own null keeps flares from setting the bar for day-long dips.
-    det["cls"] = np.where(det.scale <= SHORT_SCALE, "short", "long")
+    det["cls"] = event_class(det.scale)
     det["far"] = 1.0
     null_best = {}
-    for cls in ("short", "long"):
+    for cls in CLASSES:
         m = det[det.occ & (det.variant == "mirror") & (det.cls == cls)].groupby("row").snr.max()
         null_best[cls] = m.reindex(rows).fillna(0.0).values
         sel = det.occ & (det.cls == cls)
         far = calibrated_p(det.loc[sel, "snr"].values, det.loc[sel, "stratum"].values, null_best[cls], strata)
-        det.loc[sel, "far"] = np.minimum(1.0, 2 * far)   # x2: two scale classes searched
+        det.loc[sel, "far"] = np.minimum(1.0, len(CLASSES) * far)   # one trial per class searched
     pd.DataFrame({"row": rows, "stratum": strata, **null_best}).to_parquet(out / "null.parquet")
     far_row = {v: det[det.occ & (det.variant == v)].groupby("row").far.min().reindex(rows).fillna(1.0).values
                for v in ("real", "mirror", "injected")}
     far_real = far_row["real"]
-    thresholds = {f"{cls}_{a:g}": float(np.quantile(null_best[cls], 1 - a / 2))
-                  for cls in ("short", "long") for a in FAR_LEVELS}
+    thresholds = {f"{cls}_{a:g}": float(np.quantile(null_best[cls], 1 - a / len(CLASSES)))
+                  for cls in CLASSES for a in FAR_LEVELS}
 
     # --- Injection recovery (dip detector) ---
     inj = inj.set_index("row").reindex(rows)

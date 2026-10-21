@@ -45,17 +45,24 @@ searching for periodic boxes.
    systematics and variability produce a "dip" (statistics.md §2). p-values come from
    `cosmos_search.stats` in Tmag strata.
 5. **Physics vetoes rather than significance cuts.**
-   - *Coupling regression.* Fit flux against background and centroids outside the dip, predict the in-dip
-     change from those channels, and ask what fraction of the dip they explain. An occultation has nothing
-     to do with the background; a scattered-light dip is mostly background.
-   - *Aperture ratio.* A real on-target dip has the same fractional depth in every aperture.
+   - *Background coupling.* Fit flux against background outside the dip, predict the in-dip change from
+     the background, and ask what fraction of the dip it explains. Only counted when the background *rose*
+     unusually during the dip, because over-subtracting a rising background is how background makes a star
+     look faint; a background that falls with the flux is the star's own light in the annulus, which is
+     evidence for an on-target dip. Centroids are reported to the vetters but not used to veto: when a
+     blended star dims, its light-weighted centroid moves towards its neighbours, so the centroid "explains"
+     real dips.
+   - *Aperture ratio.* A real on-target dip has the same fractional depth in every aperture. Only for dips
+     under 0.1 d, because QLP's alternate apertures are spline-detrended.
+   - *One-sided events.* A dip that starts or ends on a data gap has no baseline on one side and cannot be
+     told from a ramp, the commonest TESS systematic.
    - *Occultation kinematics.* An occulter of radius r crossing at speed v changes flux over 2r/v and removes
      at most (r/R*)²; so the deepest change possible within one cadence Δt is (v_max Δt / 2R*)², with
      v_max = 2 v_esc(star). About 3% for a Sun-like star at 200 s. Faster steps cannot be occultations
      (flares in the mirror, instrumental jumps, or the star changing its own output); they go to a separate
      "sudden change" channel instead of polluting the occultation channel.
    - *Common mode.* Events shared by improbably many stars on the same camera/CCD in the same time bin
-     (binomial test) are instrumental.
+     (binomial test) are instrumental. An event is vetoed when at least half its time is in such bins.
 6. **Hypothesis-free score alongside.** An isolation forest plus kNN distance on noise-normalised features
    (extreme statistic and red-noise level at every scale, tail ratios, quantile skew, Cody M and Q,
    bimodality, von Neumann ratio), standardised within Tmag strata, asks "how unusual is this light curve
@@ -71,10 +78,21 @@ searching for periodic boxes.
     python -m cosmos_search.tess.bakeoff sample  --out data/bakeoff/v0 --sectors 60 66 72 78 84 90 --n 10000
     python -m cosmos_search.tess.bakeoff process --out data/bakeoff/v0 --workers 12
     python -m cosmos_search.tess.analyse --out data/bakeoff/v0
+    python -m cosmos_search.tess.controls --run data/bakeoff/v0
     python -m cosmos_search.tess.vet build --out data/bakeoff/v0 --controls cosmos_search/tess/controls.csv
 
-`analyse` writes `summary.json`, `recovery.csv` (one row per injection) and `candidates.parquet`; `vet`
-writes a Stage A batch through the shared vetting package.
+`analyse` writes `summary.json`, `recovery.csv` (one row per injection) and `candidates.parquet`; `controls`
+scores the known-answer stars against the same nulls; `vet` writes a Stage A batch through the shared
+vetting package.
+
+## Known-answer controls
+
+`cosmos_search/tess/controls.csv` lists 196 stars with literature evidence (bibcodes in the file, method in
+`controls_notes.md`): YSO dippers (39), aperiodic deep dimmers including exocomet hosts and ASAS-SN dippers
+(24), R CrB stars (40), UX Ori / Herbig Ae/Be (48), long or disk eclipses (8), detached EBs as a reference
+(30), and documented TESS false alarms (7). Each row gives the QLP sectors in which the dimming is
+documented, so each star is tested in its event sectors and in up to two quiet sectors. The quiet sectors
+of the same stars are the best negatives available: same star, same pipeline, different state.
 
 ## Milestones
 
@@ -107,3 +125,23 @@ Changes of approach, with the evidence that prompted them.
 - **QLP file versions.** Sectors 74–79 are delivered as `v02`; the first sample silently skipped sector 78.
 - **Shared library fix.** Dip-train priors assumed Gaia's multi-year span and failed on 27 d; fixed upstream
   (PR #4), and the spacing now scales with the span.
+- **Controls overturned three vetoes** (known dimmers in their documented event sectors, 2026-10-21).
+  - Centroid coupling removed a third of real dimmers' dips. When a blended star dims, the centroid moves
+    towards the neighbours, so centroid change is a consequence of the dip rather than its cause. Centroids
+    are now evidence for the vetters, not a veto.
+  - The background veto now needs the background to have *risen* (placement z > 2). Of background-"explained"
+    dips, 86% in quiet sectors had a rising background against 48% in event sectors; the direction rule
+    vetoes 3% of event-sector dips and 12% of quiet-sector dips (was 9% and 16%).
+  - QLP's alternate apertures are detrended with 0.3-2.5 d spline breaks, which ate 0.1-0.3 d dips of
+    known YSO dippers and failed them on aperture ratio. Injections, multiplied in after that detrending,
+    could not show this. The ratio is now used below 0.1 d only.
+- **Kinematic edge test on median-3 flux.** Single-cadence outliers (cosmic rays, hot pixels) registered as
+  two impossible steps and sent real dips to the "sudden change" channel.
+- **Edges: one-sided events only.** The 0.1 d segment-edge veto removed 15% of event-sector dips. Measured
+  against the mirror, the excess is entirely in events that touch the edge (mirror/real 2.7 at < 0.01 d,
+  0.4 at 0.01-0.1 d), so the veto is now "starts or ends on a gap".
+- **Common mode by coverage.** "Any overlap with a flagged 0.25 d bin" vetoed long dips that brushed one
+  bin. Now at least half the event's bins must be flagged. Sector 78 still loses ~17% of injection windows
+  to its first days, when cameras 3-4 share a large ramp. Subtracting the CCD's common mode (estimated from
+  its ~100 searched stars) would recover that time; it needs a two-pass pipeline and is not done yet.
+

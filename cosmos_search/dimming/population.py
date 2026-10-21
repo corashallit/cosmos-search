@@ -50,12 +50,16 @@ def common_mode_epochs(events, n_per_group, bin_width=0.25, alpha=1e-3, min_coun
 
 
 def in_common_mode(cm, group, t0, t1, bin_width=0.25):
-    """Largest coincidence fraction of any flagged bin overlapping [t0, t1], or 0."""
+    """Fraction of the event's time bins that are common-mode bins of its group (0 to 1).
+
+    Coverage rather than "any overlap": a day-long dip that brushes one flagged bin is not explained by
+    it, and with ~5% of bins flagged per sector, any-overlap vetoed 29% of injected dips in a 10^3-star run.
+    """
     g = cm.get(group)
     if not g or not g["bins"]:
         return 0.0
     bins = range(int(np.floor(t0 / bin_width)), int(np.floor(t1 / bin_width)) + 1)
-    return max((g["frac"][b] for b in bins if b in g["bins"]), default=0.0)
+    return sum(b in g["bins"] for b in bins) / len(bins)
 
 
 def anomaly_columns(columns):

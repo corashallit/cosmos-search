@@ -24,7 +24,7 @@ from cosmos_search.dimming.features import event_diagnostics, extract
 from cosmos_search.dimming.population import AnomalyModel, anomaly_columns
 
 from . import qlp
-from .analyse import SHORT_SCALE, calibrated_p, tmag_stratum, veto_reasons
+from .analyse import CLASSES, VETO_REASONS, calibrated_p, event_class, tmag_stratum, veto_reasons
 
 DEFAULT = Path(__file__).with_name("controls.csv")
 
@@ -92,12 +92,13 @@ def evaluate(run, controls=DEFAULT, workers=16):
         E["fast_edge"] = E.get("fast_edge", pd.Series(False, index=E.index)).fillna(False).astype(bool)
         E["occ"] = (E.veto == "") & ~E.fast_edge
         E["far"] = 1.0
-        for cls in ("short", "long"):
-            sel = E.occ & ((E.scale <= SHORT_SCALE) == (cls == "short"))
-            if sel.any():
+        E["cls_event"] = event_class(E.scale)
+        for cls in CLASSES:
+            sel = E.occ & (E.cls_event == cls)
+            if sel.any() and cls in null:
                 p = calibrated_p(E.loc[sel, "snr"].values, tmag_stratum(E.loc[sel, "tmag"]), null[cls].values,
                                  null.stratum.values)
-                E.loc[sel, "far"] = np.minimum(1.0, 2 * p)
+                E.loc[sel, "far"] = np.minimum(1.0, len(CLASSES) * p)
         best = E.groupby("job").far.min()
         F["dip_far"] = F.job.map(best).fillna(1.0)
         F["n_dips_any"] = F.job.map(E.groupby("job").size()).fillna(0).astype(int)
@@ -125,7 +126,7 @@ def evaluate(run, controls=DEFAULT, workers=16):
     veto_counts = {}
     if len(E):
         ev_event = E[E.state == "event"]
-        for reason in ("systematics", "aperture", "segment_edge", "momentum_dump"):
+        for reason in VETO_REASONS[1:]:
             veto_counts[reason] = float(ev_event.veto.str.contains(reason).mean())
         veto_counts["fast_edge"] = float(ev_event.fast_edge.mean())
     out = {"by_class_and_state": summary.to_dict(orient="records"),
