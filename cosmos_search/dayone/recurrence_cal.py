@@ -18,6 +18,7 @@ import argparse
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -51,7 +52,9 @@ def _one(job):
     return {"kind": kind, "source_id": sid, "family": family, **r}
 
 
-def injected_jobs(ext, host_ids, draws, rng):
+def injected_jobs(ext, host_ids, draws, rng, min_events=0, max_tries=300):
+    """Jobs for each host: the host as observed, then `draws` trains per family. With min_events, each train is
+    redrawn until it leaves that many dip events in the external epochs (as batch 4's decoys must)."""
     from cosmos_search.inject import lightcurve as lcinj
     from cosmos_search.inject.classes import gaia_stream
 
@@ -66,9 +69,12 @@ def injected_jobs(ext, host_ids, draws, rng):
         yield ("host", int(sid), "none", None, raw)
         for fam in FAMILIES:
             for _ in range(draws):
-                sig = lcinj.sample(rng, fam, *gaia_stream.DR3_SPAN, t_ext=t_ext)
-                rec = {"signal": lcinj.truth(sig), "bands": None}
-                yield ("injected", int(sid), fam, None, apply(raw, {int(sid): rec}))
+                for _ in range(max_tries):
+                    sig = lcinj.sample(rng, fam, *gaia_stream.DR3_SPAN, t_ext=t_ext)
+                    inj = apply(raw, {int(sid): {"signal": lcinj.truth(sig), "bands": None}})
+                    if not min_events or len(recurrence.events(*recurrence.epochs(_lcs(inj)))) >= min_events:
+                        yield ("injected", int(sid), fam, None, inj)
+                        break
 
 
 def main(argv=None):
@@ -84,6 +90,7 @@ def main(argv=None):
     r.add_argument("--hosts-ext", required=True)
     r.add_argument("--hosts", required=True)
     r.add_argument("--draws", type=int, default=5)
+    r.add_argument("--min-events", type=int, default=0)
     r.add_argument("--workers", type=int, default=os.cpu_count())
     r.add_argument("--out", required=True)
     a = ap.parse_args(argv)
@@ -92,17 +99,29 @@ def main(argv=None):
 
         from .external import ztf
 
-        ebs = eb_sample(tap(), a.n)
-        ebs.to_parquet(a.out)
+        if Path(a.out).exists():
+            ebs = pd.read_parquet(a.out)
+        else:
+            ebs = eb_sample(tap(), a.n)
+            ebs.to_parquet(a.out)
         from concurrent.futures import ThreadPoolExecutor
+
+        # One file per star beside the output, so a run that IRSA's 504s cut short resumes where it stopped.
+        cache = Path(a.ext).with_suffix(".d")
+        cache.mkdir(exist_ok=True)
 
         def one(row):
             sid, ra, dec = row
+            f = cache / f"{int(sid)}.parquet"
+            if f.exists():
+                return pd.read_parquet(f)
             try:
-                return ztf(int(sid), float(ra), float(dec))
-            except Exception as exc:  # one failed star is missing data
+                df = ztf(int(sid), float(ra), float(dec))
+            except Exception as exc:  # one failed star is missing data; a rerun tries it again
                 print(f"{sid}: ZTF failed ({type(exc).__name__})", flush=True)
                 return None
+            df.to_parquet(f)
+            return df
 
         parts = []
         with ThreadPoolExecutor(4) as pool:
@@ -117,7 +136,7 @@ def main(argv=None):
     eb_ext = pd.read_parquet(a.ebs_ext)
     jobs = [("eb", int(sid), "eclipsing_binary", None, g) for sid, g in eb_ext.groupby("source_id")]
     hosts = pd.read_parquet(a.hosts, columns=["source_id"])["source_id"].astype("int64")
-    jobs += list(injected_jobs(pd.read_parquet(a.hosts_ext), hosts, a.draws, rng))
+    jobs += list(injected_jobs(pd.read_parquet(a.hosts_ext), hosts, a.draws, rng, a.min_events))
     print(f"{len(jobs)} light curves", flush=True)
     with ProcessPoolExecutor(a.workers) as pool:
         rows = list(pool.map(_one, jobs, chunksize=4))
