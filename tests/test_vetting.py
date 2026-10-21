@@ -2,6 +2,7 @@ import json
 import re
 
 import numpy as np
+import pandas as pd
 import pytest
 from pyrage import encrypt, x25519
 
@@ -745,3 +746,44 @@ def test_vectorised_clean_long_matches_the_per_source_loop(seed):
         assert a.equals(b)
     exercised = b.drop(columns=["source_id", "stage0_n_untested"]).sum()
     assert (exercised > 0).sum() >= 2  # several verdicts occur, so the comparison means something
+
+
+def test_external_bands_keep_the_gaia_clock_and_holdout_window():
+    from cosmos_search.vetting.candidate import LightCurve
+    cand = gaia_like(dip_at=2457300.0)
+    rng = np.random.default_rng(3)
+    t = np.sort(np.concatenate([rng.uniform(2457850.0, 2457990.0, 50), rng.uniform(2458100.0, 2459000.0, 950)]))
+    f = 1 + rng.normal(0, 0.003, len(t))
+    f[-5] = 0.8                                            # a deep external epoch after Gaia's span
+    cand.lightcurves.append(LightCurve("ztf_r", t, f, np.full(len(t), 0.003), {}))
+    g = cand.band("G")
+    assert cand.time_span() == (g.time.min(), g.time.max())
+    packet, key = build(cand, holdout=("tail",))
+    t0, t1 = g.time.min(), g.time.max()
+    cut = t0 + 0.8 * (t1 - t0)
+    w = packet["withheld"]
+    assert w["after_t"] == pytest.approx(cut - t0, rel=1e-4) and w["until_t"] == pytest.approx(t1 - t0, rel=1e-4)
+    shown = packet["summaries"]["ztf_r"]["n_epochs"]
+    assert shown == int(np.sum((t < cut) | (t > t1)))      # external epochs inside the withheld window are hidden
+    assert "Faintest epochs" in packet["text"] and f"{t[-5] - t0:.4f}" in packet["text"]
+
+
+def test_external_apply_dilutes_tess_and_skips_g_only():
+    from cosmos_search.dayone.external import apply
+    from cosmos_search.inject import lightcurve as lcinj
+    dip = lcinj.truth(lcinj.Dip(t0=10.0, covering=0.2, ingress=0.1, egress=0.1, flat=1.0))
+    ext = pd.DataFrame({"source_id": [1, 1, 2], "band": ["TESS", "ztf_r", "TESS"], "t": [10.5, 10.5, 10.5],
+                        "flux": 1.0, "err": 0.01})
+    plan = {1: {"signal": dip, "bands": None}, 2: {"signal": dip, "bands": ["G"]}}
+    out = apply(ext, plan, {1: 0.5})
+    assert out.flux.tolist() == pytest.approx([0.9, 0.8, 1.0])
+
+
+def test_dip_trains_continue_past_the_span():
+    from cosmos_search.inject import lightcurve as lcinj
+    for fam in ("dip_train_periodic", "dip_train_poisson", "dip_train_primes"):
+        late = 0
+        for seed in range(20):
+            sig = lcinj.sample(np.random.default_rng(seed), fam, 0.0, 1000.0, t_ext=4000.0)
+            late += sum(p.t0 > 1000.0 for p in sig.parts)
+        assert late > 0, fam

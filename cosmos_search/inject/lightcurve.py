@@ -210,9 +210,13 @@ def _loguniform(rng, lo, hi):
     return float(np.exp(rng.uniform(np.log(lo), np.log(hi))))
 
 
-def sample(rng, family, t_min, t_max):
-    """Draw one signal from a named family over the light curve's time span."""
+def sample(rng, family, t_min, t_max, t_ext=None):
+    """Draw one signal from a named family over the light curve's time span.
+
+    With t_ext > t_max, dip trains keep running to t_ext under the same law (same rate, period or spacing),
+    so another survey's later epochs see the same process; priors still scale with t_max - t_min."""
     span = t_max - t_min
+    t_end = t_max if t_ext is None else max(t_ext, t_max)
     if family == "grey_dip":
         dur = _loguniform(rng, 0.05, 30.0)
         return Dip(t0=rng.uniform(t_min, t_max), covering=_loguniform(rng, 0.005, 0.5),
@@ -240,7 +244,7 @@ def sample(rng, family, t_min, t_max):
         }[kind]()
         depth, dur = _loguniform(rng, 0.005, 0.3), _loguniform(rng, 0.05, min(5.0, span / 20))
         dips = [Dip(t0=float(t0), covering=depth, ingress=dur / 4, egress=dur / 4, flat=dur / 2)
-                for t0 in event_times(rng, kind, t_min, t_max, **kw)]
+                for t0 in event_times(rng, kind, t_min, t_end, **kw)]
         return Composite(dips)
     if family == "secular_fade":
         return SecularTrend(rate_per_year=-_loguniform(rng, 1e-3, 5e-2), t_ref=(t_min + t_max) / 2,

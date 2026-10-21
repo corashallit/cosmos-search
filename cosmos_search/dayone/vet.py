@@ -1,7 +1,8 @@
 """From the vetting queue to Stage A packets, and from committed verdicts to a scored shortlist.
 
     python -m cosmos_search.dayone.vet build --queue rank/queue.parquet --ranked rank/ranked.parquet \\
-        --lightcurves stream/lightcurves [--context xm/context.parquet] --out vet/
+        --lightcurves stream/lightcurves [--context xm/context.parquet] [--external ext.parquet] \\
+        [--plan decoys.json.age] --out vet/
     python -m cosmos_search.dayone.vet score --out vet/ --batch vet/batch [--plan plan.json.age]
 
 `build` writes products.json (packets), prompts/ and key.json. The key maps packet ids to candidates and
@@ -33,6 +34,8 @@ COINCIDENCE_TAU = 0.05      # days: one Gaia transit pair is 0.074 d; same-scan 
 COINCIDENCE_WINDOW = 5.0    # days
 CONTEXT_KEYS = {"allwise_w1mpro": "W1", "allwise_w2mpro": "W2", "allwise_w3mpro": "W3", "allwise_w4mpro": "W4",
                 "allwise_p_cal": "wise_match_p", "2mass_k_m": "Ks", "2mass_p_cal": "twomass_match_p"}
+EXTERNAL_CONTEXT_KEYS = {"blend_tess_contamination": "tess_contamination"}
+EXTERNAL_BANDS = ("ztf_g", "ztf_r", "ztf_i", "TESS")
 P_U_SHORTLIST = 0.25        # pilots 2-3: probes 4/8 and controls 0/26 at P(unexplained) >= 0.25
 # Shortlist rule v1 (docs/dayone.md, pre-registered before batch 2): for a technosignature search the rare
 # astrophysical leaves are as interesting as "unexplained", so the score is their sum. YSO dippers stay common.
@@ -43,14 +46,27 @@ TARGET_FAMILIES = ("grey_dip", "blue_dip", "dip_train_poisson", "dip_train_prime
                    "chromatic_flip", "secular_fade")
 
 
-def candidate_dicts(queue, ranked, lc_dir, wide=None):
-    """Candidate dicts (vetting.candidate shape) for the queue, from the stream's kept light curves."""
+def candidate_dicts(queue, ranked, lc_dir, wide=None, plan_map=None, external=None):
+    """Candidate dicts (vetting.candidate shape) for the queue, from the stream's kept light curves.
+
+    plan_map (a decrypted sealed plan) injects into the Gaia epochs here, before Stage 0, as the stream would have,
+    and into the external epochs (dayone.external) with the same signal. external adds ZTF and TESS bands after
+    Gaia's, plus the TESS contamination ratio to the context."""
     ids = queue["source_id"].astype("int64").to_numpy()
     lc = read_lightcurves(lc_dir, ids)
+    if plan_map:
+        from cosmos_search.inject.classes.gaia_stream import apply
+        lc = apply(lc, plan_map)
     lc, _ = stage0.clean_long(lc, blend=_blend_map(queue))
+    ctx = wide.set_index("source_id") if wide is not None else None
+    if external is not None:
+        from .external import apply as apply_external
+        contam = {} if ctx is None or "blend_tess_contamination" not in ctx else \
+            ctx["blend_tess_contamination"].dropna().astype(float).to_dict()
+        external = apply_external(external[external["source_id"].isin(ids)], plan_map, contam)
+        ext_by_id = {int(k): v for k, v in external.groupby("source_id")}
     df = lc.to_pandas()
     df["band"] = df["band"].astype(str)
-    ctx = wide.set_index("source_id") if wide is not None else None
     out = []
     for _, row in queue.iterrows():
         sid = int(row["source_id"])
@@ -66,10 +82,18 @@ def candidate_dicts(queue, ranked, lc_dir, wide=None):
                         "meta": {"fov": b["fov"].tolist(), "flags": b["flags"].tolist()}})
         if not lcs or lcs[0]["band"] != "G":
             continue
+        if external is not None and sid in ext_by_id:
+            e = ext_by_id[sid]
+            for band in EXTERNAL_BANDS:
+                b = e[(e["band"] == band) & np.isfinite(e["flux"]) & (e["flux"] > 0)].sort_values("t")
+                if len(b) >= 10:
+                    med = float(np.median(b.flux))
+                    lcs.append({"band": band, "time": b["t"].tolist(), "flux": (b["flux"] / med).tolist(),
+                                "flux_err": (b["err"] / med).tolist(), "meta": {}})
         source = {k: float(row[k]) for k in SOURCE_KEYS if k in row and pd.notna(row[k])}
         context = {}
         if ctx is not None and sid in ctx.index:
-            for col, name in CONTEXT_KEYS.items():
+            for col, name in {**CONTEXT_KEYS, **(EXTERNAL_CONTEXT_KEYS if external is not None else {})}.items():
                 v = ctx.at[sid, col] if col in ctx.columns else np.nan
                 context[name] = float(v) if pd.notna(v) else float("nan")
         out.append({"candidate_id": f"gaia_dr3:{sid}", "arm": "gaia", "source": source, "lightcurves": lcs,
@@ -158,11 +182,11 @@ def interesting_score(class_probs):
     return float(sum(class_probs.get(k, 0.0) for k in INTERESTING))
 
 
-def build(queue, ranked, lc_dir, out, wide=None, rng=None, sso_check=True):
+def build(queue, ranked, lc_dir, out, wide=None, rng=None, sso_check=True, plan_map=None, external=None):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     rng = rng or np.random.default_rng(int.from_bytes(__import__("os").urandom(16), "little"))
-    cands = candidate_dicts(queue, ranked, lc_dir, wide)
+    cands = candidate_dicts(queue, ranked, lc_dir, wide, plan_map, external)
     _, flagged = coincidence_tests(ranked)
     cands = add_tests(cands, coincidence_at(ranked), sso_check)
     entries = [(c, {"kind": "control" if c["role"] == "control" else "real", "role_in_queue": c["role"],
@@ -274,6 +298,8 @@ def main(argv=None):
     b.add_argument("--context")
     b.add_argument("--out", required=True)
     b.add_argument("--no-sso", action="store_true")
+    b.add_argument("--external", help="dayone.external fetch output: ZTF and TESS bands for the packets")
+    b.add_argument("--plan", help="sealed decoy plan to inject at build time (dayone.decoys; needs COSMOS_REVEAL_KEY)")
     s = sub.add_parser("score")
     s.add_argument("--out", required=True)
     s.add_argument("--batch", required=True)
@@ -281,8 +307,10 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd == "build":
         wide = pd.read_parquet(a.context) if a.context else None
+        from cosmos_search.inject.classes.gaia_stream import load_plan
         packets, _ = build(pd.read_parquet(a.queue), pd.read_parquet(a.ranked), a.lightcurves, a.out, wide,
-                           sso_check=not a.no_sso)
+                           sso_check=not a.no_sso, plan_map=load_plan(a.plan) if a.plan else None,
+                           external=pd.read_parquet(a.external) if a.external else None)
         from cosmos_search.vetting.__main__ import main as vmain
         vmain(["prompts", "--packets", str(Path(a.out) / "products.json"), "--out", str(Path(a.out) / "prompts")])
         print(f"{len(packets)} packets")

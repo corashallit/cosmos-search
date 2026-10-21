@@ -24,6 +24,8 @@ from .candidate import Candidate, LightCurve
 MAX_ROWS = 400        # epochs per band shown in full; longer light curves are binned
 N_BINS = 150
 ZOOM_POINTS = 60      # per dip window
+FAINT_SIGMA = 4.0     # binned light curves also list their faintest epochs below this many robust sigma
+FAINT_ROWS = 60
 HOLDOUT_TAIL = 0.2    # fraction of the time span withheld by the "tail" holdout
 DIP_SIGMA = 4.0       # a held-out "dip" is a point this many robust sigma below the visible median
 
@@ -93,6 +95,16 @@ def _binned(lc, n_bins):
             f = lc.flux[m]
             lines.append(f"{(edges[b] + edges[b + 1]) / 2:.3f} {int(m.sum())} {np.nanmedian(f):.5f} {np.nanmin(f):.5f}")
     return lines
+
+
+def _faint(lc):
+    """Epochs FAINT_SIGMA below the median, deepest first: binning hides short dips in long light curves."""
+    med, s = np.nanmedian(lc.flux), robust_sigma(lc.flux)
+    if not s > 0:
+        return np.array([], int)
+    idx = np.flatnonzero(lc.flux < med - FAINT_SIGMA * s)
+    idx = idx[np.argsort(lc.flux[idx])][:FAINT_ROWS]
+    return np.sort(idx)
 
 
 def _zoom(lc, dip):
@@ -183,8 +195,11 @@ def build(candidate, holdout=(), packet_id=None):
         tg, tr, t_cut = _tail_targets(cand, t0 + (1 - HOLDOUT_TAIL) * (t1 - t0))
         targets += tg
         truths.update(tr)
+    # The holdout hides the window [t_cut, t1] of the arm's own span in every band, so another survey's epochs in
+    # that window cannot give the answer away; epochs after t1 (other surveys only) stay visible.
     visible = cand if t_cut is None else Candidate(
-        cand.candidate_id, cand.arm, cand.source, [_subset(lc, lc.time < t_cut) for lc in cand.lightcurves],
+        cand.candidate_id, cand.arm, cand.source,
+        [_subset(lc, (lc.time < t_cut) | (lc.time > t1)) for lc in cand.lightcurves],
         cand.dips, cand.scores, cand.tests, cand.context)
     if "colour" in holdout:
         tg, tr, hidden_bands = _colour_targets(visible)
@@ -225,7 +240,8 @@ def build(candidate, holdout=(), packet_id=None):
                     if k not in hidden_context and isinstance(v, (int, float, str))},
         "targets": [_rezero_question(t, t0) for t in targets],
         "withheld": {"bands": list(hidden_bands), "context": list(hidden_context),
-                     "after_t": None if t_cut is None else sig(t_cut - t0, 5)},
+                     "after_t": None if t_cut is None else sig(t_cut - t0, 5),
+                     **({"until_t": sig(t1 - t0, 5)} if t_cut is not None and len(visible.primary()) < len(lcs) else {})},
     }
     packet["text"] = render(packet, lcs)
     # Random hex ids can contain long digit runs; they are ours, so take them out before scanning.
@@ -244,7 +260,8 @@ def _rezero_question(target, t0):
 
 def render(packet, lcs):
     """The packet as the text the expert reads."""
-    out = [f"# Packet {packet['packet_id']}", "", f"Arm: {packet['arm']}. Times are days since the first epoch.", ""]
+    out = [f"# Packet {packet['packet_id']}", "",
+           f"Arm: {packet['arm']}. Times are days since the arm's first epoch; other surveys use the same clock.", ""]
     out += ["## Source", json.dumps(packet["source"], sort_keys=True), ""]
     if packet["context"]:
         out += ["## Context", json.dumps(packet["context"], sort_keys=True), ""]
@@ -264,8 +281,12 @@ def render(packet, lcs):
         else:
             out += [f"Binned to {N_BINS} bins:"] + _binned(lc, N_BINS)
             for j, d in enumerate(packet["dips"]):
-                if "t_min" in d:
-                    out += [f"Zoom on dip {j}:"] + _rows(lc, _zoom(lc, d))
+                if "t_min" in d and len(idx := _zoom(lc, d)):
+                    out += [f"Zoom on dip {j}:"] + _rows(lc, idx)
+            faint = _faint(lc)
+            if len(faint):
+                out += [f"Faintest epochs ({len(faint)}, at least {FAINT_SIGMA:g} robust sigma below the median, "
+                        f"at most {FAINT_ROWS}):"] + _rows(lc, faint)
         out.append("")
     w = packet["withheld"]
     if w["bands"] or w["context"] or w["after_t"] is not None:
