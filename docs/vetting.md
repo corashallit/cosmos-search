@@ -329,8 +329,11 @@ confabulation fell from a rubric 3/4 to 0/4. The flip vetters argued it from fir
 cannot brighten RP". One `duration_tension` probe drew the intended argument: "a 14.6 d dip on a dwarf would need an
 occulter on a very wide orbit", with P(u) 0.28 as the top leaf. The other was read as an eclipse, with the long dip
 taken for a partial one. The prime train drew the timing argument (P(u) 0.38). Control tail intervals were too
-narrow in both pilots (64% and 67% against 80%). The recalibration in `scoring.isotonic` should be applied to them
-before they are used as a confabulation measure.
+narrow in both pilots (64% and 67% against 80%). The fix is a split-conformal widening
+(`scoring.conformal_widening`, reported per batch as `conformal_widening_80` on the controls). On the 26 pooled
+controls the factor is 1.14, and leave-one-out coverage after widening is 81%. Most misses sit just outside the
+interval (6 of 9 within 1.4 half-widths), so the vetter is slightly overconfident, not wrong about where the tail
+goes. Decoy intervals covered 83% without widening.
 
 **The labels, this time on the controls.** 4 of the 9 non-EB controls were called instrumental, and the vetters'
 evidence was specific: a G-only dip with BP and RP normal at the same transit, a G error 30 times the median at the
@@ -426,3 +429,5 @@ Consequences for the pilots:
   errors, are dropped before detection. In an injection test, G-only dips were flagged 71–77% of the time at
   ≥ 10σ, and grey, dust and flip changes ≤ 0.3%. Pilot controls and hosts are cleaned first, control stars are
   no longer reused as hosts, and single-band decoys leave the Gaia mix.
+- 2026-10-21. Held-out tail intervals are recalibrated by split-conformal widening fitted on controls: factor 1.14
+  on pilots 2–3, which brings leave-one-out coverage from 65% to 81%.

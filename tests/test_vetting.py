@@ -529,3 +529,16 @@ def test_stage0_passes_injected_decoys():
         g1 = epoch_verdicts(cand)["verdict"]
         new = (g1 == "band_inconsistent") & (g0 != "band_inconsistent")
         assert not new.any(), spec
+
+
+def test_conformal_widening_restores_coverage():
+    rng = np.random.default_rng(0)
+    n = 400
+    mid = rng.normal(0, 1, n)
+    y = mid + rng.normal(0, 1, n)
+    half = np.full(n, 0.6)  # a nominal 80% interval would need 1.28: these are overconfident
+    s = scoring.conformal_widening(mid - half, mid + half, y[:n])
+    assert 1.8 < s < 2.5
+    lo, hi = scoring.widen(mid - half, mid + half, s)
+    assert 0.78 < scoring.interval_coverage(lo, hi, y) < 0.84
+    assert scoring.conformal_widening([0], [1], [0.5]) == np.inf
