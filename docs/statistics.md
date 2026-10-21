@@ -19,6 +19,11 @@ Nulls are built from the data so that they keep its systematics:
   brightening statistics, computed in the same strata (magnitude, colour, ecliptic latitude, crowding, number
   of transits), estimates the dimming statistic's null. Brightening has its own astrophysics (flares,
   microlensing), which makes this null conservative in some strata. Measure that, don't assume it.
+- **Strata must include the number of epochs.** Statistics that take an extreme over a light curve
+  (minimum flux, largest gap, longest run) have nulls that widen with the number of points, roughly as
+  √(2 ln n) for near-Gaussian noise. Gaia's epoch count follows the scanning law, mostly ecliptic latitude,
+  so leaving it out of the strata produces false structure on the sky. Stratify on it, or convert to a
+  per-point tail probability and apply the Šidák form 1 − (1 − p₁)ⁿ before calibrating.
 - **Stratified permutation.** Re-assign epochs between sources in the same stratum that share scan
   history, which keeps the cadence and calibration systematics but breaks any star-specific signal.
 - **Invariance nulls.** Gaia's redundancy gives tests whose null is exact: agreement across the 9 CCDs of a
