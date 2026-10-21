@@ -86,7 +86,9 @@ def dilution_floor(d_g, e_g, d_bp, d_rp, blend_frac=None, min_epochs=5):
     blended in every transit). Where the source changes significantly in G at >= min_epochs epochs, r is
     measured from them: a generous fraction of the lower quintile of mix / d_G for a source known to be
     unblended (blend_frac < BLEND_MAX), of the minimum otherwise, because a neighbour enters the BP/RP window
-    only at some scan angles and so dilutes only some transits. A quiet source gives no measurement: r = 1 if
+    only at some scan angles and so dilutes only some transits. The minimum includes the epoch under test:
+    leaving it out gains ~4 points of G-only recall but vetoed 2-8% of diluted real changes in the injection
+    test (docs/vetting.md §12). A quiet source gives no measurement: r = 1 if
     it is known to be unblended, else 0, which leaves every G change untested rather than vetoed. On a
     blended source the test is therefore lenient by design.
     """

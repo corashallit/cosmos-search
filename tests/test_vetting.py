@@ -607,3 +607,42 @@ def test_stage0_long_table_survives_a_source_without_bp():
                       for k, v in rows.items()})
     out, counts = clean_long(table, blend={1: 0.0})
     assert out.num_rows == n and counts.iloc[0]["stage0_n_untested"] == n
+
+
+SKYBOT_TEXT = """# Flag: 1
+# Ticket: 1
+# Num | Name | RA(h) | DE(deg) | Class | Mv | Err(arcsec) | d(arcsec) | dRA(arcsec/h) | dDEC(arcsec/h) | Dg(ua) | Dh(ua)
+ 1009 | Sirene | 15 55 45.3229 | -21 23 17.828 | Mars-Crosser | 20.7 | 0.067 | 543.824 | 14.4594 | 0.615 | 3.63335939559 | 3.77265346836
+"""
+MIRIADE = {
+    "@gaia": "# header\n  2015-02-20T21:28:46.524  +15 56 22.96766  -21 25 34.8964      3.635510581     20.69\n",
+    "500": "# header\n  2015-02-20T21:28:46.524  +15 55 45.29456  -21 23 17.8251      3.633355470     20.69\n",
+}
+
+
+class _FakeIMCCE:
+    """SkyBoT and Miriade answers for Gaia DR3's own detection of (1009) Sirene, 2015-02-20 (sso_observation)."""
+
+    def get(self, url, params=None, cache=False):
+        class R:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+        r = R()
+        r.text = SKYBOT_TEXT if "skybot" in url else MIRIADE[params["-observer"]]
+        return r
+
+
+def test_sso_search_corrects_for_gaia_parallax():
+    from cosmos_search.vetting import sso
+    ra, dec = 239.09585284122534, -21.426396751900427  # where Gaia saw Sirene
+    bodies = sso.nearby(2457074.3949829205, ra, dec, 15.0, "gaia", client=_FakeIMCCE())
+    # Geocentric, SkyBoT puts it 544 arcsec away; seen from Gaia it is where Gaia measured it.
+    assert len(bodies) == 1 and bodies[0]["geo_sep_arcsec"] > 500 and bodies[0]["sep_arcsec"] < 1.0
+    assert sso.flux_ratio(20.7, 15.0, "gaia") < 0.01
+    cand = gaia_like()
+    cand.source.update(ra=ra, dec=dec)
+    cand.dips = [{"t_min": 57074.0 + 2400000.0 - 2457000.0, "depth": 0.002}]
+    (row,) = sso.check(cand, client=_FakeIMCCE())
+    assert row["verdict"] in ("sso_bright", "sso_faint") and row["bodies"]

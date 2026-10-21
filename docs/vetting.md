@@ -48,7 +48,7 @@ and a source of known-answer controls or decoys, or its α is unmeasured.
 | calibration_offset | Steps between FoVs, CCDs, sectors, calibration epochs | FoV pair test; step test at known calibration boundaries | Gaia detectors | step decoys |
 | shared_systematic | Same epoch dims in unrelated stars | **cross-candidate coincidence** (`vetting/coincidence.py`, below); TESS common-mode per CCD | vetting; TESS thread | coincident-dip injections across hosts |
 | processing | Detrending or background-model artefacts, cross-match errors | re-extraction with an independent pipeline (TGLC for TESS; DataLink re-pull for Gaia) | arm threads | — |
-| solar_system_occultation | Single-epoch dip near the ecliptic; asteroid in TESS background annulus | **SkyBoT cone search at dip epochs** | vetting (pending the shared client) | known asteroid crossings |
+| solar_system_occultation | Single-epoch dip near the ecliptic; asteroid in TESS background annulus | **SkyBoT cone + Miriade parallax from the spacecraft** (`vetting/sso.py`, §13) | vetting | Gaia DR3 `sso_observation` |
 | eclipsing_binary, planet_transit | Periodic, flat or V-shaped, grey | period search, odd/even, secondary | arm detectors | VSX/Gaia DR3 EBs |
 | disk_occultation, yso_dipper, rcrb_dust, debris_transit | Long, reddened or irregular dips; IR excess | dip colour ratio R; energy budget vs WISE (G5) | Gaia detectors, cross-match thread | KIC 8462852, Gaia17bpp, EPIC 204278916, YSO dippers, R CrB stars, ZTF J0139+5245 |
 | rotation_or_spots, pulsation_or_irregular, eruptive_or_be | Quasi-periodic or red-noise variability | periodograms, colour–magnitude slope | arm detectors | VSX/DR3 classified variables |
@@ -380,7 +380,9 @@ blended source it takes 0.7 × the minimum, because a neighbour enters the windo
 quiet source gives no measurement: r_lo = 1 if it is unblended, else 0, which leaves it `untested`. "Unblended"
 means a BP and RP blended-transit fraction below 5%, from `gaia_source` `phot_{bp,rp}_n_blended_transits` /
 `n_obs`. Without those columns a quiet source is untested. On a blended source the test is therefore lenient by
-design: a G-only change there cannot be told from a diluted real one.
+design: a G-only change there cannot be told from a diluted real one. Leaving the epoch under test out of the
+minimum would stop a single G fault from setting its own bound. It gained about 4 points of G-only recall, but
+vetoed 2–8% of diluted injections, so the minimum keeps that epoch.
 
 **Error inflation.** A G error more than 5 times the star's median is `inflated_error`, and that G epoch is
 dropped, but only if no independent measurement corroborates the change. It is kept when BP or RP at that
@@ -437,6 +439,27 @@ Consequences for the pilots:
   cannot, the packet does not show it to be single-band, so its "instrumental" label would not be what an ideal
   observer can conclude. Its false-positive class is measured by the injection test above instead.
 
+## 13. Solar-system bodies at dip epochs
+
+`vetting/sso.py` looks for known asteroids near the source at each detected dip. A body inside the photometric
+window adds light. One in a TESS background annulus is over-subtracted and makes a dip. One exactly in front of
+the star occults it for seconds, which Gaia records as a single-epoch dip if a transit catches it. The result,
+`sso_bright` (the body's flux is at least a tenth of the dip depth), `sso_faint` or `clear`, is evidence for the
+packet and Stage B, not a veto.
+
+SkyBoT's cone search is geocentric whatever observer code it is given. On Gaia DR3's own detection of (1009)
+Sirene (`gaiadr3.sso_observation`, 2015-02-20), SkyBoT put the body 544 arcsec from where Gaia saw it, with
+location codes 258, `@gaia` and 500 alike. That offset is parallax: Gaia is about 0.01 au from the Earth, so a body
+at 3.6 au shifts by about 570 arcsec. Miriade's `ephemcc` does take spacecraft observers (`@gaia`, `@tess`). So
+the check runs a geocentric SkyBoT cone widened by the largest parallax (Gaia at 0.0102 au, TESS at 0.0026 au,
+bodies beyond 0.8 au), then makes two Miriade calls for one reference body. Every body near one line of sight
+shifts by the same sky-plane vector divided by its distance, so that one body fixes the shift for all of them.
+On 8 Gaia DR3 asteroid observations ((3200) Phaethon and (7000) Curie), the corrected search found the right body
+0.4–1.6 arcsec from Gaia's position, against 500–830 arcsec geocentric. Search radii are 15 arcsec for Gaia (G
+window 0.7 × 2.1, BP/RP 3.5 × 2.1, plus timing and ephemeris slack) and 150 arcsec for TESS. Dip times are
+converted from BJD to observer UTC by removing the barycentric light time towards the source (up to ±8.3 min).
+NEOs within 0.8 au can fall outside the widened cone.
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -467,3 +490,5 @@ Consequences for the pilots:
   allowed G change scales with a per-source dilution bound, and quiet stars that may be blended are untested.
   Inflated-error epochs are kept when BP, RP or the partner transit corroborates them. G-only recall falls from
   71–77% to 41–45% at ≥ 10σ; none of 6,800 diluted injections is vetoed.
+- 2026-10-21. Solar-system check at dip epochs (§13): SkyBoT is geocentric only, so positions are corrected to
+  Gaia or TESS with Miriade. Gaia's own asteroid detections are recovered within 1.6 arcsec.
