@@ -349,6 +349,10 @@ Calibration puts the flag alone at about 0.5 on such trains, so the agent's S ha
 recall alone, the next step is more overlap (ATLAS, ASAS-SN) rather than a lower threshold. v3a is reported to
 learn whether the agents act on the test.
 
+*Deviation, recorded before the build:* the plan drew 18 of 20 decoys. All 12 trains, the 4 single events and
+the 2 strict-period trains are in; the dust dip and the step are not, because the 40 unused hosts ran out
+(conditioned trains reject many hosts). Batch 4 has 48 packets.
+
 ## Keep rule v2 (after the rehearsal)
 
 The stream keeps a light curve when the source's G3 `single` or `fov` |W| reaches 0.6 × the |W| at which G3

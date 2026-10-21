@@ -37,8 +37,12 @@ from .rank import DIP_CLASSES
 # Target families (rule v1/v2 should keep them) and the rest (should read as EB, YSO or instrumental).
 COUNTS = {"dip_train_poisson": 3, "dip_train_primes": 3, "dip_train_geometric": 3, "grey_dip": 3, "blue_dip": 1,
           "chromatic_flip": 1, "secular_fade": 2, "dip_train_periodic": 2, "dust_dip": 1, "step": 1}
+# Batch 4 (docs/dayone.md, rule v3): dip trains are the primary measure.
+COUNTS4 = {"dip_train_poisson": 4, "dip_train_primes": 4, "dip_train_geometric": 4, "grey_dip": 2, "blue_dip": 1,
+           "chromatic_flip": 1, "dip_train_periodic": 2, "dust_dip": 1, "step": 1}
 MIN_SIGMA = 5.0
 MAX_DRAWS = 200
+MAX_DRAWS_EXTERNAL = 3000   # most trains leave < 4 external events, so the conditioned draw needs more tries
 MIN_EXTERNAL = 100          # epochs in at least one external band
 # Batch 4: a dip train must also leave this many distinct dip events in the external epochs, so the recurrence
 # test (vetting.recurrence) has something to test. Single dips, fades and steps are not held to it.
@@ -131,7 +135,7 @@ def plan(host_ctx, lc_dir, external, rng, counts=COUNTS, min_external_events=0, 
                 continue
             t, _, s, span = vis
             ext_star = external[external["source_id"] == sid]
-            for _ in range(MAX_DRAWS):
+            for _ in range(MAX_DRAWS_EXTERNAL if min_external_events and fam in TRAINS else MAX_DRAWS):
                 sig = lcinj.sample(rng, fam, *gaia_stream.DR3_SPAN, t_ext=t_ext)
                 if np.max(np.abs(1 - sig.factor(t, "G"))) < MIN_SIGMA * s:
                     continue
@@ -168,6 +172,7 @@ def main(argv=None):
     p.add_argument("--recipient-file", action="append", required=True)
     p.add_argument("--min-external-events", type=int, default=0, help="dip trains must leave this many external dip events")
     p.add_argument("--half", default="batch3", help="label stored in each plan record")
+    p.add_argument("--counts", choices=("batch3", "batch4"), default="batch3")
     p.add_argument("--context", help="parquet with source_id, blend_tess_contamination (TESS dilution)")
     a = ap.parse_args(argv)
     rng = np.random.default_rng(int.from_bytes(os.urandom(32), "little"))
@@ -191,7 +196,8 @@ def main(argv=None):
             ctx = pd.read_parquet(a.context, columns=["source_id", "blend_tess_contamination"])
             contamination = dict(zip(ctx["source_id"].astype("int64"), ctx["blend_tess_contamination"]))
         records = plan(pd.read_parquet(a.hosts), a.lightcurves, pd.read_parquet(a.external), rng,
-                       min_external_events=a.min_external_events, half=a.half, contamination=contamination)
+                       counts=COUNTS4 if a.counts == "batch4" else COUNTS, min_external_events=a.min_external_events,
+                       half=a.half, contamination=contamination)
         digest = write_sealed(records, a.out, a.recipient_file)
         # Counts only. Never print anything derived from the plan beyond its size.
         print(f"sealed {len(records)} decoys to {a.out} (sha256 {digest})")
