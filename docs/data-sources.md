@@ -34,7 +34,7 @@ spectra, activity, literature.
 |---|---|---|---|---|---|---|
 | **Hipparcos** (van Leeuwen 2007) | I/311 | Long-baseline astrometry and photometry for bright stars (secular trends since 1991) | All sky, bright | VizieR TAP | none | CDS limits (below) |
 | **2MASS** PSC | final | JHK_s, epoch ~1998–2001 | All sky | IRSA TAP `fp_psc`; Gaia `tmass_psc_xsc_best_neighbour`; HATS `two_mass` | none | IRSA: none published; TAP async, avoid >2 GB per sync query |
-| **AllWISE** | final | W1–W4 | All sky | IRSA TAP `allwise_p3as_psd` | none | as IRSA |
+| **AllWISE** | final | W1–W4 | All sky | IRSA TAP `allwise_p3as_psd`; HATS `wise/allwise` (**column-shifted, see below**) | none | as IRSA |
 | **CatWISE2020** | final | W1/W2 + proper motions | All sky | IRSA `catwise_2020`, VizieR II/365, Data Lab `catwise2020.main` | none | as host |
 | **unWISE** | 2019 catalogue (neo7 coadds) | Deeper W1/W2, crowded fields | All sky | IRSA `unwise_2019`, Data Lab `unwise_dr1` | none | as host |
 | **NEOWISE-R** single exposure | final (mission ended 2024) | W1/W2 time series 2014–2024 | All sky, ~2 visits/yr | IRSA TAP `neowiser_p1bs_psd`; HEALPix Parquet on S3 `nasa-irsa-wise/wise/neowiser/catalogs/p1bs_psd/healpix_k5/` | none | Catalog engine truncates at 2 GB; use S3 Parquet for bulk |
@@ -51,6 +51,8 @@ spectra, activity, literature.
 | **SIMBAD** | live | Identifiers, types, bibliography | — | TAP (`simbad.cds.unistra.fr/simbad/sim-tap`) | none | **> 6 queries/s from one IP gets a temporary blacklist.** Upload tables to TAP instead of looping. |
 | **VizieR** | live | Published catalogues | — | TAPVizieR, X-Match | none | same CDS policy |
 | **ADS** | live | Literature record per object | — | ADS API | Token is a proxy-injected bearer secret for `api.adsabs.harvard.edu`; send no Authorization header ourselves | 5,000 search queries/day per token, resets 00:00 UTC; limits in response headers |
+
+**AllWISE HATS copy (`data.lsdb.io/hats/wise/allwise`), checked 2026-10-21:** from `ngrp` onward every column holds its right-hand neighbour's values (e.g. `w1mjdmean` contains `w2magp`), so the profile-fit fluxes, aperture magnitudes, mean MJDs, the 2MASS association and the x/y/z columns are wrong there. Columns before `ngrp` are correct and agree with DPAC's `allwise_best_neighbour` (574/574 matches in a test field): positions and `sig*`, `w?mpro`, `w?sigmpro`, `w?snr`, `w?rchi2`, `nb`, `na`, `w?sat`, the proper-motion block, `cc_flags`, `ext_flg`, `var_flg`, `ph_qual`, `det_bit`, `moon_lev`, `w?nm`, `w?m`, `w?cov`. `cosmos_search.xmatch` reads only those and uses a fixed epoch. For anything else use IRSA TAP.
 
 ## Supporting sources
 

@@ -464,3 +464,105 @@ def test_decoys_must_pass_the_queue_veto():
     assert len(seen) == 3
     with pytest.raises(RuntimeError):
         make_decoy(host, "grey_dip", np.random.default_rng(4), max_tries=50, veto=lambda c: ["always"])
+
+
+# --- Stage 0 ----------------------------------------------------------------
+
+
+def _one_epoch(cand, i, factors):
+    """Multiply epoch i of each band by its factor (G, BP and RP share epochs in gaia_like)."""
+    for lc in cand.lightcurves:
+        lc.flux[i] *= factors.get(lc.band, 1.0)
+    return cand
+
+
+def test_stage0_flags_a_g_only_dip_and_passes_coherent_ones():
+    from cosmos_search.vetting.stage0 import band_consistency, clean, veto
+    i = 40
+    cases = {
+        "band_inconsistent": {"G": 0.9},  # G dips, BP and RP flat
+        "consistent": {"G": 0.9, "BP": 0.9, "RP": 0.9},  # grey
+        "colour_fault": {"BP": 3.0},  # BP brightens threefold at an otherwise flat transit
+    }
+    for want, f in cases.items():
+        cand = _one_epoch(gaia_like(seed=1), i, f)
+        t = cand.lightcurves[0].time[i]
+        (row,) = band_consistency(cand, [{"t_min": t, "depth": 0.1}])
+        assert row["verdict"] == want, (want, row)
+    # A chromatic sign flip, BP down and RP up with G between, is no fault.
+    flip = _one_epoch(gaia_like(seed=1), i, {"BP": 0.8, "G": 0.95, "RP": 1.1})
+    (row,) = band_consistency(flip, [{"t_min": flip.lightcurves[0].time[i]}])
+    assert row["verdict"] == "consistent"
+    # G-only dips are vetoed and cleaned from G alone; BP/RP faults leave G alone.
+    g_only = _one_epoch(gaia_like(seed=1), i, {"G": 0.9})
+    assert veto(g_only) == ["band_inconsistent"]
+    cleaned, dropped = clean(g_only)
+    assert len(dropped) >= 1 and len(cleaned.lightcurves[0].time) < 120 and len(cleaned.lightcurves[1].time) == 120
+    assert not simple_dips(cleaned) or min(d["depth"] for d in simple_dips(cleaned)) < 0.05
+    bp_fault = _one_epoch(gaia_like(seed=1), i, {"BP": 3.0})
+    cleaned, dropped = clean(bp_fault)
+    assert len(cleaned.lightcurves[0].time) == 120 and len(cleaned.lightcurves[1].time) < 120
+
+
+def test_stage0_flags_inflated_errors_and_leaves_noisy_colours_untested():
+    from cosmos_search.vetting.stage0 import band_consistency
+    cand = gaia_like(seed=1)
+    i = 40
+    cand.lightcurves[0].flux[i] *= 0.9
+    cand.lightcurves[0].flux_err[i] *= 20
+    (row,) = band_consistency(cand, [{"t_min": cand.lightcurves[0].time[i]}])
+    assert row["verdict"] == "inflated_error"
+    noisy = gaia_like(seed=1)
+    for lc in noisy.lightcurves[1:]:
+        lc.flux_err[:] = 0.2  # BP/RP too poor to have shown a 10% dip
+    noisy.lightcurves[0].flux[i] *= 0.9
+    (row,) = band_consistency(noisy, [{"t_min": noisy.lightcurves[0].time[i]}])
+    assert row["verdict"] == "untested"
+
+
+def test_stage0_passes_injected_decoys():
+    from cosmos_search.vetting.stage0 import epoch_verdicts
+    host = gaia_like(seed=9, n=150)
+    for spec in ("grey_primes", "chromatic_flip", "dust_dip"):
+        cand, _, _ = make_decoy(host, spec, np.random.default_rng(3))
+        g0 = epoch_verdicts(host)["verdict"]
+        g1 = epoch_verdicts(cand)["verdict"]
+        new = (g1 == "band_inconsistent") & (g0 != "band_inconsistent")
+        assert not new.any(), spec
+
+
+def test_conformal_widening_restores_coverage():
+    rng = np.random.default_rng(0)
+    n = 400
+    mid = rng.normal(0, 1, n)
+    y = mid + rng.normal(0, 1, n)
+    half = np.full(n, 0.6)  # a nominal 80% interval would need 1.28: these are overconfident
+    s = scoring.conformal_widening(mid - half, mid + half, y[:n])
+    assert 1.8 < s < 2.5
+    lo, hi = scoring.widen(mid - half, mid + half, s)
+    assert 0.78 < scoring.interval_coverage(lo, hi, y) < 0.84
+    assert scoring.conformal_widening([0], [1], [0.5]) == np.inf
+
+
+def test_stage0_long_table_matches_the_candidate_path():
+    import pyarrow as pa
+    from cosmos_search.gaia.epoch import SCHEMA
+    from cosmos_search.vetting.stage0 import clean, clean_long, epoch_verdicts, verdict_counts
+    cand = _one_epoch(gaia_like(seed=1), 40, {"G": 0.9})
+    _one_epoch(cand, 70, {"RP": 4.0})
+    cols = {f.name: [] for f in SCHEMA}
+    for lc in cand.lightcurves:
+        n = len(lc.time)
+        for k, v in (("source_id", [7] * n), ("band", [lc.band] * n), ("t", lc.time), ("flux", lc.flux * 1e4),
+                     ("err", lc.flux_err * 1e4), ("flags", [0] * n), ("transit_id", np.arange(n) * 1000),
+                     ("fov", [1] * n), ("ccd_row", [1] * n), ("n_obs", [9] * n)):
+            cols[k] += list(v)
+    table = pa.table({k: pa.array(v).cast(SCHEMA.field(k).type) if k != "band" else pa.array(v).dictionary_encode()
+                      for k, v in cols.items()})
+    out, counts = clean_long(table)
+    want = verdict_counts(epoch_verdicts(cand)["verdict"])
+    assert counts.iloc[0].drop("source_id").to_dict() == want
+    assert want["stage0_n_band_inconsistent"] >= 1 and want["stage0_n_colour_fault"] >= 1
+    cleaned, _ = clean(cand)
+    bands = out.column("band").to_pylist()
+    assert [bands.count(b) for b in ("G", "BP", "RP")] == [len(lc.time) for lc in cleaned.lightcurves]

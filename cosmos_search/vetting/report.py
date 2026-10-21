@@ -116,6 +116,8 @@ def held_out_skill(verdicts, keys):
                 lo, hi = zip(*preds)
                 out[tid][split] = {"n": len(sub), "coverage_80": scoring.interval_coverage(lo, hi, truths),
                                    "interval_score": scoring.interval_score(lo, hi, truths)}
+                if split == "control":  # known answers: the widening to apply to real candidates' intervals
+                    out[tid][split]["conformal_widening_80"] = scoring.conformal_widening(lo, hi, truths)
             else:
                 y = np.array(truths, float)
                 base = np.mean([float(r[3]) for r in rs])  # base rate over the whole batch, not the split

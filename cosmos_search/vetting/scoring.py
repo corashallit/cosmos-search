@@ -49,6 +49,26 @@ def interval_coverage(lo, hi, y):
     return float(np.mean((y >= lo) & (y <= hi)))
 
 
+def conformal_widening(lo, hi, y, target=0.8):
+    """Factor s by which to scale intervals about their midpoints so that a new one covers with rate >= target.
+
+    Split-conformal on the score |y - mid| / half-width: the ceil((n + 1) * target)-th smallest score. This
+    guarantees coverage for an exchangeable new case whatever the vetter's errors look like, which matters
+    because the pilots' control intervals were too narrow (64-67% at a nominal 80%). inf if n is too small.
+    """
+    lo, hi, y = (np.asarray(a, float) for a in (lo, hi, y))
+    half = np.maximum((hi - lo) / 2, 1e-12)
+    scores = np.sort(np.abs(y - (hi + lo) / 2) / half)
+    k = int(np.ceil((len(scores) + 1) * target))
+    return float(scores[k - 1]) if k <= len(scores) else float("inf")
+
+
+def widen(lo, hi, s):
+    lo, hi = np.asarray(lo, float), np.asarray(hi, float)
+    mid, half = (hi + lo) / 2, (hi - lo) / 2
+    return mid - s * half, mid + s * half
+
+
 # --- Calibration ------------------------------------------------------------
 
 

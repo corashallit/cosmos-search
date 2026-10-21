@@ -16,6 +16,7 @@ import numpy as np
 from cosmos_search.gaia.archive import tap
 from cosmos_search.gaia.epoch import datalink_epoch_photometry
 from cosmos_search.inject.classes.vetting_decoys import vetting_batch
+from cosmos_search.vetting import stage0
 from cosmos_search.vetting.batch import simple_dips
 from cosmos_search.vetting.candidate import Candidate
 from cosmos_search.vetting.packet import HOLDOUT_TAIL
@@ -31,7 +32,9 @@ CONTROLS = {
     "AGN": ("extragalactic", ["astrophysical"], 2),
 }
 HOST_CLASSES = {"SOLAR_LIKE": 6, "RS": 6}
-DECOYS = {"grey_primes": 1, "grey_geometric": 1, "duration_tension": 2, "chromatic_flip": 2, "single_band_dip": 2, "dust_dip": 2,
+# No single_band_dip: Stage 0 removes G-only dips wherever BP and RP could show them, and where they cannot the
+# packet does not show the dip to be single-band, so the label would not be identifiable (docs/vetting.md §12).
+DECOYS = {"grey_primes": 1, "grey_geometric": 1, "duration_tension": 2, "chromatic_flip": 2, "dust_dip": 2,
           "periodic_grey": 2}
 SOURCE_COLS = "s.source_id, s.ra, s.dec, s.phot_g_mean_mag, s.bp_rp, s.parallax, s.parallax_error, s.ruwe, " \
               "s.ipd_frac_multi_peak, s.phot_bp_rp_excess_factor"
@@ -47,6 +50,8 @@ def select(cls, n, extra="", after=0):
 
 
 def candidates(rows, lc):
+    # Stage 0 first, as in the queue: a control's detected dip, and so its label, must be about the star.
+    lc, _ = stage0.clean_long(lc)
     out = []
     for r in rows:
         sid = int(r["source_id"])
@@ -74,6 +79,22 @@ def detected(c):
     return any(d["t_min"] < cut for d in simple_dips(cand))
 
 
+def n_epochs(c):
+    return len(c["lightcurves"][0]["time"])
+
+
+def match_cadence(targets, pool, n):
+    """n pool members whose epoch counts follow the targets': greedy nearest neighbour in log(epochs)."""
+    free, out = list(pool), []
+    want = [n_epochs(targets[i % len(targets)]) for i in range(n)] if targets else []
+    for w in want:
+        if not free:
+            break
+        j = min(range(len(free)), key=lambda k: abs(np.log(n_epochs(free[k]) / w)))
+        out.append(free.pop(j))
+    return out
+
+
 def fetch(out, after=0, pool=10):
     """Controls are drawn through the detector, as real candidates are; pilot 2's random class members mostly had
     no detected dips while every decoy did, so calibration on them would not transfer to the queue."""
@@ -86,11 +107,17 @@ def fetch(out, after=0, pool=10):
         rates[cls] = f"{len(hit)}/{len(cands)}"
         for c in hit[:n]:
             controls.append({**c, "label": label, "acceptable": acceptable, "aliases": [], "dpac_class": cls})
-    # Hosts from classes that also appear among the controls, so planted packets are not a separate population.
-    hosts = []
+    # Hosts from classes that also appear among the controls, so planted packets are not a separate population,
+    # and matched to the controls' cadence: pilot 3's unmatched hosts had a median of 67 epochs against the
+    # controls' 40, which the audit picked up (AUC 0.81). One host per control, nearest in log(epochs).
+    pool = []
     for cls, n in HOST_CLASSES.items():
-        rows = select(cls, n + 3, "AND s.phot_g_mean_mag BETWEEN 12 AND 17", after=after)
-        hosts += candidates(rows, datalink_epoch_photometry([int(s) for s in rows["source_id"]]))[:n]
+        rows = select(cls, n * 4, "AND s.phot_g_mean_mag BETWEEN 12 AND 17", after=after)
+        pool += candidates(rows, datalink_epoch_photometry([int(s) for s in rows["source_id"]]))
+    # The same random_index walk feeds both lists, so pilots 2 and 3 used some control stars as hosts too.
+    taken = {c["candidate_id"] for c in controls}
+    pool = [h for h in pool if h["candidate_id"] not in taken]
+    hosts = match_cadence(controls, pool, sum(HOST_CLASSES.values()))
     (out / "controls.jsonl").write_text("\n".join(json.dumps(c) for c in controls))
     (out / "hosts.jsonl").write_text("\n".join(json.dumps(h) for h in hosts))
     print(f"{len(controls)} controls, {len(hosts)} hosts; detector fired on {rates}")
@@ -100,7 +127,7 @@ def build(out):
     cfg = {"controls": str(out / "controls.jsonl"), "hosts": str(out / "hosts.jsonl"), "holdout": ["tail"],
            "decoys": DECOYS, "max_tries": 6000}
     rng = np.random.default_rng(int.from_bytes(__import__("os").urandom(16), "little"))
-    packets, truth, keys = vetting_batch(cfg, rng)
+    packets, truth, keys = vetting_batch(cfg, rng, veto=stage0.veto)
     (out / "products.json").write_text(json.dumps(packets))
     (out / "key.json").write_text(json.dumps(keys))
     (out / "truth.json").write_text(json.dumps(truth))
