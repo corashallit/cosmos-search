@@ -50,6 +50,8 @@ def select(cls, n, extra="", after=0):
 
 
 def candidates(rows, lc):
+    # Stage 0 first, as in the queue: a control's detected dip, and so its label, must be about the star.
+    lc, _ = stage0.clean_long(lc)
     out = []
     for r in rows:
         sid = int(r["source_id"])
@@ -64,10 +66,8 @@ def candidates(rows, lc):
                         "flux_err": (b["err"] / med).tolist(), "meta": {"fov": b["fov"].tolist(), "flags": b["flags"].tolist()}})
         if len(lcs) == 3:
             src = {k: (None if np.ma.is_masked(r[k]) else float(r[k])) for k in r.colnames if k != "source_id"}
-            raw = Candidate.from_dict({"candidate_id": f"gaia_dr3:{sid}", "arm": "gaia",
-                                       "source": {k: v for k, v in src.items() if v is not None}, "lightcurves": lcs})
-            # Stage 0 first, as in the queue: a control's detected dip, and so its label, must be about the star.
-            out.append(stage0.clean(raw)[0].to_dict())
+            out.append({"candidate_id": f"gaia_dr3:{sid}", "arm": "gaia",
+                        "source": {k: v for k, v in src.items() if v is not None}, "lightcurves": lcs})
     return out
 
 

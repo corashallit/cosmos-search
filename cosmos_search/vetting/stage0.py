@@ -47,6 +47,39 @@ def _matched(lc, t):
     return d, e
 
 
+VERDICTS = ("consistent", "band_inconsistent", "colour_fault", "inflated_error", "untested")
+
+
+def _robust(x):
+    x = x[np.isfinite(x)]
+    return robust_sigma(x) if len(x) >= 5 else 0.0
+
+
+def _assess(d_g, e_g, d_bp, e_bp, d_rp, e_rp, nsigma, err_ratio, w_range):
+    """Verdicts from per-G-epoch fractional changes and errors, with BP/RP NaN where the transit has none."""
+    ends = np.array([w * d_bp + (1 - w) * d_rp for w in w_range])
+    lo, hi = ends.min(axis=0), ends.max(axis=0)
+    outside = np.where(d_g > hi, d_g - hi, np.where(d_g < lo, d_g - lo, 0.0))
+    outside[~np.isfinite(lo)] = np.nan
+    e_other = np.fmax(e_bp, e_rp)
+    tested = np.isfinite(outside)
+    noise = np.fmax(np.hypot(e_g, e_other), _robust(d_g - 0.5 * (d_bp + d_rp)))
+    g_err_ratio = e_g / np.median(e_g)
+
+    def z(d, e):  # a band's change in units of its own scatter (or the epoch's error, if larger)
+        return np.abs(d) / np.fmax(e, _robust(d))
+
+    g_at_fault = z(d_g, e_g) > np.fmax(np.nan_to_num(z(d_bp, e_bp)), np.nan_to_num(z(d_rp, e_rp)))
+    verdict = np.full(len(d_g), "untested", dtype=object)
+    verdict[tested & (nsigma * e_other < np.abs(d_g))] = "consistent"
+    bad = tested & (np.abs(np.nan_to_num(outside)) > nsigma * noise)
+    verdict[bad & g_at_fault] = "band_inconsistent"
+    verdict[bad & ~g_at_fault] = "colour_fault"
+    verdict[g_err_ratio > err_ratio] = "inflated_error"
+    return {"verdict": verdict, "d_g": d_g, "d_bp": d_bp, "d_rp": d_rp, "outside": outside, "noise": noise,
+            "g_err_ratio": g_err_ratio}
+
+
 def epoch_verdicts(cand, nsigma=4.0, err_ratio=5.0, w_range=W_RANGE):
     """Per G epoch: a verdict and the numbers behind it, as a dict of arrays aligned with the G light curve.
 
@@ -57,35 +90,62 @@ def epoch_verdicts(cand, nsigma=4.0, err_ratio=5.0, w_range=W_RANGE):
     g = cand.band("G")
     if g is None:
         return None
-    t = g.time
     med = float(np.median(g.flux))
-    d_g, e_g = 1 - g.flux / med, g.flux_err / med
-    d_bp, e_bp = _matched(cand.band("BP"), t)
-    d_rp, e_rp = _matched(cand.band("RP"), t)
-    ends = np.array([w * d_bp + (1 - w) * d_rp for w in w_range])
-    lo, hi = ends.min(axis=0), ends.max(axis=0)
-    outside = np.where(d_g > hi, d_g - hi, np.where(d_g < lo, d_g - lo, 0.0))
-    outside[~np.isfinite(lo)] = np.nan
-    e_other = np.fmax(e_bp, e_rp)
-    tested = np.isfinite(outside)
-    resid = d_g - 0.5 * (d_bp + d_rp)
-    floor = robust_sigma(resid[tested]) if tested.sum() >= 5 else 0.0
-    noise = np.fmax(np.hypot(e_g, e_other), floor)
-    g_err_ratio = g.flux_err / np.median(g.flux_err)
+    ev = _assess(1 - g.flux / med, g.flux_err / med, *_matched(cand.band("BP"), g.time),
+                 *_matched(cand.band("RP"), g.time), nsigma, err_ratio, w_range)
+    return {"time": g.time, **ev}
 
-    def z(d, e):  # a band's change in units of its own scatter (or the epoch's error, if larger)
-        s = robust_sigma(d[np.isfinite(d)]) if np.isfinite(d).sum() >= 5 else 0.0
-        return np.abs(d) / np.fmax(e, s)
 
-    g_at_fault = z(d_g, e_g) > np.fmax(np.nan_to_num(z(d_bp, e_bp)), np.nan_to_num(z(d_rp, e_rp)))
-    verdict = np.full(len(t), "untested", dtype=object)
-    verdict[tested & (nsigma * e_other < np.abs(d_g))] = "consistent"
-    bad = tested & (np.abs(np.nan_to_num(outside)) > nsigma * noise)
-    verdict[bad & g_at_fault] = "band_inconsistent"
-    verdict[bad & ~g_at_fault] = "colour_fault"
-    verdict[g_err_ratio > err_ratio] = "inflated_error"
-    return {"time": t, "verdict": verdict, "d_g": d_g, "d_bp": d_bp, "d_rp": d_rp, "outside": outside,
-            "noise": noise, "g_err_ratio": g_err_ratio}
+def verdict_counts(verdicts):
+    """Per-source feature: how many G epochs got each verdict. Dropped epochs are counted, never silently lost:
+    the rate of faults per source and per sky region is an instrument diagnostic in its own right."""
+    v = np.asarray(verdicts, dtype=object)
+    return {f"stage0_n_{name}": int((v == name).sum()) for name in VERDICTS}
+
+
+def clean_long(table, nsigma=4.0, err_ratio=5.0, w_range=W_RANGE):
+    """Stage 0 on gaia.epoch's long light-curve table (one row per observation, G/BP/RP sharing transit_id).
+
+    Returns (table without the faulty measurements, pandas frame of per-source verdict_counts). Matching is
+    by transit_id, which is exact. For the statistics downstream to stay valid, run this before every
+    statistic that reads the light curves (dim and bright alike, so a mirrored null stays symmetric) and on
+    injected light curves too, so completeness is measured after cleaning.
+    """
+    import pandas as pd
+    import pyarrow as pa
+
+    df = table.to_pandas() if hasattr(table, "to_pandas") else table.copy()
+    band = df["band"].astype(str).to_numpy()
+    flux, err, tid = (df[c].to_numpy() for c in ("flux", "err", "transit_id"))
+    drop = np.zeros(len(df), bool)
+    counts = []
+    for sid, idx in df.groupby("source_id", sort=False).indices.items():
+        rows = {b: idx[(band[idx] == b) & np.isfinite(flux[idx])] for b in ("G", "BP", "RP")}
+        g = rows["G"]
+        if len(g) == 0:
+            counts.append({"source_id": sid, **verdict_counts([])})
+            continue
+        def changes(r):
+            f, e = flux[r], err[r]
+            med = float(np.median(f)) if len(f) else np.nan
+            return 1 - f / med, e / med
+
+        d_g, e_g = changes(g)
+        cols = []
+        for b in ("BP", "RP"):
+            d, e = changes(rows[b])
+            at = {t: i for i, t in enumerate(tid[rows[b]])}
+            j = np.array([at.get(t, -1) for t in tid[g]])
+            cols += [np.where(j >= 0, d[j], np.nan), np.where(j >= 0, e[j], np.nan)]
+        v = _assess(d_g, e_g, *cols, nsigma, err_ratio, w_range)["verdict"]
+        drop[g[np.isin(v, ARTEFACTS)]] = True
+        faulty = set(tid[g][v == "colour_fault"])
+        for b in ("BP", "RP"):
+            drop[rows[b][np.isin(tid[rows[b]], list(faulty))]] = True
+        counts.append({"source_id": sid, **verdict_counts(v)})
+    keep = ~drop
+    out = table.filter(pa.array(keep)) if isinstance(table, pa.Table) else df[keep]
+    return out, pd.DataFrame(counts)
 
 
 def band_consistency(cand, dips, **kw):

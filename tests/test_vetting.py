@@ -542,3 +542,27 @@ def test_conformal_widening_restores_coverage():
     lo, hi = scoring.widen(mid - half, mid + half, s)
     assert 0.78 < scoring.interval_coverage(lo, hi, y) < 0.84
     assert scoring.conformal_widening([0], [1], [0.5]) == np.inf
+
+
+def test_stage0_long_table_matches_the_candidate_path():
+    import pyarrow as pa
+    from cosmos_search.gaia.epoch import SCHEMA
+    from cosmos_search.vetting.stage0 import clean, clean_long, epoch_verdicts, verdict_counts
+    cand = _one_epoch(gaia_like(seed=1), 40, {"G": 0.9})
+    _one_epoch(cand, 70, {"RP": 4.0})
+    cols = {f.name: [] for f in SCHEMA}
+    for lc in cand.lightcurves:
+        n = len(lc.time)
+        for k, v in (("source_id", [7] * n), ("band", [lc.band] * n), ("t", lc.time), ("flux", lc.flux * 1e4),
+                     ("err", lc.flux_err * 1e4), ("flags", [0] * n), ("transit_id", np.arange(n) * 1000),
+                     ("fov", [1] * n), ("ccd_row", [1] * n), ("n_obs", [9] * n)):
+            cols[k] += list(v)
+    table = pa.table({k: pa.array(v).cast(SCHEMA.field(k).type) if k != "band" else pa.array(v).dictionary_encode()
+                      for k, v in cols.items()})
+    out, counts = clean_long(table)
+    want = verdict_counts(epoch_verdicts(cand)["verdict"])
+    assert counts.iloc[0].drop("source_id").to_dict() == want
+    assert want["stage0_n_band_inconsistent"] >= 1 and want["stage0_n_colour_fault"] >= 1
+    cleaned, _ = clean(cand)
+    bands = out.column("band").to_pylist()
+    assert [bands.count(b) for b in ("G", "BP", "RP")] == [len(lc.time) for lc in cleaned.lightcurves]

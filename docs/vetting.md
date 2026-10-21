@@ -397,7 +397,13 @@ mostly single BP or RP values tens of times the median.
 
 Consequences for the pilots:
 
-- `vetting_pilot.py fetch` cleans every control and host with `stage0.clean` before the detector runs, so a
+- `stage0.clean_long` runs the same test on `gaia.epoch`'s long light-curve table, matching bands by
+  `transit_id`, and returns per-source counts of each verdict as features. Dropped epochs are counted, never
+  silently lost, because the fault rate per source and per sky region is an instrument diagnostic. Any statistic
+  that reads the light curves should run after it, dim and bright sides alike so a mirrored null stays
+  symmetric, and so should injections, so completeness is measured after cleaning. `epoch_verdicts` is the
+  stable entry point for the DR4 stream's G-fault mask.
+- `vetting_pilot.py fetch` cleans every control and host with `stage0.clean_long` before the detector runs, so a
   control's detected dip, and with it the label, is about the star. Control stars are no longer reused as hosts:
   pilots 2 and 3 each had two stars in both roles, because both lists come from the same `random_index` walk.
 - `build` passes `stage0.veto` to `vetting_batch`, so every decoy must pass the queue's Stage 0.
