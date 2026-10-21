@@ -515,3 +515,9 @@ NEOs within 0.8 au can fall outside the widened cone.
   controls (an irregular pulsator the flag cannot tell from an occulter), 0/4 single events. v3a (S alone) got
   7/12: the agents read the test and mostly follow it. Out of sample, 3 of 39 testable Gaia DR3 EBs are flagged
   (periods near 1 d, aliased by ZTF's cadence). The gain is conditional on external coverage (docs/dayone.md).
+- 2026-10-21. Red-team review fixes (docs/dayone.md, "Review fixes and the confirmatory batch"). Control rates
+  from batches 2–4 are in-sample (the same 14 controls and 16 real packets throughout, also used in calibration).
+  Verdicts are now committed to `prereg/verdicts/` and must be on origin before a reveal; batches 1–4 were archived
+  only afterwards. A reserved pool of 135 controls in 9 DPAC classes, including spotted, RS CVn, chemically
+  peculiar stars and AGN, is sealed for one confirmatory batch, along with four held-out injection families and
+  pass criteria with stated power (`vetting.power`). The vetter's text no longer quotes calibration figures.
