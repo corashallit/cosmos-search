@@ -194,14 +194,16 @@ def search(t, in_dip, z, widths=WIDTHS, p_min=P_MIN, top_k=TOP_K):
 def test(lcs):
     """Packet test dict for a list of visible light curves (vetting.candidate.LightCurve)."""
     r = search(*epochs(lcs))
+    # What the test computes and what else produces the same result, but no calibration figures: those would
+    # make the vetter's score repeat the flag rather than weigh the light curve (docs/dayone.md, review fixes).
     r["description"] = (
         "Recurrence across all surveys: n_events distinct dips (epochs >= 4 robust sigma low and deeper than the largest brightening in their band, merged within 1 d); "
         "n_aligned of them fall in one or two pure phase windows (n_primary, n_secondary: two eclipses) at one "
         "strict period (period, d); purity = share of epochs in the primary window that are in dip; "
         "aligned_fraction = n_aligned / n_events. Eclipses give aligned_fraction near 1, dips that do not recur "
         "at one period give a small one. aperiodic is true when at least 2 events are left unexplained and "
-        "aligned_fraction <= 0.6; in calibration no injected strict-period train and 1 of 63 Gaia eclipsing "
-        "binaries met it, against about half of injected aperiodic trains with 4 or more events. "
+        "aligned_fraction <= 0.6. It says only that no single strict period explains the dips: spot evolution, "
+        "irregular pulsation, flaring and other variability of the star give dips that do not recur too. "
         "testable is false with fewer than 4 events, where any dips can be aligned by chance.")
     r["visible_only"] = True
     return r

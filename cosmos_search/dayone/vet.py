@@ -4,6 +4,7 @@
         --lightcurves stream/lightcurves [--context xm/context.parquet] [--external ext.parquet] \\
         [--plan decoys.json.age] --out vet/
     python -m cosmos_search.dayone.vet score --out vet/ --batch vet/batch [--plan plan.json.age]
+    # (commit with --archive and push first: score refuses to reveal until the archived verdicts are on origin)
 
 `build` writes products.json (packets), prompts/ and key.json. The key maps packet ids to candidates and
 roles; it carries no injection truth, because the vetting stage does not know which sources were injected.
@@ -23,6 +24,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from cosmos_search.inject import lightcurve as lc_families
 from cosmos_search.vetting import coincidence, sso, stage0
 from cosmos_search.vetting.batch import build_batch, simple_dips
 
@@ -41,10 +43,14 @@ P_U_SHORTLIST = 0.25        # pilots 2-3: probes 4/8 and controls 0/26 at P(unex
 # astrophysical leaves are as interesting as "unexplained", so the score is their sum. YSO dippers stay common.
 INTERESTING = ("disk_occultation", "debris_transit", "other_astrophysical", "unexplained")
 S_SHORTLIST = 0.35
+# The shortlist rule in force for the D2 freeze (docs/dayone.md). score_batch's headline keys, the printed summary
+# and shortlist.csv come from this rule; every other rule is reported under report["rules"] as a comparison.
+ADOPTED_RULE = "v3b"
 # Injected families an ideal v1 shortlist should keep; the others should read as EB, YSO or instrumental.
 TRAIN_FAMILIES = ("dip_train_poisson", "dip_train_primes", "dip_train_geometric")
 SINGLE_FAMILIES = ("grey_dip", "blue_dip", "chromatic_flip")
 COMMON_VARIABILITY = ("eclipsing_binary", "rotation_or_spots", "pulsation_or_irregular", "extragalactic")
+HELD_OUT_FAMILIES = lc_families.HELD_OUT_FAMILIES
 TARGET_FAMILIES = ("grey_dip", "blue_dip", "dip_train_poisson", "dip_train_primes", "dip_train_geometric",
                    "chromatic_flip", "secular_fade")
 
@@ -185,7 +191,8 @@ def interesting_score(class_probs):
     return float(sum(class_probs.get(k, 0.0) for k in INTERESTING))
 
 
-def build(queue, ranked, lc_dir, out, wide=None, rng=None, sso_check=True, plan_map=None, external=None):
+def build(queue, ranked, lc_dir, out, wide=None, rng=None, sso_check=True, plan_map=None, external=None,
+          pipeline_flags=True):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     rng = rng or np.random.default_rng(int.from_bytes(__import__("os").urandom(16), "little"))
@@ -197,20 +204,22 @@ def build(queue, ranked, lc_dir, out, wide=None, rng=None, sso_check=True, plan_
                     **(_control_label(c) if c["role"].startswith("control") else {})})
                for c in cands]
     # The batch detector, as a hook: with no hook, build_batch also clears the tests and scores.
-    packets, keys = build_batch(entries, rng, holdout=("tail",), detect=lambda c: setattr(c, "dips", simple_dips(c)))
+    packets, keys = build_batch(entries, rng, holdout=("tail",), detect=lambda c: setattr(c, "dips", simple_dips(c)),
+                                pipeline_flags=pipeline_flags)
     (out / "products.json").write_text(json.dumps(packets))
     (out / "key.json").write_text(json.dumps(keys))
     (out / "coincidence_flagged.json").write_text(json.dumps(flagged))
     return packets, keys
 
 
-def score_batch(out, batch, plan=None):
-    """Reveal the key (after commit), mark injected sources as decoys, score, and write the shortlist."""
+def score_batch(out, batch, plan=None, remote="origin"):
+    """Reveal the key (after commit, and once the archived verdicts are on `remote`), mark injected sources as
+    decoys, score, and write the shortlist under the adopted rule. remote=None skips the remote check (tuning)."""
     from cosmos_search.vetting.commit import load_verdicts, reveal
     from cosmos_search.vetting.report import decision, score
 
     out = Path(out)
-    keys = reveal(batch, out / "key.json")
+    keys = reveal(batch, out / "key.json", remote=remote)
     injected = {}
     if plan:
         from cosmos_search.inject.classes import gaia_stream
@@ -233,37 +242,55 @@ def score_batch(out, batch, plan=None):
                      "p_common": float(sum(v.class_probs.get(k, 0.0) for k in COMMON_VARIABILITY)) if v.ok else None,
                      "top_leaf": max(v.class_probs, key=v.class_probs.get) if v.ok else None})
     table = pd.DataFrame(rows).sort_values("p_unexplained", ascending=False)
-    short = table[(table.kind == "real") & (table.p_unexplained >= P_U_SHORTLIST)]
-    rep["shortlist"] = short.to_dict("records")
-    rep["shortlist_rule"] = f"real packets with P(unexplained) >= {P_U_SHORTLIST}"
     ctrl = table[table.kind == "control"]
-    rep["controls_flagged"] = {"k": int((ctrl.p_unexplained >= P_U_SHORTLIST).sum()), "n": len(ctrl)}
-    rep["v1"] = score_v1(table)
-    # Rule v3 (docs/dayone.md, batch 4): the recurrence test's flag as shown in each packet, and recall on the
-    # dip trains (the families the test exists for) and on single-event families separately.
+    rules = {"v0": {"rule": f"real packets with P(unexplained) >= {P_U_SHORTLIST}",
+                    "shortlist": table[(table.kind == "real") & (table.p_unexplained >= P_U_SHORTLIST)].to_dict("records"),
+                    "controls_flagged": {"k": int((ctrl.p_unexplained >= P_U_SHORTLIST).sum()), "n": len(ctrl)}},
+             "v1": score_v1(table)}
+    rep["v1"] = rules["v1"]
+    # Rule v3 (docs/dayone.md, batch 4): the recurrence test's flag, and recall on the dip trains (the families
+    # the test exists for) and on single-event families separately. The flag comes from the key, which holds the
+    # pipeline's tests whether or not the packet showed them; batches built before that read it from the packet.
     packets = json.loads((out / "products.json").read_text())
-    flags = {p["packet_id"]: bool(p["tests"].get("recurrence", {}).get("aperiodic", False)) for p in packets}
+    flags = {p["packet_id"]: bool(keys[p["packet_id"]].get("pipeline", p["tests"]).get("recurrence", {})
+                                  .get("aperiodic", False)) for p in packets}
     table["aperiodic"] = table.packet_id.map(flags).fillna(False)
-    rep["v3"] = {"v3a": score_v1(table, targets=TRAIN_FAMILIES),
-                 "v3b": score_v1(table, flag="aperiodic", targets=TRAIN_FAMILIES),
+    table["pipeline_shown"] = table.packet_id.map(lambda pid: keys[pid].get("pipeline_shown", True))
+    rules["v3a"] = score_v1(table, targets=TRAIN_FAMILIES)
+    rules["v3b"] = score_v1(table, flag="aperiodic", targets=TRAIN_FAMILIES)
+    rep["v3"] = {"v3a": rules["v3a"], "v3b": rules["v3b"],
                  "single_events_v3b": score_v1(table, flag="aperiodic", targets=SINGLE_FAMILIES)["target_decoy_recall"]}
     # Rule v4 (docs/dayone.md, batch 5): v3b or the single-event test's flag; recall on single-event decoys, and
     # controls flagged separately for batch 3's controls and the single-eclipse EB controls.
-    single = {p["packet_id"]: bool(p["tests"].get("single_event", {}).get("single_dip_flag", False)) for p in packets}
+    single = {p["packet_id"]: bool(keys[p["packet_id"]].get("pipeline", p["tests"]).get("single_event", {})
+                                   .get("single_dip_flag", False)) for p in packets}
     table["single_dip"] = table.packet_id.map(single).fillna(False)
     table["v4"] = table["aperiodic"] | table["single_dip"]
     # Secondary, reported only (red-team R1): the single-dip flag counts unless the vetter puts most of its mass on
     # a common variability class.
     table["v4g"] = table["aperiodic"] | (table["single_dip"] & (table["p_common"].fillna(1.0) < 0.5))
-    rep["v4"] = {"single_events_v4": score_v1(table, flag="v4", targets=SINGLE_FAMILIES),
+    rules["v4"] = score_v1(table, flag="v4", targets=SINGLE_FAMILIES)
+    rules["v4g"] = score_v1(table, flag="v4g", targets=SINGLE_FAMILIES)
+    rep["v4"] = {"single_events_v4": rules["v4"],
                  "single_events_v3b": score_v1(table, flag="aperiodic", targets=SINGLE_FAMILIES),
                  "flag_alone_single_events": score_v1(table, threshold=float("inf"), flag="single_dip",
                                                       targets=SINGLE_FAMILIES),
-                 "single_events_v4g": score_v1(table, flag="v4g", targets=SINGLE_FAMILIES)}
+                 "single_events_v4g": rules["v4g"]}
     for role in sorted(set(table.role_in_queue.dropna()) & {"control", "control_single_eb"}):
         sub = table[(table.kind != "control") | (table.role_in_queue == role)]
         rep["v4"][f"{role}_flagged"] = score_v1(sub, flag="v4")["controls_flagged"]
         rep["v4"][f"{role}_flagged_v4g"] = score_v1(sub, flag="v4g")["controls_flagged"]
+    held = (table.kind == "decoy") & table.injected_family.isin(HELD_OUT_FAMILIES)
+    if held.any():
+        rep["held_out_recall"] = {r: score_v1(table, flag="aperiodic" if r == "v3b" else None,
+                                              targets=HELD_OUT_FAMILIES)["target_decoy_recall"] for r in ("v3a", "v3b")}
+    rep["rules"] = rules
+    adopted = rules[ADOPTED_RULE]
+    rep["adopted_rule"] = ADOPTED_RULE
+    rep["shortlist_rule"] = adopted["rule"]
+    rep["shortlist"] = adopted["shortlist"]
+    rep["controls_flagged"] = adopted["controls_flagged"]
+    pd.DataFrame(adopted["shortlist"]).to_csv(out / "shortlist.csv", index=False)
     table.to_csv(out / "verdicts_table.csv", index=False)
     (out / "report.json").write_text(json.dumps(rep, indent=2, sort_keys=True, default=str))
     return rep, table
@@ -280,7 +307,7 @@ def score_v1(table, threshold=S_SHORTLIST, flag=None, targets=TARGET_FAMILIES):
     if flag is not None:
         hit = hit | ok[flag].fillna(False).astype(bool)
     target = (ok.kind == "decoy") & ok.injected_family.isin(targets)
-    other = (ok.kind == "decoy") & ~ok.injected_family.isin(TARGET_FAMILIES)
+    other = (ok.kind == "decoy") & ~ok.injected_family.isin(TARGET_FAMILIES + HELD_OUT_FAMILIES)
     ctrl = ok.kind == "control"
 
     def rate(mask):
@@ -319,6 +346,8 @@ DECOY_LABELS = {
     "step": {"label": "calibration_offset", "acceptable": ["instrumental", "unexplained"], "role": "incoherent"},
     "chromatic_flip": {"label": "unexplained", "acceptable": ["unexplained", "instrumental"], "role": "incoherent"},
     "g_only": {"label": "other_instrumental", "acceptable": ["instrumental"], "role": "incoherent"},
+    **{f: {"label": "unexplained", "acceptable": ["astrophysical", "unexplained"], "role": "ambiguous"}
+       for f in HELD_OUT_FAMILIES},
 }
 
 
@@ -334,23 +363,33 @@ def main(argv=None):
     b.add_argument("--no-sso", action="store_true")
     b.add_argument("--external", help="dayone.external fetch output: ZTF and TESS bands for the packets")
     b.add_argument("--plan", help="sealed decoy plan to inject at build time (dayone.decoys; needs COSMOS_REVEAL_KEY)")
+    b.add_argument("--hide-pipeline-flags", action="store_true",
+                   help="leave the pipeline's tests (recurrence) out of the packets; they stay in the key for scoring")
     s = sub.add_parser("score")
     s.add_argument("--out", required=True)
     s.add_argument("--batch", required=True)
     s.add_argument("--plan")
+    s.add_argument("--unpublished", action="store_true",
+                   help="reveal without checking that the archived verdicts are on origin (tuning batches only)")
     a = ap.parse_args(argv)
     if a.cmd == "build":
         wide = pd.read_parquet(a.context) if a.context else None
         from cosmos_search.inject.classes.gaia_stream import load_plan
         packets, _ = build(pd.read_parquet(a.queue), pd.read_parquet(a.ranked), a.lightcurves, a.out, wide,
                            sso_check=not a.no_sso, plan_map=load_plan(a.plan) if a.plan else None,
-                           external=pd.read_parquet(a.external) if a.external else None)
+                           external=pd.read_parquet(a.external) if a.external else None,
+                           pipeline_flags=not a.hide_pipeline_flags)
         from cosmos_search.vetting.__main__ import main as vmain
         vmain(["prompts", "--packets", str(Path(a.out) / "products.json"), "--out", str(Path(a.out) / "prompts")])
         print(f"{len(packets)} packets")
     else:
-        rep, table = score_batch(a.out, a.batch, a.plan)
-        print(json.dumps({k: rep[k] for k in ("n", "shortlist_rule", "controls_flagged") if k in rep}, indent=2))
+        rep, table = score_batch(a.out, a.batch, a.plan, remote=None if a.unpublished else "origin")
+        adopted = rep["rules"][rep["adopted_rule"]]
+        summary = {"adopted_rule": rep["adopted_rule"], "shortlist_rule": rep["shortlist_rule"],
+                   "shortlist": [r["candidate_id"] for r in rep["shortlist"]],
+                   **{k: adopted[k] for k in ("target_decoy_recall", "controls_flagged", "real_flagged") if k in adopted}}
+        print(json.dumps(summary, indent=2, default=str))
+        print("comparisons:", ", ".join(f"{r}: {len(v['shortlist'])} shortlisted" for r, v in rep["rules"].items()))
         print(table.to_string(index=False))
     return 0
 

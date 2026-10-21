@@ -7,8 +7,10 @@
     python -m cosmos_search.vetting api --packets products.json --replies run/replies --model <model id>
     # 2b. ...or have an orchestrating session's no-tool subagents write run/replies/<packet_id>.txt
 
-    # 3. Parse and commit (verdicts become immutable)
-    python -m cosmos_search.vetting commit --packets products.json --replies run/replies --vetter <label> --batch run/batch
+    # 3. Parse and commit (verdicts become immutable), archive them in the repo as a git commit, and push it
+    python -m cosmos_search.vetting commit --packets products.json --replies run/replies --vetter <label> \
+        --batch run/batch --archive prereg/verdicts/<batch name>
+    git push        # reveal refuses until the archive commit is on origin
 
     # 4. Only now open the key and score
     python -m cosmos_search.vetting score --batch run/batch --key reveal.json.age --out run/report.json
@@ -20,7 +22,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .commit import commit, load_verdicts, reveal
+from .commit import _sha, commit, load_verdicts, reveal
 from .report import score
 from .verdict import SCHEMA_TEXT, failed, parse
 
@@ -70,12 +72,13 @@ def cmd_commit(args):
     for p in _packets(args.packets):
         f = Path(args.replies) / f"{p['packet_id']}.txt"
         verdicts.append(parse(f.read_text(), p, args.vetter) if f.exists() else failed(p["packet_id"], args.vetter, "no reply"))
-    rec = commit(verdicts, args.batch)
+    extra = {"plan_sha256": _sha(args.plan)} if args.plan else None
+    rec = commit(verdicts, args.batch, archive=args.archive, allow_dirty=args.allow_dirty, extra=extra)
     print(json.dumps(rec, indent=2))
 
 
 def cmd_score(args):
-    keys = reveal(args.batch, args.key)
+    keys = reveal(args.batch, args.key, remote=None if args.unpublished else "origin")
     rep = score(load_verdicts(args.batch), keys)
     Path(args.out).write_text(json.dumps(rep, indent=2, sort_keys=True))
     print(f"report at {args.out}")
@@ -99,11 +102,15 @@ def main(argv=None):
     s.add_argument("--replies", required=True)
     s.add_argument("--vetter", required=True)
     s.add_argument("--batch", required=True)
+    s.add_argument("--archive", help="directory in the repo to commit the verdicts to (push before revealing)")
+    s.add_argument("--plan", help="sealed decoy plan; its sha256 goes into commit.json")
+    s.add_argument("--allow-dirty", action="store_true", help="commit with uncommitted changes to tracked files")
     s.set_defaults(fn=cmd_commit)
     s = sub.add_parser("score")
     s.add_argument("--batch", required=True)
     s.add_argument("--key", required=True)
     s.add_argument("--out", required=True)
+    s.add_argument("--unpublished", action="store_true", help="skip the check that the archive is on origin")
     s.set_defaults(fn=cmd_score)
     args = ap.parse_args(argv)
     args.fn(args)

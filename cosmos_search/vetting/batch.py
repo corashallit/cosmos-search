@@ -56,7 +56,7 @@ def harmonise(cands, detect=None):
     return cands
 
 
-def build_batch(entries, rng, holdout=(), detect=None):
+def build_batch(entries, rng, holdout=(), detect=None, pipeline_flags=True):
     """entries: list of (Candidate, key_extra). Returns (packets, keys) in a shuffled order.
 
     key_extra carries kind, label, role, acceptable, aliases, and for decoys the
@@ -65,7 +65,7 @@ def build_batch(entries, rng, holdout=(), detect=None):
     cands = harmonise([e[0] for e in entries], detect)
     packets, keys = [], []
     for cand, (_, extra) in zip(cands, entries):
-        packet, key = build(cand, holdout=holdout)
+        packet, key = build(cand, holdout=holdout, pipeline_flags=pipeline_flags)
         key.update(extra)
         packets.append(packet)
         keys.append(key)
