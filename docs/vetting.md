@@ -296,6 +296,16 @@ and colour, and with the recurrence the epochs allow. Pilot-2 vetters used exact
 Gaia arm's anomaly score, and the next probe family, at per-event physics. Timing claims go to dense follow-up
 (TESS, ZTF).
 
+That family is `duration_tension` (`vetting/physics.py`). An occulter crossing a star of radius R* in time D moves
+at v ≲ 2R*/D, so any orbit carrying it has P ≥ (π/4) G M* D³ / R*³. That is 0.9 d for a 106.5 min dip on the Sun
+and 6.3 yr for a 1 d dip. Eccentricity relaxes this by up to ((1 − e)/(1 + e))^{3/2}, about 0.012 at e = 0.9.
+The decoy is a set of identical grey, flat-bottomed dips 0.5–4 d long, recurring at less than a tenth of that
+relaxed floor. It is accepted only when the shown epochs prove both halves. One event must show in-dip epochs
+≥ 0.25 d apart. Events must be separated by an epoch back at baseline. The shortest spacing must sit a factor 3
+inside the floor computed from the *observed* duration, which covers R* and M* estimated from G, BP − RP and
+parallax. On the pilot-2 dwarf hosts about 1 draw in 250 qualifies, which is 20 times the timing probes. The
+subgiant hosts give no tension, as the physics says they should.
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -310,3 +320,5 @@ Gaia arm's anomaly score, and the next probe family, at per-event physics. Timin
   over the full span, injected into every flux channel with photon-noise errors, and must trigger the detector.
   Flips must show both halves, and anomaly probes must defeat eccentric-binary solutions with ≥ 4 events. The
   prompt names the detected dips as the thing to classify.
+- 2026-10-21. Added the `duration_tension` anomaly-probe family: per-event physics that sparse cadence can show,
+  where timing cannot.
