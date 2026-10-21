@@ -65,12 +65,14 @@ the MAST copy.
 
 ## 3. Two-stage experts
 
-**Stage A, blind physical interpretation.** Each expert subagent receives one packet: anonymised ID,
-coordinates rotated or withheld, distance, photometry, SED, light-curve features and plots, spectra,
-detector outputs and residuals. Decoys and controls are mixed in at a hidden ~10% rate (statistics.md §6).
-The expert agent is defined in `.claude/agents/expert-blind.md` with **no tools**; the packet is inlined
-in its prompt. With no tools it cannot read files, run code or reach the network. Its output is a
-structured verdict: explanation class, probability, and the evidence it used.
+**Stage A, blind physical interpretation.** Each expert receives one packet: random packet ID, sky position
+reduced to coarse galactic and ecliptic latitude, distance, photometry, light curves re-zeroed in time, detector
+outputs and FP tests (vetting.md §4). Controls and decoys are made indistinguishable packet by packet; because
+the expert is stateless, most of them run in a separate calibration batch, with a small in-stream fraction as a
+drift check (statistics.md §6). The expert has **no tools** and the packet is inlined in its prompt, so it
+cannot read files, run code or reach the network: preferably a Messages API call with no tools, otherwise the
+subagent `.claude/agents/expert-blind.md`, which deny-lists every tool. Its output is a structured verdict:
+class probabilities, predictions for withheld data, the evidence it used, and whether it recognises the object.
 
 **Commit, then reveal.** Stage A verdicts for a batch are committed (file plus SHA-256 in the run log)
 before anything about the batch is revealed. The packet → real-ID map, in which decoys map to "decoy", is
