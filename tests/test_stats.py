@@ -3,7 +3,7 @@ import pytest
 
 from cosmos_search.inject.recovery import completeness, wilson
 from cosmos_search.stats import (
-    audit_inclusion, bh, cauchy_combine, empirical_p, gpd_fit, horvitz_thompson,
+    TailSketch, audit_inclusion, bh, cauchy_combine, empirical_p, gpd_fit, horvitz_thompson,
     poisson_sample, storey_pi0, stratified_p, tail_p,
 )
 
@@ -135,3 +135,55 @@ def test_completeness_map():
     assert c.rows()[0]["depth_lo"] == pytest.approx(1e-3)
     lo, hi = wilson(0, 0)
     assert (lo, hi) == (0, 1)
+
+
+def _stream(rng, n_files, per_file, max_exact, edges):
+    sk, everything = TailSketch(edges, max_exact), []
+    for _ in range(n_files):
+        v = rng.standard_t(3, per_file)
+        everything.append(v)
+        sk.add(v)
+    return sk, np.concatenate(everything)
+
+
+def test_tail_sketch_is_exact_in_the_tail_and_bounded():
+    rng = np.random.default_rng(11)
+    edges = np.linspace(-20, 20, 4001)
+    sk, null = _stream(rng, 50, 20_000, 5_000, edges)
+    assert sk.n == null.size == 1_000_000
+    assert sk.exact.size <= 5_000
+    s = np.array([sk.u, sk.u + 1, 8.0, 15.0])
+    s = s[s >= sk.u]
+    p, _ = sk.p(s, min_exceed=1)
+    assert np.allclose(p, empirical_p(s, null))
+    # Below u: counts whole bins, so never more significant than the exact empirical p.
+    low = np.array([-1.0, 0.0, 0.5, 1.0])
+    assert (sk.p(low)[0] >= empirical_p(low, null)).all()
+    assert np.allclose(sk.p(low)[0], empirical_p(low, null), rtol=1e-2)
+
+
+def test_tail_sketch_extrapolates_like_tail_p():
+    rng = np.random.default_rng(12)
+    edges = np.linspace(-20, 20, 4001)
+    sk, null = _stream(rng, 10, 20_000, 10_000, edges)
+    s = np.array([60.0, 200.0])
+    p_sketch, far = sk.p(s)
+    p_full, _ = tail_p(s, null)
+    assert far.all()
+    assert np.allclose(p_sketch, p_full)
+
+
+def test_tail_sketch_merge_matches_one_pass_and_roundtrips():
+    import json
+
+    edges = np.linspace(-20, 20, 401)
+    a, null_a = _stream(np.random.default_rng(13), 5, 10_000, 2_000, edges)
+    b, null_b = _stream(np.random.default_rng(14), 5, 10_000, 3_000, edges)
+    b = TailSketch.from_dict(json.loads(json.dumps(b.to_dict())))
+    merged = a.merge(b)
+    null = np.concatenate([null_a, null_b])
+    assert merged.n == null.size
+    s = np.array([merged.u, 6.0, 9.0])
+    assert np.allclose(merged.p(s, min_exceed=1)[0], empirical_p(s, null))
+    with pytest.raises(ValueError):
+        merged.merge(TailSketch(np.linspace(0, 1, 3)))
