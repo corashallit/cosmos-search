@@ -1,0 +1,123 @@
+import math
+
+import numpy as np
+
+from cosmos_search.ebfilter import search as S
+from cosmos_search.inject import lightcurve as lcinj
+from cosmos_search.inject.classes.eclipsing_binary import EclipsingBinary
+from cosmos_search.residual import model as M
+from cosmos_search.vetting.candidate import LightCurve
+
+SUN_AT_100PC = {"phot_g_mean_mag": 9.7, "bp_rp": 0.82, "parallax": 10.0, "parallax_error": 0.02}
+
+
+def _cadence(rng, n_nights=400, span=1200.0):
+    nights = np.sort(rng.choice(int(span), n_nights, replace=False)).astype(float)
+    t = np.concatenate([nights + rng.uniform(0.15, 0.35, n_nights), nights[::3] + rng.uniform(0.36, 0.45)])
+    return np.sort(t)
+
+
+def _eb(period=2.7, t_peri=0.3):
+    return EclipsingBinary(period=period, t_peri=t_peri, ecc=0.0, omega=math.pi / 2, incl=math.radians(89.0),
+                           r1=1.0, r2=0.8, m1=1.0, m2=0.8, t1=5800.0, t2=5000.0)
+
+
+def _mid_primary(eb, near):
+    tt = np.linspace(near, near + eb.period, 200001)
+    return float(tt[np.argmin(eb.factor(tt, "G"))])
+
+
+def _star(rng, extra=None, noise=0.005):
+    """A ZTF-like r band and a Gaia-like G band (60 epochs, three of them at mid-primary eclipse, so the star's
+    G-to-ZTF depth ratio can be measured) of one EB, times an optional extra signal factor. Both bands get the
+    r-band eclipse depths: colour is the calibration's business, not the logic's."""
+    eb = _eb()
+    t_z = _cadence(rng)
+    t_g = np.sort(np.r_[rng.uniform(0, 1200, 57), [_mid_primary(eb, x) for x in (200.0, 600.0, 1000.0)]])
+    out = []
+    for band, t in (("ztf_r", t_z), ("G", t_g)):
+        k = eb.factor(t, "ztf_r") * (extra(t) if extra else 1.0)
+        out.append(LightCurve(band, t, k * (1 + noise * rng.standard_normal(len(t))), np.full(len(t), noise)))
+    return eb, out
+
+
+def _force_g_epoch(rng, eb, lcs, depth_factor):
+    """Put a G epoch at mid-eclipse of a cycle with no ZTF epoch nearby, multiplied by depth_factor."""
+    g = lcs[1]
+    t_min = _mid_primary(eb, eb.t_peri + eb.period * 150)
+    f = eb.factor(np.array([t_min]), "ztf_r")[0] * depth_factor
+    g.time = np.r_[g.time, t_min]
+    g.flux = np.r_[g.flux, f]
+    g.flux_err = np.r_[g.flux_err, 0.005]
+    o = np.argsort(g.time)
+    g.time, g.flux, g.flux_err = g.time[o], g.flux[o], g.flux_err[o]
+    return t_min
+
+
+def test_plain_eb_is_demoted_and_leaves_nothing():
+    rng = np.random.default_rng(11)
+    eb, lcs = _star(rng)
+    t_target = _force_g_epoch(rng, eb, lcs, 1.0)
+    v = M.run(lcs, SUN_AT_100PC, t_target)
+    assert v["baseline"] == "eclipse" and v["eb_explained"]
+    assert v["target_in_window"] and not v["target_residual"]
+    assert v["n_residual_events_elsewhere"] == 0
+    assert v["demote"] and not v["eb_residual"]
+
+
+def test_extra_dip_inside_an_eclipse_is_a_residual():
+    """The EB filter's weak spot: a dip that lands on an eclipse. The sum is deeper than the eclipse at that phase."""
+    rng = np.random.default_rng(12)
+    eb, lcs = _star(rng)
+    t_target = _force_g_epoch(rng, eb, lcs, 0.6)              # 40% extra dimming at mid-eclipse
+    v = M.run(lcs, SUN_AT_100PC, t_target)
+    assert v["baseline"] == "eclipse"
+    assert v["target_in_window"] and v["target_residual"]
+    assert not v["demote"] and v["eb_residual"]
+
+
+def test_aperiodic_train_on_an_eb_survives_in_the_residuals():
+    rng = np.random.default_rng(13)
+    sig = None
+    for _ in range(50):
+        sig = lcinj.sample(rng, "dip_train_poisson", 0.0, 1200.0)
+        tt = np.linspace(0, 1200, 20001)
+        if np.sum(np.diff((sig.factor(tt, "ztf_r") < 0.9).astype(int)) == 1) >= 8:
+            break
+    eb, lcs = _star(rng, extra=lambda t: sig.factor(t, "ztf_r"))
+    raw = S.labels(lcs)
+    assert (raw[1] == 1).sum() > 0
+    v = M.run(lcs, SUN_AT_100PC, None)
+    assert v["baseline"] == "eclipse"
+    assert v["n_residual_events"] >= 4
+    assert not v["demote"]
+
+
+def test_constant_baseline_keeps_every_dip():
+    rng = np.random.default_rng(14)
+    t = _cadence(rng)
+    sig = lcinj.sample(rng, "grey_dip", float(t[0]), float(t[-1]))
+    lc = LightCurve("ztf_r", t, sig.factor(t, "ztf_r") * (1 + 0.005 * rng.standard_normal(len(t))),
+                    np.full(len(t), 0.005))
+    v = M.run([lc], SUN_AT_100PC, None)
+    assert v["baseline"] == "constant"
+    assert v["n_residual_dip_epochs"] == int((S.labels([lc])[1] == 1).sum())
+    assert not v["demote"] and not v["eb_residual"]
+
+
+def test_residual_lightcurves_drop_explained_epochs_and_their_bp_rp():
+    t = np.arange(20.0)
+    lcs = [LightCurve("G", t, np.ones(20), np.full(20, 0.01)),
+           LightCurve("BP", t + 0.001, np.ones(20), np.full(20, 0.01)),
+           LightCurve("ztf_r", t + 0.5, np.ones(20), np.full(20, 0.01))]
+    idx = np.array([[0, i] for i in range(20)] + [[2, i] for i in range(20)])
+    tt = np.r_[t, t + 0.5]
+    drop = np.zeros(40, bool)
+    drop[[3, 25]] = True
+    excess = np.zeros(40)
+    excess[7] = 0.2
+    out = M.residual_lightcurves(lcs, idx, tt, drop, excess)
+    assert len(out[0].time) == 19 and 3.0 not in out[0].time
+    assert len(out[1].time) == 19                                   # BP follows G's transit
+    assert len(out[2].time) == 19 and 5.5 not in out[2].time
+    assert abs(out[0].flux[list(out[0].time).index(7.0)] - 1.2) < 1e-12
