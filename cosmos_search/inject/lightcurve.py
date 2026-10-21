@@ -230,13 +230,15 @@ def sample(rng, family, t_min, t_max):
                    ingress=dur / 2, egress=dur / 2, shape="gaussian")
     if family in ("dip_train_poisson", "dip_train_periodic", "dip_train_primes", "dip_train_geometric"):
         kind = family.removeprefix("dip_train_")
+        # Priors scale with the span, so a 27 d TESS sector and a 2000 d Gaia baseline both get
+        # several events per train. Only the chosen kind's prior is drawn.
         kw = {
-            "poisson": {"rate_per_day": _loguniform(rng, 3 / span, 30 / span)},
-            "periodic": {"period": _loguniform(rng, 1.0, span / 3)},
-            "primes": {"unit": _loguniform(rng, 0.5, span / 200)},
-            "geometric": {"unit": _loguniform(rng, 0.5, 20.0), "ratio": rng.uniform(1.05, 1.6)},
-        }[kind]
-        depth, dur = _loguniform(rng, 0.005, 0.3), _loguniform(rng, 0.05, 5.0)
+            "poisson": lambda: {"rate_per_day": _loguniform(rng, 3 / span, 30 / span)},
+            "periodic": lambda: {"period": _loguniform(rng, span / 30, span / 3)},
+            "primes": lambda: {"unit": _loguniform(rng, span / 2000, span / 200)},
+            "geometric": lambda: {"unit": _loguniform(rng, span / 400, span / 20), "ratio": rng.uniform(1.05, 1.6)},
+        }[kind]()
+        depth, dur = _loguniform(rng, 0.005, 0.3), _loguniform(rng, 0.05, min(5.0, span / 20))
         dips = [Dip(t0=float(t0), covering=depth, ingress=dur / 4, egress=dur / 4, flat=dur / 2)
                 for t0 in event_times(rng, kind, t_min, t_max, **kw)]
         return Composite(dips)
