@@ -40,7 +40,7 @@ def test_process_file_publishes_to_durable_store_and_resumes(tmp_path, monkeypat
     assert feat.num_rows == 9 and 123 in lc["source_id"].to_pylist()
     assert feat.schema.metadata[b"control_fraction"] == b"0.01"
     sk = sketches.read(durable / "sketches" / "EpochPhotometry_000001-000002.json.gz")
-    assert set(sk) == {"dim|G=18.0", "bright|G=18.0"} and sk["dim|G=18.0"].n == 9
+    assert set(sk) == {"dim|G=18.0|n=20-40", "bright|G=18.0|n=20-40"} and sk["dim|G=18.0|n=20-40"].n == 9
     assert not list((out / "features").glob("*.parquet"))  # local copies removed after publishing
 
 
@@ -74,9 +74,17 @@ def test_mirror_sketches_merge_like_one_pass(tmp_path):
     for i, f in enumerate(parts):
         paths.append(tmp_path / f"{i}.json.gz")
         sketches.write(paths[-1], sketches.MirrorSketches().add(f).to_dict())
-    merged = sketches.merge(paths)["dim|G=15.0"]
+    merged = sketches.merge(paths)["dim|G=15.0|n=40-80"]
     whole = -pd.concat(parts)["min_z_rob"].to_numpy()
     assert merged.n == whole.size
     s = np.quantile(whole, [0.99, 0.995, 0.999])
     p, _ = merged.p(s, min_exceed=1)  # exact counts, no GPD extrapolation
     np.testing.assert_allclose(p, [(1 + (whole >= x).sum()) / (1 + whole.size) for x in s])
+
+
+def test_mirror_sketches_stratify_by_transit_count():
+    import pandas as pd
+
+    f = pd.DataFrame({"n_g": [9, 10, 19, 20, 79, 80, 300], "med_flux_g": 1000.0, "min_z_rob": -1.0, "max_z_rob": 1.0})
+    keys = {k: sk.n for k, sk in sketches.MirrorSketches().add(f).sketches().items() if k.startswith("dim")}
+    assert keys == {"dim|G=18.0|n=10-20": 2, "dim|G=18.0|n=20-40": 1, "dim|G=18.0|n=40-80": 1, "dim|G=18.0|n=80+": 2}
