@@ -57,6 +57,20 @@ Ingredients for the detectors in docs/arms/gaia-dimmers.md, one row per source. 
 - `control` marks a deterministic 1% random subset (splitmix64 of source_id with a public salt). These are
   controls, not injections, so the salt being public does not affect blinding.
 
+## Stage 0 cleaning (features-v1-stage0)
+
+`source_features` removes the measurements that `vetting.stage0.clean_long` marks as instrument faults before
+computing anything: G epochs whose change lies outside what BP and RP allow (`band_inconsistent`) or whose
+error is > 5× the median (`inflated_error`), and BP/RP measurements at `colour_fault` transits. The cleaning
+applies to faint and bright statistics alike, so the mirror null stays symmetric, and injections go through
+the same path (`clean=True` is the default). Per source it adds `stage0_n_<verdict>` counts and the
+uncleaned extremes `min_z_raw` and `max_z_raw`. The DR3 pass on the share predates this (`dr3-features-v0`).
+
+On one DR3 chunk of 2,000 sources, cleaning removed 6 of 381 dips ≤ −8σ but 29 of 160 bright spikes ≥ +8σ.
+Faults are not symmetric between the two sides, so a null drawn from uncleaned bright tails would be too
+wide. Cleaning triples the CPU cost per source: 3.3 s instead of 1.1 s per 2,000 sources, mostly in
+`clean_long`'s per-source loop, which is the part to vectorise before the DR4 stream.
+
 ## What the DR3 pass keeps
 
 Features for every source. Full light curves only where `keep_light_curve` is true: `min_z_rob ≤ −5`,

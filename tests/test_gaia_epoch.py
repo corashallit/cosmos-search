@@ -110,3 +110,20 @@ def test_control_mask_is_deterministic_and_near_one_percent():
     m = features.control_mask(ids)
     assert np.array_equal(m, features.control_mask(ids))
     assert 0.009 < m.mean() < 0.011
+
+
+def test_stage0_removes_g_only_faults_but_keeps_grey_dips():
+    rng = np.random.default_rng(7)
+    g = 10_000 + rng.uniform(-20, 20, 40)
+    grey = g.copy()
+    grey[10] *= 0.6
+    fault = g.copy()
+    fault[10] *= 0.6
+    flat = 10_000 + rng.uniform(-20, 20, 40)
+    lc = epoch.read_epoch_csv(synth_csv([(1, grey, {}), (2, fault, {"bp": flat * 0.5, "rp": flat * 0.8})]))
+    f = features.source_features(lc).set_index("source_id")
+    assert f.loc[1, "min_z_rob"] < -50 and f.loc[1, "stage0_n_band_inconsistent"] == 0
+    assert f.loc[2, "min_z_raw"] < -50 and f.loc[2, "stage0_n_band_inconsistent"] == 1
+    assert f.loc[2, "min_z_rob"] > -5
+    raw = features.source_features(lc, clean=False).set_index("source_id")
+    assert raw.loc[2, "min_z_rob"] < -50 and "stage0_n_consistent" not in raw
