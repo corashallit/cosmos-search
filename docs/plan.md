@@ -68,14 +68,14 @@ These apply to every arm and every thread.
 | **Decision and freeze** | | | |
 | D1 | Compare arms on equal footing: recovery on injections and vetting cost per surviving candidate; reallocate effort | G4, T4, A3, V3 | DR4 plan thread → Cora |
 | D2 | Freeze `dr4-day-one`: queries, thresholds, code, pre-registered analysis | D1, G7; before DR4 | DR4 plan thread |
-| D3 | DR4 day one: TAP prefilter and a random full-light-curve channel (sees DPAC-rejected transits the prefilter cannot) → DataLink pull → detectors → ranking → vetting | D2, DR4 release | all |
+| D3 | DR4 day one: TAP prefilter → DataLink pull of the top ~10⁴; full bulk stream of epoch photometry with detectors per file (falls back to a random DataLink channel if there are no bulk files) → ranking → vetting | D2, DR4 release | all |
 | D4 | Shortlist with measured recall and false-positive rate; decide on outreach to technosignature groups | D3 | Cora |
 
 ## Open decisions
 
 | Item | Status |
 |---|---|
-| Size of the random full-light-curve channel on day one (arms/gaia-dimmers.md step 2) | Set at D1 from DR3: the channel's yield per source pulled vs the prefilter's, against DataLink capacity |
+| Day-one stream capacity (arms/gaia-dimmers.md) | Is DR4 epoch photometry on the CDN at release (DR3's was)? If yes, how many sessions split the bulk stream. If no, the size of the random DataLink channel, set at D1 from DR3 yields |
 | Durable store | Deferred; ~50–100 GB is enough for this track (storage.md) |
 | Vetting budget | ~10³, ~10⁴ outer limit (decided) |
 | Collaborators for follow-up | After D4. Candidates: Wright group (Penn State), Project Hephaistos (Uppsala), Boyajian (LSU) |

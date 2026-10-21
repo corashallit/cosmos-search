@@ -50,25 +50,37 @@ calibration offsets (caught by the FoV test), and photometric outliers DPAC alre
 
 ## Day-one strategy for DR4
 
-DR4 epoch photometry is 121.8 × 10⁹ rows (7.2 TB). We cannot pull it all, and DataLink serves at most ~5,000
-sources per call with 5 jobs in parallel. So:
+DR4 epoch photometry is 121.8 × 10⁹ rows (7.2 TB). Two routes reach it, at very different rates (measured on
+DR3 on 2026-10-21; docs/infra/targets.md):
 
-1. **TAP-side prefilter** on the variability summary tables (DR4 `vari_summary`, ~4 × 10⁸ rows), using
-   statistics that respond to a one-sided faint tail: skewness, the minimum relative to the median in units
-   of the per-source noise, and the number of low points. The exact query is prepared on DR3's
-   `vari_summary` and adapted to DR4's draft data model before release (milestone G7).
-2. **Random full-light-curve channel**: pull ~10⁵ sources' full epoch photometry, including transits DPAC
-   rejected, drawn with known inclusion probabilities (`stats.audit`). This is a search channel as well as a
-   control. `vari_summary` statistics exclude rejected transits, so the prefilter cannot see a dip that
-   DPAC's variability processing threw out. On DR3 so far, 7.9% of sources have a rejected point ≥ 3σ faint
-   in an otherwise quiet light curve, and the prefilter recalls 0.3% of them (docs/infra/targets.md). DR4's
-   `vari_epoch_flags` is DataLink-only, so the channel can only be reached by pulling light curves. Most of
-   these points will be cosmic rays and CCD defects, which the per-CCD G test separates from real dips, so
-   sources in this channel with a rejected faint point also get per-CCD G. Injecting into the same sample
-   measures the prefilter's recall, and Horvitz–Thompson weights turn what the channel finds into an
-   all-sky rate.
-3. **DataLink pull** for the top ~10⁵–10⁶ by prefilter score, per-CCD G for the top ~10⁵.
-4. Run detectors on both channels, calibrate against nulls, rank, and send the top ~10³ to vetting.
+- **DataLink** caps at 50 source IDs per call and costs ~11 s per call plus ~1.1 s per source. Calls in
+  parallel gave no speed-up, so it delivers ~1.5 sources/s: 10⁴ sources in ~2 h, 10⁵ in ~18 h.
+- **Bulk CDN files** stream and parse at ~29 MB/s on one 4-core container, CPU-bound. If DR4's epoch
+  photometry is on the CDN at release, as DR3's was, a full pass takes ~3 days on one container and
+  proportionally less when the file list is split across several sessions.
+
+The bulk stream changes the design. It reaches every source, including the transits DPAC rejected, which the
+`vari_summary` prefilter cannot see. On DR3 so far, 7.9% of sources have a rejected point ≥ 3σ faint in an
+otherwise quiet light curve, and the prefilter recalls 0.3% of them. With the full stream, the prefilter is
+no longer a selection: it only decides what we look at first. So:
+
+1. **TAP-side prefilter** on DR4 `vari_summary` (~4 × 10⁸ rows), using statistics that respond to a
+   one-sided faint tail: skewness, the minimum relative to the median in units of the per-source noise, and
+   the number of low points. It is prepared on DR3 and adapted to the draft data model (G7).
+2. **DataLink on day one** for the top ~10⁴ by prefilter score, with per-CCD G. This gives the first ranked
+   candidates within hours of release.
+3. **Full bulk stream from day one**, with detectors run on each file as it lands. Only compact outputs are
+   kept (storage.md):
+   - a feature row for every source above a loose cut, plus full light curves for a random sample drawn with
+     known inclusion probabilities (`stats.audit`), which give injection hosts and recall measurements;
+   - per-stratum **tail sketches** for the null. Each stratum keeps every dimming and brightening statistic
+     above its 10⁻⁴ quantile exactly, with a fine histogram below. The mirror null then stays exact where
+     thresholds are set (statistics.md §2), without keeping 1.8 × 10⁹ rows.
+   - The stream must resume after a container is reclaimed, so it records which files it has processed.
+4. **Fallback if DR4 has no bulk files at release.** The random full-light-curve channel then goes through
+   DataLink at ~10⁵ sources per ~18 h, which is still large enough to measure the rejected-transit channel
+   and the prefilter's recall. DataLink limits for DR4 may differ from DR3's, so re-measure them on the day.
+5. Rank across all channels, calibrate against nulls, and send the top ~10³ to vetting.
 
 The DR3 rehearsal (G1–G6) runs the same chain on DR3's 11.75 M variable sources. DR3 has only per-transit G,
 so the per-CCD test is DR4-only.
@@ -89,3 +101,6 @@ Record changes of approach here, with the evidence that prompted them.
   `vari_summary` prefilter is blind to dips in DPAC-rejected transits (7.9% of DR3 sources processed so far
   have a quiet light curve with a ≥ 3σ faint rejected point; the prefilter recalls 0.3% of them). Sampling
   is with known inclusion probabilities so the channel's yield extrapolates to the whole sky.
+- **2026-10-21.** DataLink caps at 50 IDs per call (~1.5 sources/s), while bulk CDN streaming runs at ~29 MB/s.
+  Day one becomes a DataLink pull of the prefilter's top ~10⁴ plus a full bulk stream, so the prefilter only
+  sets the order of work. The random DataLink channel stays as the fallback if DR4 has no bulk files.

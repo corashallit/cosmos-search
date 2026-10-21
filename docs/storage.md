@@ -16,15 +16,15 @@ Per-source sizes are DR4 totals divided by 1.8 × 10⁹ sources.
 |---|---|---|
 | DR3 epoch photometry, all variables (bulk CDN files) | 1.175 × 10⁷ | 74 GB transfer; stream to features (~1–2 GB kept) |
 | DR3 `vari_summary` subset | ~10⁷ | ~2 GB |
-| DR4 epoch photometry (~4 kB/source): prefilter top + random controls | ~10⁶ + 10⁵ | ~5 GB |
-| DR4 per-CCD G (~13 kB/source) | ~10⁵ | ~1.5 GB |
-| DR4 epoch astrometry (~34 kB/source) | ~10⁵ | ~3.5 GB |
+| DR4 epoch photometry, full bulk stream | 1.8 × 10⁹ | 7.2 TB transfer, not kept. Kept: feature rows above a loose cut (~10⁷ × ~100 B ≈ 1 GB), random full light curves (~10⁶ × ~4 kB ≈ 4 GB), per-stratum null tail sketches (< 1 GB) |
+| DR4 per-CCD G via DataLink (~13 kB/source) | ~10⁴ | ~0.1 GB |
+| DR4 epoch astrometry via DataLink (~34 kB/source; 62 TB in total, too large to stream) | ~10⁴ | ~0.3 GB |
 | WISE / 2MASS / SIMBAD cross-match rows | ~10⁶ | ~1 GB |
 | TESS FFI cutouts | streamed per target | features only, < 1 GB |
 | Vetting packets, injections, run manifests | — | < 5 GB |
 | **Durable total** | | **~20–30 GB** |
 
-The DR3 rehearsal can stream from the CDN through local disk without a durable store. The durable store
+The DR3 rehearsal and the DR4 bulk stream both pass through local disk one file at a time without a durable store; only their outputs need one. The durable store
 matters once injected products from the truth repo need to reach the analysis side (milestone V3) and for
 keeping DR4 pulls across sessions.
 
