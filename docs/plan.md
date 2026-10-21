@@ -45,12 +45,12 @@ These apply to every arm and every thread.
 | I2 | Gaia DR3 epoch photometry streamed to per-source features (bulk CDN files and DataLink) | I1 | Archive thread |
 | I3 | Versioned target queries with a freeze manifest | I1 | Archive thread |
 | I4 | Durable store | Cora | Cora |
-| I5 | Proper-motion-aware cross-match to WISE family, 2MASS, SIMBAD/VSX | I1 | unassigned |
+| I5 | Proper-motion-aware cross-match to WISE family, 2MASS, SIMBAD/VSX | I1 | Cross-match thread |
 | **Gaia dimmers (main)** | | | |
 | G1 | DR3 rehearsal sample: full DR3 epoch photometry (11.75 M) plus random controls | I2 | unassigned |
-| G2 | Detectors v0: invariance tests (FoV pairs, bands), dip colour, secular trend, surprisal score | G1 | unassigned |
+| G2 | Detectors v0: invariance tests (FoV pairs, bands), dip colour, secular trend, surprisal score | G1 | TESS thread's survey-agnostic detector in `dimming/`, then Gaia-specific tests |
 | G3 | Empirical nulls (brightening mirror, stratified permutation) and calibrated false-alarm rates | G2 | unassigned |
-| G4 | Injection families and recovery maps on DR3 | G2, inject core ✓ | unassigned |
+| G4 | Injection families (library ✓ `inject/lightcurve.py`) and recovery maps on DR3 | G2 | DR4 plan thread (library); detector owner (maps) |
 | G5 | Energy-budget test against WISE | I5, G2 | unassigned |
 | G6 | Ranking with value term, plus a random-audit stream below threshold | G3, G4, G5 | unassigned |
 | G7 | DR4 adapters from the draft data model (per-CCD G, new vari tables) | I3 | Archive thread |
@@ -62,9 +62,9 @@ These apply to every arm and every thread.
 | A2 | Nested model fits (single, acceleration, 1–2 Keplerians) plus VIM and scan-angle terms | A1 | unassigned |
 | A3 | Injections of non-gravitational motion into real residuals | A2 | unassigned |
 | **Vetting** | | | |
-| V1 | Packet builder and anonymiser | G6 | unassigned |
-| V2 | Stage A / Stage B agents, decoys and known-answer controls (KIC 8462852 and other known dippers) | V1, truth repo ✓ | unassigned |
-| V3 | Vetting rehearsal on DR3 candidates; measure confabulation and calibration | V2, I4 | unassigned |
+| V1 | Packet builder and anonymiser | G6 | Vetting thread |
+| V2 | Stage A / Stage B agents, decoys and known-answer controls (KIC 8462852 and other known dippers) | V1, truth repo ✓ | Vetting thread |
+| V3 | Vetting rehearsal on DR3 candidates; measure confabulation and calibration | V2, I4 | Vetting thread |
 | **Decision and freeze** | | | |
 | D1 | Compare arms on equal footing: recovery on injections and vetting cost per surviving candidate; reallocate effort | G4, T4, A3, V3 | DR4 plan thread → Cora |
 | D2 | Freeze `dr4-day-one`: queries, thresholds, code, pre-registered analysis | D1, G7; before DR4 | DR4 plan thread |

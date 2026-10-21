@@ -19,7 +19,9 @@ Several Claude threads work in this repo at once. These rules keep them out of e
 | `cosmos_search/tess/` | TESS aperiodic dimmers | FFI access, light curves |
 | `cosmos_search/dimming/` | TESS aperiodic dimmers (first), then shared | Dip detection and features used by both arms |
 | `cosmos_search/inject/` | DR4 plan and repo layout | Injector core and sealing; arms add classes in `inject/classes/` |
-| `cosmos_search/astrometry/`, `vetting/`, `xmatch/` | unassigned | Later milestones |
+| `cosmos_search/vetting/` | Candidate vetting | Packets, anonymiser, decoys, scoring (V1–V3) |
+| `cosmos_search/xmatch/` | Multi-survey cross-match | Proper-motion-aware matching (I5) |
+| `cosmos_search/astrometry/` | unassigned | Non-Keplerian arm (A1–A3) |
 | `docs/` | DR4 plan and repo layout | Arms own their page under `docs/arms/` and `docs/infra/` |
 
 To change a package you don't own, message its owner thread first.
