@@ -223,10 +223,10 @@ masked events had been seen at that point; nothing about where on the sky or at 
 
 ## 11. Data and code
 
-- Compact light curves: `python /home/user/pop/stream_compact.py` (this run's container; 3,386 files, 9.3 GB, Stage 0
+- Compact light curves: `python scripts/population_stream_compact.py` ( 3,386 files, 9.3 GB, Stage 0
   applied with blend fractions). G flux and relative error, DPAC flags, FoV, BP/RP fractional change at the same
   transit. Regenerated from the bulk CDN files in about 70 min on 4 cores.
-- Astrometry: one TAP query per 1/24 of the sky, joining `vari_summary`, `gaia_source`, `external.gaiaedr3_distance`
+- Astrometry (`scripts/population_fetch_astrometry.py`): one TAP query per 1/24 of the sky, joining `vari_summary`, `gaia_source`, `external.gaiaedr3_distance`
   and `vari_classifier_result`. 11,754,237 rows, on the share at
   `data/gaia-dr3-epoch/aux/aux_astrometry.parquet`.
 - Code: `cosmos_search/population/` (`run.py` drives the steps, `calibrate.py` the universes);
