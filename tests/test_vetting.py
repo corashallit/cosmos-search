@@ -29,7 +29,9 @@ def gaia_like(cid="gaia_dr3:4567890123456789", dip_at=None, seed=0, n=120):
     return Candidate.from_dict({
         "candidate_id": cid, "arm": "gaia", "lightcurves": lcs,
         "source": {"source_id": 4567890123456789, "ra": 301.56, "dec": 44.46, "phot_g_mean_mag": 11.73,
-                   "bp_rp": 0.55, "parallax": 2.2, "parallax_error": 0.02, "ruwe": 1.01},
+                   "bp_rp": 0.55, "parallax": 2.2, "parallax_error": 0.02, "ruwe": 1.01,
+                   "phot_bp_n_obs": n, "phot_bp_n_blended_transits": 0, "phot_rp_n_obs": n,
+                   "phot_rp_n_blended_transits": 0},
         "scores": {"surprisal": 1e-6}, "tests": {"fov_invariance": {"statistic": 0.3, "p": 0.7}},
         "context": {"ir_excess_sigma": 0.4},
     })
@@ -559,10 +561,49 @@ def test_stage0_long_table_matches_the_candidate_path():
             cols[k] += list(v)
     table = pa.table({k: pa.array(v).cast(SCHEMA.field(k).type) if k != "band" else pa.array(v).dictionary_encode()
                       for k, v in cols.items()})
-    out, counts = clean_long(table)
+    out, counts = clean_long(table, blend={7: 0.0})
     want = verdict_counts(epoch_verdicts(cand)["verdict"])
     assert counts.iloc[0].drop("source_id").to_dict() == want
     assert want["stage0_n_band_inconsistent"] >= 1 and want["stage0_n_colour_fault"] >= 1
     cleaned, _ = clean(cand)
     bands = out.column("band").to_pylist()
     assert [bands.count(b) for b in ("G", "BP", "RP")] == [len(lc.time) for lc in cleaned.lightcurves]
+
+
+def test_stage0_keeps_corroborated_and_diluted_changes():
+    from cosmos_search.vetting.stage0 import band_consistency, dilution_floor
+    i = 40
+    # A real 10% dip seen in all three bands, on a transit whose G error is inflated, is kept.
+    cand = _one_epoch(gaia_like(seed=1), i, {"G": 0.9, "BP": 0.9, "RP": 0.9})
+    cand.lightcurves[0].flux_err[i] *= 20
+    (row,) = band_consistency(cand, [{"t_min": cand.lightcurves[0].time[i]}])
+    assert row["verdict"] == "consistent"
+    # An eclipsing binary blended in BP/RP: BP and RP see a third of each eclipse. The eclipses are not faults.
+    eb = gaia_like(seed=2, n=150)
+    for lc in eb.lightcurves:
+        ecl = (np.arange(len(lc.time)) % 15) == 0
+        lc.flux[ecl] *= 1 - (0.3 if lc.band == "G" else 0.1)
+    eb.source.update(phot_bp_n_blended_transits=150, phot_rp_n_blended_transits=150)
+    g = eb.lightcurves[0]
+    rows = band_consistency(eb, [{"t_min": t} for t in g.time[::15]])
+    assert {r["verdict"] for r in rows} == {"consistent"} and 0.1 < rows[0]["r_lo"] < 0.35
+    # A quiet star that is often blended cannot have its G-only dips told from diluted real ones.
+    quiet = _one_epoch(gaia_like(seed=1), i, {"G": 0.9})
+    quiet.source.update(phot_bp_n_blended_transits=60, phot_rp_n_blended_transits=60)
+    (row,) = band_consistency(quiet, [{"t_min": quiet.lightcurves[0].time[i]}])
+    assert row["verdict"] == "untested"
+    assert dilution_floor(np.zeros(10), np.ones(10), np.zeros(10), np.zeros(10), None) == 0.0
+
+
+def test_stage0_long_table_survives_a_source_without_bp():
+    import pyarrow as pa
+    from cosmos_search.gaia.epoch import SCHEMA
+    from cosmos_search.vetting.stage0 import clean_long
+    n = 30
+    rows = {"source_id": [1] * n, "band": ["G"] * n, "t": np.arange(n, dtype=float), "flux": np.ones(n),
+            "err": np.full(n, 0.01), "flags": [0] * n, "transit_id": np.arange(n), "fov": [1] * n,
+            "ccd_row": [1] * n, "n_obs": [9] * n}
+    table = pa.table({k: pa.array(v).cast(SCHEMA.field(k).type) if k != "band" else pa.array(v).dictionary_encode()
+                      for k, v in rows.items()})
+    out, counts = clean_long(table, blend={1: 0.0})
+    assert out.num_rows == n and counts.iloc[0]["stage0_n_untested"] == n
