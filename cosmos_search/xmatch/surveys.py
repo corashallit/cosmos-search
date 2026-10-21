@@ -156,8 +156,10 @@ SURVEYS = {s.name: s for s in [
         hats=f"{HATS}/wise/allwise",
         notes="Coadd of 2010.0-2011.1. W3/W4 for energy-budget tests; W3/W4 detections near bright stars "
               "are often spurious, so keep cc_flags and the rchi2 columns. The data.lsdb.io copy is shifted by "
-              "one column from ngrp onward (w?flux, aperture mags, w?mjd*, the 2MASS columns, x/y/z hold "
-              "the next column's values; checked against IRSA 2026-10-21), so use only columns before ngrp "
+              "one column from use_src onward: its schema has a use_src column the data lack, so use_src, "
+              "best_use_cntr, ngrp, w?flux, aperture mags, w?mjd*, the 2MASS columns and x/y/z each hold the "
+              "next column's values (all 187 such columns checked against IRSA 2026-10-21). Use only columns "
+              "before use_src "
               "from it, and a fixed epoch rather than w1mjdmean.",
     ),
     Survey(
