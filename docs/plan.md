@@ -41,8 +41,8 @@ These apply to every arm and every thread.
 | # | Milestone | Depends on | Owner |
 |---|---|---|---|
 | **Infrastructure** | | | |
-| I1 | Shared HTTP/TAP client with per-host policies and cache | — | Archive thread |
-| I2 | Gaia DR3 epoch photometry streamed to per-source features (bulk CDN files and DataLink) | I1 | Archive thread |
+| I1 | Shared HTTP/TAP client with per-host policies and cache ✓ | — | Archive thread |
+| I2 | Gaia DR3 epoch photometry streamed to per-source features (bulk CDN files and DataLink) ✓ | I1 | Archive thread |
 | I3 | Versioned target queries with a freeze manifest | I1 | Archive thread |
 | I4 | Durable store | Cora | Cora |
 | I5 | Proper-motion-aware cross-match to WISE family, 2MASS, SIMBAD/VSX | I1 | Cross-match thread |
@@ -53,7 +53,7 @@ These apply to every arm and every thread.
 | G4 | Injection families (library ✓ `inject/lightcurve.py`) and recovery maps on DR3 (binning ✓ `inject/recovery.py`) | G2 | DR4 plan thread (library); detector owner (maps) |
 | G5 | Energy-budget test against WISE | I5, G2 | unassigned |
 | G6 | Ranking with value term, plus a random-audit stream below threshold (audit sampler ✓ `stats/audit.py`) | G3, G4, G5 | unassigned |
-| G7 | DR4 adapters from the draft data model (per-CCD G, new vari tables) | I3 | Archive thread |
+| G7 | DR4 adapters from the draft data model (per-CCD G, new vari tables); I3 and G7 in review (docs/infra/targets.md) | I3 | Archive thread |
 | **TESS dimmers (side)** | | | |
 | T1–T4 | FFI access, detector in `dimming/`, injections, 10⁴-target comparison run | I1 | TESS thread |
 | T5 | TESS cross-check of Gaia candidates | T1, G6 | TESS thread |
@@ -68,13 +68,14 @@ These apply to every arm and every thread.
 | **Decision and freeze** | | | |
 | D1 | Compare arms on equal footing: recovery on injections and vetting cost per surviving candidate; reallocate effort | G4, T4, A3, V3 | DR4 plan thread → Cora |
 | D2 | Freeze `dr4-day-one`: queries, thresholds, code, pre-registered analysis | D1, G7; before DR4 | DR4 plan thread |
-| D3 | DR4 day one: TAP prefilter → DataLink pull → detectors → ranking → vetting | D2, DR4 release | all |
+| D3 | DR4 day one: TAP prefilter and a random full-light-curve channel (sees DPAC-rejected transits the prefilter cannot) → DataLink pull → detectors → ranking → vetting | D2, DR4 release | all |
 | D4 | Shortlist with measured recall and false-positive rate; decide on outreach to technosignature groups | D3 | Cora |
 
 ## Open decisions
 
 | Item | Status |
 |---|---|
+| Size of the random full-light-curve channel on day one (arms/gaia-dimmers.md step 2) | Set at D1 from DR3: the channel's yield per source pulled vs the prefilter's, against DataLink capacity |
 | Durable store | Deferred; ~50–100 GB is enough for this track (storage.md) |
 | Vetting budget | ~10³, ~10⁴ outer limit (decided) |
 | Collaborators for follow-up | After D4. Candidates: Wright group (Penn State), Project Hephaistos (Uppsala), Boyajian (LSU) |
