@@ -80,9 +80,22 @@ def blend_for(source_ids, path):
     return dict(zip(ids[ok].tolist(), frac[j][ok].tolist()))
 
 
-def process_file(info, out, durable=None, feature_cut=None, sketch=None, blend=None):
+_PLAN = {}
+
+
+def injection_plan(path):
+    """The sealed injection plan (inject.classes.gaia_stream), decrypted in memory once per worker."""
+    if path not in _PLAN:
+        from cosmos_search.inject.classes import gaia_stream
+        _PLAN[path] = gaia_stream.load_plan(path)
+    return _PLAN[path]
+
+
+def process_file(info, out, durable=None, feature_cut=None, sketch=None, blend=None, inject=None, keep=None):
     """Process one bulk file. feature_cut: pandas query string for which feature rows to keep (default all).
     blend: Parquet of gaia_source's stage0.BLEND_COLS; without it Stage 0 leaves quiet sources untested.
+    inject: sealed injection plan, applied to every chunk before Stage 0 and features.
+    keep: (|z| threshold, control fraction) for which light curves to keep (features.keep_light_curve).
     sketch: factory for a per-file accumulator with add(features DataFrame) and to_dict() (for example
     sketches.MirrorSketches); it sees every source, before feature_cut, and is written as gzipped JSON."""
     out = Path(out)
@@ -96,21 +109,26 @@ def process_file(info, out, durable=None, feature_cut=None, sketch=None, blend=N
         b"source_file": info["name"].encode(),
         b"control_fraction": str(features.CONTROL_FRACTION).encode(),
         b"control_salt": hex(features.CONTROL_SALT).encode(),
-        b"keep_rule": b"features.keep_light_curve",
+        b"keep_rule": f"features.keep_light_curve{tuple(keep) if keep else ''}".encode(),
+        b"injected": b"sealed plan" if inject else b"none",
         b"feature_cut": (feature_cut or "").encode(),
     }
     tmp = {k: p.with_suffix(".tmp") for k, p in paths.items()}
     writers = {}
     acc = sketch() if sketch is not None else None
+    keep_rule = keep
     n_src = n_feat = n_kept = n_rows = 0
     try:
         with get_client().streamed(info["url"], md5=info.get("md5")) as path:
             for lc in epoch.iter_epoch_csv(path):
+                if inject:
+                    from cosmos_search.inject.classes import gaia_stream
+                    lc = gaia_stream.apply(lc, injection_plan(inject))
                 bl = blend_for(lc["source_id"].to_numpy(), blend) if blend else None
                 feat = features.source_features(lc, blend=bl)
                 if acc is not None:
                     acc.add(feat)
-                keep = feat["source_id"].to_numpy()[features.keep_light_curve(feat)]
+                keep = feat["source_id"].to_numpy()[features.keep_light_curve(feat, *(keep_rule or ()))]
                 kept = lc.filter(pc.is_in(lc["source_id"], value_set=pa.array(keep)))
                 n_src, n_kept, n_rows = n_src + len(feat), n_kept + len(keep), n_rows + lc.num_rows
                 if feature_cut:
@@ -161,7 +179,8 @@ def _publish(paths, durable, name, rec):
         p.unlink(missing_ok=True)
 
 
-def run(out, workers, limit=None, durable=None, shard=(0, 1), feature_cut=None, files=None, sketch=None, blend=None):
+def run(out, workers, limit=None, durable=None, shard=(0, 1), feature_cut=None, files=None, sketch=None, blend=None,
+        inject=None, keep=None):
     out = Path(out)
     files = files if files is not None else epoch.bulk_files()
     mine = [f for f in files if in_shard(f["name"], shard)]
@@ -170,7 +189,7 @@ def run(out, workers, limit=None, durable=None, shard=(0, 1), feature_cut=None, 
     out.mkdir(parents=True, exist_ok=True)
     failures = 0
     with ProcessPoolExecutor(workers) as pool, (out / "manifest.jsonl").open("a") as fh:
-        futures = {pool.submit(process_file, f, out, durable, feature_cut, sketch, blend): f for f in todo}
+        futures = {pool.submit(process_file, f, out, durable, feature_cut, sketch, blend, inject, keep): f for f in todo}
         for i, fut in enumerate(as_completed(futures), 1):
             try:
                 rec = fut.result()
@@ -219,13 +238,19 @@ def main(argv=None):
     ap.add_argument("--feature-cut", help="pandas query selecting feature rows to keep (default: all)")
     ap.add_argument("--sketch", action="store_true", help="write per-stratum mirror-null tail sketches")
     ap.add_argument("--blend", help="Parquet of source_id + stage0.BLEND_COLS from gaia_source, for Stage 0")
+    ap.add_argument("--inject", help="sealed injection plan (inject.classes.gaia_stream); needs COSMOS_REVEAL_KEY")
+    ap.add_argument("--keep-z", type=float, help="keep light curves with |z| >= this (both sides), not the DR3 rule")
+    ap.add_argument("--keep-controls", type=float, default=features.CONTROL_FRACTION,
+                    help="with --keep-z: fraction of random controls whose light curves are kept")
     ap.add_argument("--consolidate", metavar="DEST")
     a = ap.parse_args(argv)
     if a.consolidate:
         consolidate(a.durable or a.out, a.consolidate)
         return 0
     sketch = sketches.MirrorSketches if a.sketch else None
-    return 1 if run(a.out, a.workers, a.limit, a.durable, a.shard, a.feature_cut, sketch=sketch, blend=a.blend) else 0
+    keep = (a.keep_z, a.keep_controls) if a.keep_z else None
+    return 1 if run(a.out, a.workers, a.limit, a.durable, a.shard, a.feature_cut, sketch=sketch, blend=a.blend,
+                    inject=a.inject, keep=keep) else 0
 
 
 if __name__ == "__main__":

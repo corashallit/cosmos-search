@@ -130,3 +130,9 @@ def test_stage0_removes_g_only_faults_but_keeps_grey_dips():
     assert unknown.loc[2, "stage0_n_band_inconsistent"] == 0 and unknown.loc[2, "min_z_rob"] < -50
     raw = features.source_features(lc, clean=False).set_index("source_id")
     assert raw.loc[2, "min_z_rob"] < -50 and "stage0_n_consistent" not in raw
+
+
+def test_datalink_style_booleans_are_read():
+    """DataLink writes '(true, false, ...)'; reading only 'True' lost every DPAC rejection on that route."""
+    assert list(epoch._parse_bools(["(true, false, true)"], np.array([3]))) == [True, False, True]
+    assert list(epoch._parse_bools(['["True","False"]'], np.array([2]))) == [True, False]

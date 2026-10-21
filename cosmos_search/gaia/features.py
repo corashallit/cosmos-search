@@ -252,8 +252,12 @@ def _features(table):
     return df
 
 
-def keep_light_curve(feat):
+def keep_light_curve(feat, z=None, controls=CONTROL_FRACTION):
     """Loose, symmetric rule for which full light curves to keep from the DR3 pass.
+
+    With z set, the DR4-sized rule instead: |z| >= z on either side, plus a `controls` fraction of random
+    controls (a subset of `control`, by the same hash). The DR3 rule keeps ~13-25% of sources, which on DR4's
+    1.8e9 would be ~10^8 light curves; storage.md budgets ~10^6 random ones plus the candidates.
 
     Faint-side and bright-side criteria are mirrored so the kept set carries its own null, and random
     controls are always kept. Criteria are in robust-sigma units only: fractional depth cuts select
@@ -261,6 +265,9 @@ def keep_light_curve(feat):
     both are left to the ranking stage, which works from the features. Keeps ~13% of sources.
     """
     f = feat
+    if z is not None:
+        ctrl = control_mask(f["source_id"].to_numpy(), controls) if controls else False
+        return ((f["min_z_rob"] <= -z) | (f["max_z_rob"] >= z)).to_numpy() | ctrl
     faint = (f["min_z_rob"] <= -5) | (f["n_low3"] >= 3) | (f["n_rej_low3"] >= 1)
     bright = (f["max_z_rob"] >= 5) | (f["n_high3"] >= 3)
     return (faint | bright | f["control"]).to_numpy()

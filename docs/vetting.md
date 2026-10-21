@@ -494,3 +494,9 @@ NEOs within 0.8 au can fall outside the widened cone.
   71–77% to 41–45% at ≥ 10σ; none of 6,800 diluted injections is vetoed.
 - 2026-10-21. Solar-system check at dip epochs (§13): SkyBoT is geocentric only, so positions are corrected to
   Gaia or TESS with Miriade. Gaia's own asteroid detections are recovered within 1.6 arcsec.
+- 2026-10-21. Day-one dress rehearsal (docs/dayone.md): 44 packets from ranking v0 (31 real, 5 sealed injections
+  the queue drew blind, 8 tier-3 EB controls), one blind subagent each, committed before the reveal. Controls 8/8
+  astrophysical; injections 0/5 unexplained (max P(u) 0.20), so the pre-registered shortlist (P(u) ≥ 0.25) was
+  empty. The agents placed injected grey dips in rare known classes (ε Aur-like disks), so the shortlist rule
+  should count rare astrophysical classes as interesting. Packet tests computed from visible epochs only are now
+  marked `visible_only` and survive the tail holdout; before, the holdout dropped every test.
