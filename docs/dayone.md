@@ -567,10 +567,16 @@ the rule.
      with ZTF in that window, a dip of 1, 5 or 10 d gets ≥ 2 ZTF epochs inside it 10%, 26% and 33% of the time.
    - **TESS.** It covers most stars for one or two 27-d sectors between July 2018 and January 2020 and resolves
      any dip longer than an hour when it overlaps. In the calibration fetch, though, TESS epochs inside that
-     window are almost absent (about 1 per star), because the fetch keeps the first sectors TGLC returns.
-   - **Before DR4:** the external fetch should take the TESS sectors and ZTF epochs that overlap Gaia's span
-     first, and TGLC's coverage of sectors 1–20 needs checking. The per-star test already uses concurrent epochs
-     as in-dip or refuting evidence.
+     window are almost absent (about 1 per star). The "Concurrent ZTF and TESS coverage" thread found the cause:
+     `dayone.external._bin` drops 30-min bins with fewer than 2 points, which removes every epoch of the
+     30-min FFI sectors 1–26. Its branch fixes the binning and ranks sectors by closeness to the dip. Batch 5 is
+     built with the fetch as pre-registered; for DR3 this only loses refutation epochs, since TESS starts after
+     DR3 ends.
+   - **The event rule also needs revisiting for concurrent data.** `single_event` splits in-dip epochs from
+     different surveys more than 1 d apart into separate events. That stops lone ZTF outliers merging with a
+     Gaia dip, but a multi-day dip seen by Gaia and by ZTF 2 d later would split and drop out of the test. The
+     rule cannot bite on DR3 (no concurrent epochs); for DR4 it should join across surveys when no informative
+     normal epoch lies between. The change comes after batch 5, so the batch tests the rule as registered.
 2. **Population statistics for the one-look dips.** Most single dips will be one-look dips that no single star
    can argue. Their rate can still be tested.
    - **The EB expectation.** The single-event test already computes `eb_rate`, a per-star probability that a
