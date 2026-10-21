@@ -204,7 +204,7 @@ def _to_long(sid, c):
 
 # -- DataLink -----------------------------------------------------------------------------------------
 
-DATALINK_MAX_IDS = 5000
+DATALINK_MAX_IDS = 50  # archive limit since the 2026-10-14 release ("Maximum number of Source Ids reached (max: 50)")
 
 
 def datalink_epoch_photometry(source_ids, client=None, cache=True):
