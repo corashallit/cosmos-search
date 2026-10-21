@@ -1,12 +1,13 @@
-"""Light curves from other surveys for the stars in a vetting queue: ZTF DR22 and TESS (TGLC), on the Gaia clock.
+"""Light curves from other surveys for the stars in a vetting queue: ZTF and TESS (TGLC), on the Gaia clock.
 
     python -m cosmos_search.dayone.external fetch --queue rank/queue3.parquet --out ext/external.parquet
 
 Gaia's ~35-70 epochs show most dip trains as one or two dips, which an eclipsing binary explains as well, so a
 blind vetter rightly calls them EBs (docs/dayone.md, batch 2). Denser photometry from other years makes that
 testable: an EB repeats at a fixed period with a fixed depth, other occulters need not. Times are BTJD
-(BJD_TDB - 2457000), as in the Gaia stream. ZTF objects are normalised to their own median per field, CCD and
-filter; TGLC per sector. ZTF keeps catflags == 0 epochs; TGLC keeps unflagged cadences (`tess.tglc.clean`).
+(BJD_TDB - 2457000), as in the Gaia stream; ZTF's HJD differs from BJD by under a minute. ZTF (IRSA's
+light-curve service, latest data release) objects are normalised to their own median per field, CCD quadrant
+and filter; TGLC per sector. ZTF keeps catflags == 0 epochs; TGLC keeps unflagged cadences (`tess.tglc.clean`).
 
 The output is a long table (source_id, band, t, flux, err), with bands named as in
 `inject.lightcurve.BAND_WAVELENGTH_UM` (ztf_g, ztf_r, ztf_i, TESS), so `apply` can inject the same sealed signal
@@ -20,13 +21,11 @@ import sys
 import numpy as np
 import pandas as pd
 
-from cosmos_search.xmatch.surveys import HATS
-
-ZTF_HATS = f"{HATS}/ztf_dr22/ztf_lc"
-ZTF_BANDS = {1: "ztf_g", 2: "ztf_r", 3: "ztf_i"}
+ZTF_LC = ("https://irsa.ipac.caltech.edu/cgi-bin/ZTF/nph_light_curves?POS=CIRCLE%20{ra:.6f}%20{dec:.6f}%20{r:.6f}"
+          "&FORMAT=csv")
+ZTF_BANDS = {"zg": "ztf_g", "zr": "ztf_r", "zi": "ztf_i"}
 ZTF_RADIUS_ARCSEC = 1.5     # ZTF's PSF is ~2"; Gaia positions are good to mas, so anything further is a neighbour
 ZTF_MIN_EPOCHS = 20
-MJD_TO_BTJD = 2400000.5 - 2457000.0
 TESSCUT_SECTORS = "https://mast.stsci.edu/tesscut/api/v0.1/sector?ra={ra:.6f}&dec={dec:.6f}"
 TESS_BIN_DAYS = 1 / 48       # 30 min: TGLC's slowest FFI cadence, so every sector reads the same
 COLUMNS = ["source_id", "band", "t", "flux", "err"]
@@ -37,25 +36,28 @@ def _empty():
                          zip(COLUMNS, ("int64", "object", "float64", "float64", "float64"))})
 
 
-def ztf(source_id, ra, dec, catalog=None):
-    """ZTF DR22 epochs within ZTF_RADIUS_ARCSEC of (ra, dec), one block per ZTF object (field, CCD, filter)."""
-    import lsdb
+def ztf(source_id, ra, dec):
+    """ZTF epochs within ZTF_RADIUS_ARCSEC of (ra, dec) from IRSA's light-curve service, one block per ZTF object
+    (field, CCD quadrant, filter), each normalised to its own median.
 
-    cat = catalog if catalog is not None else lsdb.open_catalog(ZTF_HATS)
-    rows = cat.cone_search(ra, dec, ZTF_RADIUS_ARCSEC).compute()
+    Not the HATS copy: its partitions are single row groups of whole light curves, so a cone search reads ~10 GB."""
+    import io
+
+    from cosmos_search.net import get_client
+
+    body = get_client().get_bytes(ZTF_LC.format(ra=ra, dec=dec, r=ZTF_RADIUS_ARCSEC / 3600), cache=False)
+    rows = pd.read_csv(io.BytesIO(body)) if body else pd.DataFrame()
     out = []
-    for _, r in rows.iterrows():
-        mag, magerr = np.asarray(r["mag"], float), np.asarray(r["magerr"], float)
-        hmjd, flags = np.asarray(r["hmjd"], float), np.asarray(r["catflags"], np.int64)
-        ok = (flags == 0) & np.isfinite(mag) & np.isfinite(magerr)
-        if ok.sum() < ZTF_MIN_EPOCHS:
+    for _, r in rows.groupby("oid") if len(rows) else ():
+        ok = (r["catflags"] == 0) & np.isfinite(r["mag"]) & np.isfinite(r["magerr"])
+        band = ZTF_BANDS.get(str(r["filtercode"].iloc[0]))
+        if ok.sum() < ZTF_MIN_EPOCHS or band is None:
             continue
-        band = ZTF_BANDS.get(int(r["filterid"]))
-        if band is None:
-            continue
-        flux = 10 ** (-0.4 * (mag[ok] - np.median(mag[ok])))
-        out.append(pd.DataFrame({"source_id": int(source_id), "band": band, "t": hmjd[ok] - MJD_TO_BTJD,
-                                 "flux": flux, "err": flux * magerr[ok] * np.log(10) / 2.5}))
+        mag, magerr = r.loc[ok, "mag"].to_numpy(float), r.loc[ok, "magerr"].to_numpy(float)
+        flux = 10 ** (-0.4 * (mag - np.median(mag)))
+        out.append(pd.DataFrame({"source_id": int(source_id), "band": band,
+                                 "t": r.loc[ok, "hjd"].to_numpy(float) - 2457000.0,
+                                 "flux": flux, "err": flux * magerr * np.log(10) / 2.5}))
     return pd.concat(out, ignore_index=True) if out else _empty()
 
 
@@ -101,16 +103,13 @@ def tess(source_id, ra, dec, max_sectors=None):
 
 def fetch(queue, max_sectors=None, log=print):
     """External light curves for every star in the queue (source_id, ra, dec), as one long table."""
-    import lsdb
-
-    cat = lsdb.open_catalog(ZTF_HATS, columns=["filterid", "objra", "objdec", "hmjd", "mag", "magerr", "catflags"])
     parts = []
     # Not iterrows: on an all-numeric frame it casts source_id to float64 and corrupts it.
     for sid, ra, dec in zip(queue["source_id"].astype("int64"), queue["ra"].astype(float), queue["dec"].astype(float)):
         sid, ra, dec = int(sid), float(ra), float(dec)
         z, s = _empty(), _empty()
         try:
-            z = ztf(sid, ra, dec, cat)
+            z = ztf(sid, ra, dec)
         except Exception as exc:  # a survey that fails for one star is missing data, not a reason to stop
             log(f"{sid}: ZTF failed ({type(exc).__name__})")
         try:
@@ -118,6 +117,7 @@ def fetch(queue, max_sectors=None, log=print):
         except Exception as exc:
             log(f"{sid}: TESS failed ({type(exc).__name__})")
         parts += [z, s]
+        log(f"{len(parts) // 2}/{len(queue)} ztf {len(z)} tess {len(s)}")
     df = pd.concat(parts, ignore_index=True) if parts else _empty()
     return df.astype({"source_id": "int64", "band": "object"})
 
