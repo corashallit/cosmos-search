@@ -85,8 +85,8 @@ v1 uses the filter as in PR #45 and the residual search is revised.
   ranking v1 demotes the filter's `explained` stars, as specified in PR #45.
 - D2, `eb_residual` as a ranking flag (counted with fov, grey, tension, bright): adopt if it marks ≤ 15% of real
   DPAC EBs and ≥ 50% of eb_host injections. Otherwise it is reported in the packet and not used for priority.
-- D3, recurrence on residuals in place of raw epochs for v3b's `aperiodic` input (rule v3c = S ≥ 0.35 or
-  `residual_aperiodic`): adopt if (a) on trains in EB hosts, residual flags more than raw (paired gains > losses);
+- D3, recurrence on residuals in place of raw epochs as the `aperiodic` input (rephrased after half A, see below:
+  the input to ranking v1's priority flag, not a shortlist bypass): adopt if (a) on trains in EB hosts, residual flags more than raw (paired gains > losses);
   (b) on trains in non-EB hosts, residual recall ≥ raw recall − 2 percentage points; (c) on testable real DPAC EBs,
   residual flags ≤ raw flags. The agents' part of the rule is unchanged, so this is a pipeline-level test; the
   flag's agents-plus-flag recall was measured on batch 4.
@@ -94,9 +94,46 @@ v1 uses the filter as in PR #45 and the residual search is revised.
 Also reported: synthetic-EB demotion, real queued non-EB hosts demoted and flagged, strict-period trains demoted, and
 the real stars (no injection) with `eb_residual`, as exploratory leads.
 
+### Half A (calibration), and changes recorded before half B
+
+Run with seed 12169237894723442052 (4,813 jobs; 175 queued real DPAC EBs, 46 queued non-EB hosts, 254 synthetic
+EBs, 360 target-family and 49 strict-period injections, 177 eb_host injections that could be drawn).
+
+| TOL | MIN_EVENT_EPOCHS | real EBs demoted | eb_host loss | qualifies (≥ 0.75 × 0.674) |
+|---|---|---|---|---|
+| 0.05 | 1 | 0.234 | 0.023 | no |
+| 0.05 | 2 | 0.571 | 0.056 | **yes, chosen** |
+| 0.1 | 1 / 2 | 0.240 / 0.571 | 0.034 / 0.068 | no / yes |
+| 0.2 | 1 / 2 | 0.240 / 0.577 | 0.034 / 0.068 | no / yes |
+| 0.4 | 1 / 2 | 0.251 / 0.589 | 0.034 / 0.073 | no / yes |
+
+The EB filter alone explains 67.4% of the real EBs and 13.0% of the eb_host injections on these stars. **Chosen: TOL =
+0.05, MIN_EVENT_EPOCHS = 2.** The tolerance barely matters; what matters is whether a one-epoch residual event counts.
+With MIN_EVENT_EPOCHS = 1, 68% of real EBs keep some residual event, almost all of them single epochs (ZTF one-night
+outliers and ingress mispredictions).
+
+*Two changes after half A, recorded before half B was drawn:*
+
+1. **Recurrence on residuals uses the same event definition.** Under an eclipse baseline, residual events with fewer
+   than MIN_EVENT_EPOCHS in-dip epochs are dropped before the recurrence test. On half A without this, the residual
+   flag fired on 18 of 175 real EBs against 14 on raw epochs: the lone epochs an eclipse leaves behind look
+   aperiodic once the eclipses no longer outnumber them. Constant baselines are untouched (residual = raw).
+2. **D3 is rephrased because of the red-team review's R1** (`/mnt/project-files/review/`): on real DR3 stars with ZTF,
+   v3b's flag fires on 64% of testable non-EB variables (79% of RS CVn, 67% of SOLAR_LIKE) against 9% of EBs, and v3b
+   lets it shortlist on its own. Ranking v1 therefore uses the flag as a priority flag, not a bypass (the shortlist
+   rule stays frozen until the review's fixes land). D3 now decides which epochs feed that ranking flag, raw or
+   residual, with the same criteria (a)–(c). Half B adds a population `real_class`: every real star of the half the
+   raw test can test (the review's list), so both versions' flag rates are reported by DPAC class.
+
 ## Ranking v1 (for the D2 freeze)
 
 `python -m cosmos_search.dayone.rank requeue` (after `dayone.external fetch` on a prefetch list of the top tier-1–2
 rows, then `python -m cosmos_search.residual` on it): demoted stars (D1's rule, or the filter's `explained` if D1
 fails) move to tier 3 as known-answer controls, the audit draw is made over every star below the vetting cut
 *including the demoted ones*, with known inclusion probabilities, so DR4 measures what demotion loses.
+
+Active stars (review R1): RS, SOLAR_LIKE, S and AGN are tier 2 in v1 (v0 left the first three in tier 1), the
+`aperiodic` flag is one priority flag among fov, grey, tension and bright, and the queue carries `--n-active-controls`
+(default 8) active-class stars as controls labelled `rotation_or_spots` (AGN: `extragalactic`), so the false-flag rate
+is measured on the class that will crowd the shortlist. On DR4 day one DPAC classes may lag the photometry; an
+activity model of our own (rotation period from ZTF/TESS, flares, eROSITA, `activityindex_espcs`) is the next step.

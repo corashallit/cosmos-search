@@ -153,3 +153,24 @@ def test_requeue_demotes_to_controls_and_audits_them():
         assert ((a.inclusion > 0) & (a.inclusion <= 1)).all()
         seen |= set(a.source_id) & {0, 1, 2}
     assert seen == {0, 1, 2}                                               # demoted stars stay reachable
+
+
+def test_active_stars_go_to_tier_2_and_into_the_controls():
+    import pandas as pd
+
+    from cosmos_search.dayone import rank as R
+
+    n = 30
+    ranked = pd.DataFrame({"source_id": np.arange(n), "tier": [1] * 25 + [3] * 5, "w": np.linspace(10, 1, n),
+                           "fov": False, "grey": False, "tension": False, "bright": False,
+                           "best_class_name": ["RS", "SOLAR_LIKE", "AGN"] + [None] * 27})
+    verdicts = pd.DataFrame({"source_id": np.arange(25), "demote": False, "eb_explained": False,
+                             "eb_residual": False, "residual_aperiodic": False})
+    verdicts.loc[[0, 7], "residual_aperiodic"] = True
+    v1 = R.apply_residual(ranked, verdicts)
+    assert (v1.set_index("source_id").loc[[0, 1, 2], "tier"] == 2).all()
+    assert v1[v1.tier == 1].source_id.iloc[0] == 7                         # aperiodic ranks, it does not bypass
+    q = R.queue_v1(v1, 5, 2, 2, np.random.default_rng(1), n_active_controls=3)
+    c = q[q.role == "control"].set_index("source_id")
+    assert {0, 1, 2} <= set(c.index)
+    assert c.loc[2, "control_label"] == "extragalactic" and c.loc[0, "control_label"] == "rotation_or_spots"

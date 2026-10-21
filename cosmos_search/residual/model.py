@@ -16,9 +16,9 @@ from cosmos_search.vetting.candidate import LightCurve
 
 RES_SIGMA = 4.0             # an in-window epoch deeper than the eclipse allows by this many combined sigma (as DIP_SIGMA)
 NEIGHBOUR_PHASE = 0.125     # same eclipse phase: within this share of the window's phase width (the period grid's drift)
-TOL = 0.2                   # relative depth tolerance, same band; placeholder until set on half A (docs/arms/residual.md)
+TOL = 0.05                  # relative depth tolerance, same band; chosen on half A (docs/arms/residual.md)
 CROSS_FACTOR = 2.0          # tolerance multiplier when the prediction comes from another band or the whole window
-MIN_EVENT_EPOCHS = 1        # residual events elsewhere need this many in-dip epochs; placeholder until set on half A
+MIN_EVENT_EPOCHS = 2        # residual events elsewhere need this many in-dip epochs; chosen on half A
 PAIR_BANDS = ("BP", "RP")   # Gaia's colour bands share G's transits: they follow G's decision
 MIN_RATIO_PAIRS = 2        # other-cycle epochs of a band needed to measure its eclipse depth ratio to the other bands
 RATIO_SIGMA = 5.0          # ... each where the other bands predict an eclipse at least this deep (their sigma)
@@ -311,7 +311,17 @@ def evaluate(ctx, tol=TOL, cross=CROSS_FACTOR, min_event_epochs=MIN_EVENT_EPOCHS
     out["n_residual_events"] = int(len(ev))
     out["n_residual_events_elsewhere"] = int(n_ev)
     if recurrence_test:
-        r = recurrence.search(*rec_ep)
+        t_r, d_r, z_r = rec_ep
+        if base and min_event_epochs > 1 and len(ev):
+            # Under an eclipse baseline, residual events need min_event_epochs in-dip epochs here too: lone
+            # epochs left by an eclipse are prediction misses at ingress or one-night outliers, and on raw data
+            # the recurrence test never saw them on their own (the eclipses outnumbered them).
+            d_r = d_r.copy()
+            for _, a, b, _ in ev:
+                inside = d_r & (t_r >= a) & (t_r <= b)
+                if inside.sum() < min_event_epochs:
+                    d_r[inside] = False
+        r = recurrence.search(t_r, d_r, z_r)
         out.update({"residual_testable": bool(r["testable"]), "residual_aperiodic": bool(r.get("aperiodic", False)),
                     "residual_aligned_fraction": r.get("aligned_fraction", np.nan)})
     out["demote"] = bool(eb["explained"] and base and n_ev == 0 and out["target_residual"] is False)

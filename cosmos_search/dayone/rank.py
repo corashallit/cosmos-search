@@ -41,6 +41,12 @@ Ranking v1 (for the D2 freeze, docs/arms/residual.md) adds a second pass once ex
    demoted ones included, so the cost of demotion is measured on DR4 itself.
 8. **eb_residual.** An eclipsing binary with an unexplained dip left over. With `--flag-eb-residual` (adopted only if
    docs/arms/residual.md's D2 passes) it counts as a priority flag like fov, grey, tension and bright.
+9. **Active stars** (red-team review R1). On real DR3 stars with ZTF, the recurrence flag fires on 79% of testable
+   RS CVn and 67% of testable SOLAR_LIKE stars: spotted stars' low states are aperiodic dips. Ranking v0 put those
+   classes in tier 1. In v1 they and AGN are tier 2 (ACTIVE_CLASSES), the recurrence flag (on residuals where the
+   residual search ran) is a priority flag, not a route around the vetter, and the queue carries n_active_controls
+   active-class stars as controls labelled `rotation_or_spots` (AGN: `extragalactic`), so the shortlist's false-flag
+   rate is measured on the class that will crowd it.
 """
 
 import argparse
@@ -246,6 +252,9 @@ def prefetch(ranked, n):
 
 
 FLAGS_V0 = ("fov", "grey", "tension", "bright")
+# Classes whose dips are activity, not occultation (review R1): RS CVn, spotted (SOLAR_LIKE), short-timescale, AGN.
+ACTIVE_CLASSES = {"RS": "rotation_or_spots", "SOLAR_LIKE": "rotation_or_spots", "S": "rotation_or_spots",
+                  "AGN": "extragalactic"}
 
 
 def apply_residual(ranked, verdicts, rule="residual", flag_eb_residual=False):
@@ -262,14 +271,18 @@ def apply_residual(ranked, verdicts, rule="residual", flag_eb_residual=False):
     df.loc[hit, "explained_by"] = "residual" if rule == "residual" else "ebfilter"
     df.loc[hit, "tier"] = 3
     df["eb_residual"] = df["eb_residual"].fillna(False).astype(bool)
-    flags = list(FLAGS_V0) + (["eb_residual"] if flag_eb_residual else [])
+    if "best_class_name" in df:
+        df.loc[(df["tier"] == 1) & df["best_class_name"].isin(list(ACTIVE_CLASSES)), "tier"] = 2
+    df["aperiodic"] = df["residual_aperiodic"].fillna(False).astype(bool) if "residual_aperiodic" in df else False
+    flags = list(FLAGS_V0) + ["aperiodic"] + (["eb_residual"] if flag_eb_residual else [])
     df["n_flags"] = df[flags].fillna(False).astype(bool).sum(axis=1)
     return df.sort_values(["tier", "n_flags", "w"], ascending=[True, False, False]).reset_index(drop=True)
 
 
-def queue_v1(ranked, n_vet, n_audit, n_controls, rng):
+def queue_v1(ranked, n_vet, n_audit, n_controls, rng, n_active_controls=0):
     """As `queue`, but the audit draw covers the stars demoted by the residual search as well as the rest of tiers
-    1-2, so what demotion removes is sampled with known probability. Controls come from all of tier 3."""
+    1-2, so what demotion removes is sampled with known probability. Controls come from all of tier 3, plus
+    n_active_controls stars of ACTIVE_CLASSES below the vetting cut, labelled by star (activity, or AGN)."""
     vettable = ranked[ranked["tier"] < 3]
     top = vettable.head(n_vet).assign(role="ranked", inclusion=1.0)
     pool = pd.concat([vettable.iloc[n_vet:], ranked[ranked["explained_by"].isin(["residual", "ebfilter"])]])
@@ -282,7 +295,16 @@ def queue_v1(ranked, n_vet, n_audit, n_controls, rng):
     ctrl = ranked[(ranked["tier"] == 3) & ~ranked["source_id"].isin(taken)]
     if len(ctrl) and n_controls:
         pick = rng.choice(len(ctrl), min(n_controls, len(ctrl)), replace=False)
-        parts.append(ctrl.iloc[np.sort(pick)].assign(role="control", inclusion=n_controls / len(ctrl)))
+        parts.append(ctrl.iloc[np.sort(pick)].assign(role="control", inclusion=n_controls / len(ctrl),
+                                                     control_label="eclipsing_binary"))
+    if n_active_controls and "best_class_name" in ranked:
+        taken = set(pd.concat(parts)["source_id"])
+        act = ranked[ranked["best_class_name"].isin(list(ACTIVE_CLASSES)) & ~ranked["source_id"].isin(taken)]
+        if len(act):
+            pick = rng.choice(len(act), min(n_active_controls, len(act)), replace=False)
+            a = act.iloc[np.sort(pick)]
+            parts.append(a.assign(role="control", inclusion=n_active_controls / len(act),
+                                  control_label=a["best_class_name"].map(ACTIVE_CLASSES)))
     return pd.concat(parts, ignore_index=True)
 
 
@@ -296,6 +318,7 @@ def _requeue(argv):
     ap.add_argument("--n-vet", type=int, default=30)
     ap.add_argument("--n-audit", type=int, default=6)
     ap.add_argument("--n-controls", type=int, default=8)
+    ap.add_argument("--n-active-controls", type=int, default=8)
     ap.add_argument("--seed", type=int)
     a = ap.parse_args(argv)
     out = Path(a.out)
@@ -303,11 +326,12 @@ def _requeue(argv):
     ranked = apply_residual(pd.read_parquet(a.ranked), pd.read_parquet(a.residual), a.rule, a.flag_eb_residual)
     ranked.to_parquet(out / "ranked_v1.parquet", index=False)
     seed = a.seed if a.seed is not None else int.from_bytes(os.urandom(8), "little")
-    q = queue_v1(ranked, a.n_vet, a.n_audit, a.n_controls, np.random.default_rng(seed))
+    q = queue_v1(ranked, a.n_vet, a.n_audit, a.n_controls, np.random.default_rng(seed), a.n_active_controls)
     q.to_parquet(out / "queue_v1.parquet", index=False)
     summary = {"by_tier": ranked["tier"].value_counts().sort_index().to_dict(),
                "explained_by": ranked["explained_by"].value_counts().to_dict(),
-               "eb_residual": int(ranked["eb_residual"].sum()), "rule": a.rule,
+               "eb_residual": int(ranked["eb_residual"].sum()), "aperiodic": int(ranked["aperiodic"].sum()),
+               "rule": a.rule,
                "flag_eb_residual": a.flag_eb_residual, "queue": q["role"].value_counts().to_dict(), "seed": seed}
     (out / "summary_v1.json").write_text(json.dumps(summary, indent=2, default=int))
     print(json.dumps(summary, indent=2, default=int))

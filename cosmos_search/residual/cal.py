@@ -34,7 +34,7 @@ from . import model as M
 TOLS = (0.05, 0.1, 0.2, 0.4)
 MIN_EVENTS = (1, 2)
 TRAIN_FAMILIES = ("dip_train_poisson", "dip_train_primes", "dip_train_geometric")
-RECURRENCE_KINDS = ("real_eb", "host")
+RECURRENCE_KINDS = ("real_eb", "host", "real_class")
 R_FRACTION = 0.75           # pre-registered: demotion on real EBs at least this share of the filter's
 
 
@@ -42,7 +42,9 @@ def _job(job):
     kind, family, sid, src, df, seed, _ = job
     rng = np.random.default_rng(seed)
     t_lo, t_hi = float(df.t.min()), float(df.t.max())
-    if kind in ("host", "real_eb"):
+    if kind == "real_class":
+        tt, inj = None, df
+    elif kind in ("host", "real_eb"):
         g = df[df.band == "G"]
         tt = EC._target(g.t.to_numpy(), g.flux.to_numpy())
         if tt is None:
@@ -64,25 +66,36 @@ def _job(job):
     for tol in TOLS:
         for m in MIN_EVENTS:
             # With a constant baseline the residual epochs are the raw ones: reuse the raw recurrence result.
-            v = M.evaluate(ctx, tol=tol, min_event_epochs=m,
-                           recurrence_test=rec and m == MIN_EVENTS[0] and ctx["base"] is not None)
+            v = M.evaluate(ctx, tol=tol, min_event_epochs=m, recurrence_test=rec and ctx["base"] is not None)
             v.pop("residual_lightcurves")
             if rec and ctx["base"] is None:
                 v.update({"residual_testable": bool(raw["testable"]), "residual_aperiodic": bool(raw.get("aperiodic", False)),
                           "residual_aligned_fraction": raw.get("aligned_fraction", np.nan)})
             rows.append({**base, "tol": tol, "min_event_epochs": m, **v})
-    # recurrence on residuals does not depend on min_event_epochs: copy it across
-    for i, r in enumerate(rows):
-        if "residual_aperiodic" not in r and rec:
-            src_row = rows[i - (i % len(MIN_EVENTS))]
-            for k in ("residual_testable", "residual_aperiodic", "residual_aligned_fraction"):
-                r[k] = src_row.get(k)
     return rows
 
 
-def jobs(lc, ctx, which, n_synth, n_family, n_host_family, rng):
-    """EB filter calibration jobs (`ebfilter.cal.jobs`) for one half, with this test's population sizes."""
+def jobs(lc, ctx, which, n_synth, n_family, n_host_family, rng, classes=None, kinds=None):
+    """EB filter calibration jobs (`ebfilter.cal.jobs`) for one half, with this test's population sizes, plus (with
+    classes: a table of source_id, cls, testable, as the red-team review's v3b_flag_by_class.csv) every real star of
+    the half that the raw recurrence test can test, labelled by DPAC class (`real_class`), for flag rates by class.
+    kinds: keep only these job kinds (the injection seeds do not change)."""
     js, counts = EC.jobs(lc, ctx, which, n_synth, n_family, n_host_family, rng)
+    if classes is not None:
+        c = classes[classes.testable.astype(bool)]
+        c = c[[EC.half(s) == which for s in c.source_id]]
+        lc = lc[(lc.band.isin(EC.GAIA_BANDS + EC.ZTF_BANDS)) & ((lc["flags"] & 1) == 0)]
+        lc = lc[lc.source_id.isin(c.source_id)]
+        groups = {int(s): g[["band", "t", "flux", "err"]].reset_index(drop=True) for s, g in lc.groupby("source_id")}
+        cx = ctx.drop_duplicates("source_id").set_index("source_id")
+        for s, cls in zip(c.source_id, c.cls):
+            if int(s) in groups and s in cx.index:
+                r = cx.loc[s]
+                src = {k: (None if pd.isna(r.get(k)) else float(r.get(k))) for k in EC.SOURCE_KEYS}
+                js.append(("real_class", str(cls), int(s), src, groups[int(s)], 0, ()))
+        counts["real_class"] = sum(j[0] == "real_class" for j in js)
+    if kinds:
+        js = [j for j in js if j[0] in kinds]
     return js, counts
 
 
@@ -99,7 +112,7 @@ def _rate(sub, col):
 def table(df, tol, m):
     """Per population at one setting: filter-explained (current), demoted, eb_residual, and recurrence flags."""
     d = df[df.drawn & (df.tol == tol) & (df.min_event_epochs == m)].copy()
-    d["pop"] = np.where(d.kind.isin(["anomaly", "eb_host"]), d.kind + ":" + d.family, d.kind)
+    d["pop"] = np.where(d.kind.isin(["anomaly", "eb_host", "real_class"]), d.kind + ":" + d.family, d.kind)
     d.loc[d.kind.eq("anomaly") & d.family.isin(EC.TARGET_FAMILIES), "group"] = "anomaly (target families)"
     d.loc[d.kind.eq("eb_host"), "group"] = "eb_host (all families)"
     rows = []
@@ -149,6 +162,8 @@ def main(argv=None):
     r.add_argument("--workers", type=int, default=os.cpu_count())
     r.add_argument("--seed", type=int)
     r.add_argument("--limit", type=int, help="first N jobs only (smoke test)")
+    r.add_argument("--classes", help="csv of source_id, cls, testable (real stars by DPAC class)")
+    r.add_argument("--kinds", nargs="+", help="run only these job kinds")
     r.add_argument("--out", required=True)
     c = sub.add_parser("choose")
     c.add_argument("file")
@@ -170,7 +185,8 @@ def main(argv=None):
     lc = pd.read_parquet(a.lc)
     lc["band"] = lc["band"].astype(str)
     ctx = pd.read_parquet(a.ctx)
-    js, counts = jobs(lc, ctx, a.half, a.n_synth, a.n_family, a.n_host_family, rng)
+    classes = pd.read_csv(a.classes) if a.classes else None
+    js, counts = jobs(lc, ctx, a.half, a.n_synth, a.n_family, a.n_host_family, rng, classes, a.kinds)
     if a.limit:
         js = js[: a.limit]
     print(f"half {a.half}: {counts}, {len(js)} jobs, seed {seed}", flush=True)
