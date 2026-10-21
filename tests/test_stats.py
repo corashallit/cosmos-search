@@ -187,3 +187,53 @@ def test_tail_sketch_merge_matches_one_pass_and_roundtrips():
     assert np.allclose(merged.p(s, min_exceed=1)[0], empirical_p(s, null))
     with pytest.raises(ValueError):
         merged.merge(TailSketch(np.linspace(0, 1, 3)))
+
+
+def _extremes(rng, n_src, n_pts, n_real=0, depth=25.0):
+    """Min and max of n_pts heavy-tailed noise points per source; the first n_real get one deep dip."""
+    x = rng.standard_t(4, size=(n_src, n_pts))
+    x[:n_real, 0] -= depth
+    return -x.min(axis=1), x.max(axis=1)
+
+
+def test_knockoff_q_controls_fdr_and_finds_dimmers():
+    from cosmos_search.stats import knockoff_q
+
+    rng = np.random.default_rng(15)
+    fdp, power = [], []
+    for _ in range(30):
+        # Epoch counts vary between sources, which breaks cross-source exchangeability but not competition.
+        dims, brights = [], []
+        for n_pts, n_real in ((15, 40), (150, 40)):
+            d, b = _extremes(rng, 5000, n_pts, n_real)
+            dims.append(d), brights.append(b)
+        dim, bright = np.concatenate(dims), np.concatenate(brights)
+        real = np.zeros(dim.size, bool)
+        real[:40] = real[5000:5040] = True
+        found = knockoff_q(dim, bright) <= 0.1
+        fdp.append((found & ~real).sum() / max(found.sum(), 1))
+        power.append((found & real).sum() / real.sum())
+    assert np.mean(fdp) <= 0.1 + 0.03
+    assert np.mean(power) > 0.5
+
+
+def test_knockoff_q_on_pure_null_finds_almost_nothing():
+    from cosmos_search.stats import knockoff_q
+
+    rng = np.random.default_rng(16)
+    dim, bright = _extremes(rng, 20000, 60)
+    q = knockoff_q(dim, bright)
+    assert (q <= 0.1).sum() <= 5
+    assert ((q >= 0) & (q <= 1)).all()
+
+
+def test_tail_ratio_is_one_for_symmetric_noise_and_flags_dimmers():
+    from cosmos_search.stats import tail_ratio
+
+    rng = np.random.default_rng(17)
+    dim, bright = _extremes(rng, 50000, 60, n_real=500)
+    strata = np.where(np.arange(dim.size) < 25000, "a", "b")
+    rows = tail_ratio(dim, bright, strata, [3.0, 20.0])
+    by = {(r["stratum"], r["threshold"]): r for r in rows}
+    assert by[("b", 3.0)]["ratio_lo"] < 1 < by[("b", 3.0)]["ratio_hi"] * 1.05
+    assert by[("a", 20.0)]["ratio_lo"] > 3
