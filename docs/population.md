@@ -229,7 +229,8 @@ masked events had been seen at that point; nothing about where on the sky or at 
 - Astrometry: one TAP query per 1/24 of the sky, joining `vari_summary`, `gaia_source`, `external.gaiaedr3_distance`
   and `vari_classifier_result`. 11,754,237 rows, on the share at
   `data/gaia-dr3-epoch/aux/aux_astrometry.parquet`.
-- Code: `cosmos_search/population/` (`run.py` drives the steps, `calibrate.py` the universes).
+- Code: `cosmos_search/population/` (`run.py` drives the steps, `calibrate.py` the universes);
+  `scripts/population_attribution.py` for §12's attribution refits.
 
 ## 12. DR3 results (2026-10-21)
 
@@ -292,8 +293,8 @@ statistic. Refitting the GLM in null realisations leaves the null maximum unchan
 4–8 kpc and beyond). With SOV-1's φ the bulge windows would not pass. That is a reason to treat window 1 as an
 instrument-or-population lead, not a candidate.
 
-**What this means for DR4.** The test runs on all of DR4 with the same code, a few CPU-hours per pass on 4 cores
-for DR3's 11 M stars. Before DR4:
+**What this means for DR4.** The test runs on all of DR4 with the same code. On DR3's 11 M stars, on 4 cores, the event
+pass took about 5 min and the exposure pass about 70 min. Before DR4:
 
 - Add source density to the null's covariates. It is not read from the dips, and §1 point 4 allows it.
 - Add a bulge or Galactic-population term, for example a Besançon-model mix per window or kinematics from proper
