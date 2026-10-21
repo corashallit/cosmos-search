@@ -126,3 +126,10 @@ Record changes of approach here, with the evidence that prompted them.
   They also keep the raw extremes and the per-source fault counts, so the effect of cleaning can be audited.
   G3 on DR3 runs without the mask. Its `fov` statistic needs the partner transit in the other field of view,
   so a fault in a single transit cannot pass it on its own.
+- **2026-10-21.** Stage 0 removes real eclipses in crowded fields. In a DR3 LMC chunk, two of the dips it
+  removed at ≥ 8σ belong to DPAC eclipsing binaries (P = 14.3 d and 60.8 d), and both have BP and RP blended
+  in every transit. Blending dilutes the dip in BP and RP, so a real G dip falls outside the mixing interval and
+  reads as a G fault. Error inflation at the deepest point removed the other one. The injection test missed
+  this because it injects undiluted changes. The fix (dilution-aware band test, corroborated epochs never
+  dropped, diluted injections, EB known-answer controls) is with the vetting thread. Until it lands, G3 is
+  reported on both the raw and the cleaned extremes (`single_raw` vs `single`).

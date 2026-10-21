@@ -15,6 +15,8 @@ Two statistics, both mirrored so the bright side is the null for the dim side:
   shows, dim = min(-min_z_rob, -min_partner_z). A dip lasting hours appears in both fields of view;
   cosmic rays, CCD defects and FoV calibration offsets mostly do not. This is the invariance test of
   docs/arms/gaia-dimmers.md, applied symmetrically.
+- `single_raw`: as `single`, on the extremes before Stage 0 cleaning (`min_z_raw`, `max_z_raw`), when the
+  features carry them (features-v1-stage0). Comparing it with `single` measures what cleaning buys.
 
 DR3 epoch photometry covers DPAC's variables, so eclipsing binaries and other known dimmers will dominate
 the dim winners. Competition q says "more dimming than this source's own bright side explains", not
@@ -38,13 +40,17 @@ N_EDGES = (10, 20, 40, 80)
 THRESHOLDS = (3.0, 5.0, 8.0, 12.0, 20.0, 30.0)
 FEATURE_COLS = ["source_id", "n_g", "med_flux_g", "min_z_rob", "max_z_rob", "min_partner_z", "max_partner_z",
                 "min_frac", "min_frac_bp", "min_frac_rp", "n_low_episodes", "n_rej_low3", "slope_g", "control"]
+OPTIONAL_COLS = ["min_z_raw", "max_z_raw", "stage0_n_band_inconsistent", "stage0_n_colour_fault",
+                 "stage0_n_inflated_error", "stage0_n_untested"]
 
 
 def load(features_dir, aux_path):
     parts = sorted(Path(features_dir).glob("*.parquet"))
     if not parts:
         raise SystemExit(f"no feature parts in {features_dir}")
-    f = pd.concat([pq.read_table(p, columns=FEATURE_COLS).to_pandas() for p in parts], ignore_index=True)
+    names = set(pq.read_schema(parts[0]).names)
+    cols = FEATURE_COLS + [c for c in OPTIONAL_COLS if c in names]
+    f = pd.concat([pq.read_table(p, columns=cols).to_pandas() for p in parts], ignore_index=True)
     aux = pq.read_table(aux_path).to_pandas()
     return f.merge(aux, on="source_id", how="left")
 
@@ -56,7 +62,10 @@ def statistics(f):
     bright_single = np.where(ok, f["max_z_rob"], np.nan)
     dim_fov = np.where(ok, np.minimum(-f["min_z_rob"], -f["min_partner_z"]), np.nan)
     bright_fov = np.where(ok, np.minimum(f["max_z_rob"], f["max_partner_z"]), np.nan)
-    return {"single": (dim_single, bright_single), "fov": (dim_fov, bright_fov)}
+    out = {"single": (dim_single, bright_single), "fov": (dim_fov, bright_fov)}
+    if "min_z_raw" in f:
+        out["single_raw"] = (np.where(ok, -f["min_z_raw"], np.nan), np.where(ok, f["max_z_raw"], np.nan))
+    return out
 
 
 def strata(f):
@@ -92,7 +101,7 @@ def ranked(f, q, top=50):
     with np.errstate(divide="ignore", invalid="ignore"):
         sel["dip_colour_R"] = sel["min_frac_rp"] / sel["min_frac_bp"]
     cols = ["source_id", "g_mag", "bp_rp", "n_g", "w_fov", "q_fov", "min_frac", "dip_colour_R", "n_low_episodes",
-            "ruwe", "ipd_frac_multi_peak"]
+            "ruwe", "ipd_frac_multi_peak", "stage0_n_band_inconsistent"]
     cols = [c for c in cols if c in sel.columns]
     return sel.sort_values("w_fov", ascending=False)[cols].head(top), len(sel)
 
@@ -106,7 +115,7 @@ def _markdown(df):
 
 def summary(sym, q, f):
     lines = ["# DR3 G3 summary", ""]
-    for name in ("single", "fov"):
+    for name in [c[2:] for c in q.columns if c.startswith("q_")]:
         qq = q[f"q_{name}"]
         lines.append(f"- `{name}`: {np.sum(qq <= 0.01):,} sources at q ≤ 0.01, {np.sum(qq <= 0.1):,} at q ≤ 0.1"
                      f" (of {np.isfinite(q[f'w_{name}']).sum():,} with the statistic defined).")
