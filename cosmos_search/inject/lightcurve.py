@@ -246,6 +246,8 @@ def sample(rng, family, t_min, t_max, t_ext=None):
         dips = [Dip(t0=float(t0), covering=depth, ingress=dur / 4, egress=dur / 4, flat=dur / 2)
                 for t0 in event_times(rng, kind, t_min, t_end, **kw)]
         return Composite(dips)
+    if family in HELD_OUT_FAMILIES:
+        return _held_out(rng, family, t_min, t_end, span)
     if family == "secular_fade":
         return SecularTrend(rate_per_year=-_loguniform(rng, 1e-3, 5e-2), t_ref=(t_min + t_max) / 2,
                             beta=float(rng.choice([0.0, rng.uniform(1, 3)])))
@@ -273,3 +275,57 @@ FAMILIES = (
     "dip_train_poisson", "dip_train_periodic", "dip_train_primes", "dip_train_geometric",
     "secular_fade", "step", "chromatic_flip", "flare",
 )
+
+# Families no detector, flag or rule was calibrated or tuned on. They exist to measure recall on structure the
+# rules were not designed around (docs/plan.md, principle 3; review finding R5), so no calibration script may
+# draw them; tests/test_inject.py checks the calibration modules' family lists. Use them only in confirmatory
+# batches, and once a rule has been adjusted after seeing their results, they are no longer held out.
+HELD_OUT_FAMILIES = ("dip_train_clustered", "dip_train_drifting", "dip_swarm", "dip_irregular")
+
+
+def _held_out(rng, family, t_min, t_end, span):
+    """Dip sequences with structure between the calibrated trains': clustered in time, nearly periodic with a
+    drifting period, many dips of scattered depth, or a few complex events (Boyajian's star-like)."""
+    def dip(t0, depth, dur, shape="trapezoid"):
+        if shape == "tail":
+            return Dip(t0=float(t0), covering=depth, ingress=dur * 0.2, egress=dur * 0.8, shape="tail")
+        return Dip(t0=float(t0), covering=depth, ingress=dur / 4, egress=dur / 4, flat=dur / 2, shape=shape)
+
+    max_dur = min(5.0, span / 20)
+    if family == "dip_train_clustered":
+        # Neyman-Scott: a Poisson set of episodes, each a burst of dips within a few days to weeks.
+        parents = event_times(rng, "poisson", t_min, t_end, rate_per_day=_loguniform(rng, 1 / span, 8 / span))
+        width = _loguniform(rng, 2.0, min(60.0, span / 10))
+        times = np.concatenate([p + rng.uniform(0, width, 1 + rng.poisson(_loguniform(rng, 1, 8))) for p in parents]) \
+            if len(parents) else np.array([])
+        depth, dur = _loguniform(rng, 0.005, 0.3), _loguniform(rng, 0.05, max_dur)
+        return Composite([dip(t, depth * rng.uniform(0.5, 1.5), dur) for t in np.sort(times[times < t_end])])
+    if family == "dip_train_drifting":
+        # Nearly periodic: the period drifts linearly by up to +-40% over the span and each dip is jittered.
+        p0 = _loguniform(rng, span / 30, span / 3)
+        drift = rng.uniform(-0.4, 0.4) / span
+        jitter = rng.uniform(0.01, 0.1)
+        t, times = t_min + rng.uniform(0, p0), []
+        while t < t_end and len(times) < 500:
+            times.append(t)
+            p = max(p0 * (1 + drift * (t - t_min)), p0 * 0.2)
+            t += p * (1 + jitter * rng.standard_normal())
+        depth, dur = _loguniform(rng, 0.005, 0.3), _loguniform(rng, 0.05, max_dur)
+        return Composite([dip(t, depth, dur) for t in times])
+    if family == "dip_swarm":
+        # Many bodies on different orbits: frequent dips whose depths and durations scatter widely.
+        times = event_times(rng, "poisson", t_min, t_end, rate_per_day=_loguniform(rng, 10 / span, 60 / span))
+        med, scatter = _loguniform(rng, 0.003, 0.05), rng.uniform(0.5, 1.5)
+        return Composite([dip(t, float(min(0.9, med * np.exp(scatter * rng.standard_normal()))),
+                              _loguniform(rng, 0.05, max_dur), str(rng.choice(["trapezoid", "gaussian", "tail"])))
+                          for t in times])
+    if family == "dip_irregular":
+        # A few complex events, each several overlapping dips of very different depth and duration.
+        n = int(rng.integers(3, 16))
+        parts = []
+        for c in rng.uniform(t_min, t_end, n):
+            for _ in range(int(rng.integers(1, 5))):
+                parts.append(dip(c + rng.uniform(-5, 5), _loguniform(rng, 0.005, 0.2), _loguniform(rng, 0.2, 20.0),
+                                 str(rng.choice(["gaussian", "tail"]))))
+        return Composite(parts)
+    raise ValueError(f"unknown family {family!r}")

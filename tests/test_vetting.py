@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,7 @@ from cosmos_search.vetting import coincidence, design, quantify, scoring, taxono
 from cosmos_search.vetting.anonymise import ecliptic_latitude, galactic_latitude, leak_scan, scrub_source
 from cosmos_search.vetting.batch import build_batch, harmonise, simple_dips
 from cosmos_search.vetting.candidate import Candidate
-from cosmos_search.vetting.commit import CommitError, commit, load_verdicts, reveal
+from cosmos_search.vetting.commit import CommitError, commit, load_verdicts, reveal, verify_published
 from cosmos_search.vetting.packet import LeakError, build
 from cosmos_search.vetting.report import score
 from cosmos_search.vetting.verdict import parse
@@ -169,16 +170,51 @@ def test_commit_then_reveal_sealed(tmp_path, monkeypatch):
     batch = tmp_path / "batch"
     v = parse(reply(packet["packet_id"], {"eclipsing_binary": 1.0}), packet)
     with pytest.raises(CommitError):
-        reveal(batch, sealed)
-    commit([v], batch)
+        reveal(batch, sealed, remote=None)
+    commit([v], batch, allow_dirty=True)
     with pytest.raises(CommitError):
-        commit([v], batch)
+        commit([v], batch, allow_dirty=True)
     monkeypatch.setenv("COSMOS_REVEAL_KEY", str(ident))
-    keys = reveal(batch, sealed)
+    with pytest.raises(CommitError):  # not archived, so not provably fixed before the reveal
+        reveal(batch, sealed)
+    keys = reveal(batch, sealed, remote=None)
     assert keys[packet["packet_id"]]["label"] == "eclipsing_binary"
     (batch / "verdicts.jsonl").write_text((batch / "verdicts.jsonl").read_text().replace("1.0", "0.9"))
     with pytest.raises(CommitError):
         load_verdicts(batch)
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def test_reveal_needs_archived_verdicts_on_the_remote(tmp_path):
+    remote, work = tmp_path / "remote.git", tmp_path / "work"
+    _git(tmp_path, "init", "--quiet", "--bare", str(remote))
+    _git(tmp_path, "clone", "--quiet", str(remote), str(work))
+    for k, val in (("user.email", "t@example.org"), ("user.name", "t"), ("commit.gpgsign", "false")):
+        _git(work, "config", k, val)
+    (work / "README").write_text("x\n")
+    _git(work, "add", "README")
+    _git(work, "commit", "--quiet", "-m", "init")
+    _git(work, "push", "--quiet", "origin", "HEAD:main")
+    packet, key = build(gaia_like())
+    key.update(kind="control", label="eclipsing_binary")
+    plain = tmp_path / "key.json"
+    plain.write_text(json.dumps([key]))
+    v = parse(reply(packet["packet_id"], {"eclipsing_binary": 1.0}), packet)
+    (work / "README").write_text("changed\n")
+    with pytest.raises(CommitError, match="uncommitted"):
+        commit([v], tmp_path / "b0", archive=work / "prereg" / "b0")
+    _git(work, "checkout", "--", "README")
+    batch = tmp_path / "batch"
+    rec = commit([v], batch, archive=work / "prereg" / "batch")
+    assert rec["published"]["path"] == "prereg/batch/verdicts.jsonl"
+    with pytest.raises(CommitError, match="not on origin"):
+        reveal(batch, plain)
+    _git(work, "push", "--quiet", "origin", "HEAD:main")
+    assert verify_published(batch) == ["origin/main"]
+    assert packet["packet_id"] in reveal(batch, plain)
 
 
 def test_report_measures_confabulation_and_recognition():
@@ -297,8 +333,9 @@ def test_cli_prompts_commit_score(tmp_path):
     (tmp_path / "replies").mkdir()
     (tmp_path / "replies" / f"{packet['packet_id']}.txt").write_text(reply(packet["packet_id"], {"eclipsing_binary": 1}))
     cli(["commit", "--packets", str(tmp_path / "products.json"), "--replies", str(tmp_path / "replies"),
-         "--vetter", "test", "--batch", str(tmp_path / "batch")])
-    cli(["score", "--batch", str(tmp_path / "batch"), "--key", str(tmp_path / "key.json"), "--out", str(tmp_path / "r.json")])
+         "--vetter", "test", "--batch", str(tmp_path / "batch"), "--allow-dirty"])
+    cli(["score", "--batch", str(tmp_path / "batch"), "--key", str(tmp_path / "key.json"), "--out", str(tmp_path / "r.json"),
+         "--unpublished"])
     assert json.loads((tmp_path / "r.json").read_text())["labelled"]["accuracy"] == 1.0
 
 

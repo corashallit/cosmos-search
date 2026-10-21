@@ -181,8 +181,9 @@ numbers that suggested it do not count as its test.
 ### Batch 2 result: v1 rejected
 
 47 packets (11 target-family decoys, 6 other decoys, 16 real, 14 controls), one blind subagent each. Every
-transcript shows exactly one Read of its prompt and one Write of its reply; verdicts committed at 830f1aa before
-the reveal.
+transcript shows exactly one Read of its prompt and one Write of its reply; verdicts committed locally before
+the reveal, with the code at 830f1aa (kept in `refs/pull/41/head`). The verdict file was archived in
+`prereg/verdicts/dayone-batch2` only after the reveal, so that order is not verifiable (`prereg/README.md`).
 
 | measure | result | criterion |
 |---|---|---|
@@ -249,7 +250,8 @@ test isolates what the extra light curves do.
 ### Batch 3 result: v2 not adopted
 
 50 packets (16 target decoys, 4 other decoys, 16 real, 14 controls), one blind subagent each. All 50 transcripts
-show exactly one Read of the prompt and one Write of the reply; verdicts committed at 0a3882c before the reveal.
+show exactly one Read of the prompt and one Write of the reply; verdicts committed locally before the reveal, with the
+code at 0a3882c (`refs/pull/43/head`; archived after the fact in `prereg/verdicts/dayone-batch3`, not verifiable).
 SkyBoT is unreachable from the cloud container, so the solar-system check did not run for this batch.
 
 | measure | result | criterion |
@@ -357,7 +359,8 @@ the 2 strict-period trains are in; the dust dip and the step are not, because th
 
 48 packets (12 trains, 4 single events, 2 strict-period trains, 16 real, 14 controls), one blind subagent each.
 All 48 transcripts show one Read of the prompt and one Write of the reply (plus the harness's hand-back); verdicts
-committed at 2d15944 before the reveal. 43 packets carry the recurrence test; 35 are testable.
+committed locally before the reveal, with the code at 2d15944 (`refs/pull/44/head`; archived after the fact in
+`prereg/verdicts/dayone-batch4`, not verifiable). 43 packets carry the recurrence test; 35 are testable.
 
 | measure | v3a (S ≥ 0.35) | v3b (S ≥ 0.35 or aperiodic) | criterion |
 |---|---|---|---|

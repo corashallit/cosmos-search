@@ -65,3 +65,32 @@ def test_dip_trains_fit_short_and_long_spans(family, span):
     rng = np.random.default_rng(2)
     counts = [len(lc.sample(rng, family, 0.0, span).parts) for _ in range(200)]
     assert np.median(counts) >= 3
+
+
+def test_held_out_families_draw_and_stay_out_of_calibration():
+    import importlib
+
+    from cosmos_search.inject import lightcurve as lc
+
+    rng = np.random.default_rng(11)
+    t = np.linspace(0.0, 1000.0, 4000)
+    for fam in lc.HELD_OUT_FAMILIES:
+        for _ in range(20):
+            sig = lc.sample(rng, fam, 0.0, 1000.0, t_ext=1500.0)
+            k = sig.factor(t, "G")
+            assert np.all(np.isfinite(k)) and np.all(k > 0) and np.all(k <= 1)
+            json.dumps(lc.truth(sig))
+    # Held out means no calibration or tuning code draws them.
+    used = set(lc.FAMILIES)
+    for mod, names in (("cosmos_search.dayone.recurrence_cal", ("FAMILIES",)),
+                       ("cosmos_search.ebfilter.cal", ("TARGET_FAMILIES", "OTHER_FAMILIES", "HOST_FAMILIES")),
+                       ("cosmos_search.dayone.decoys", ("COUNTS", "COUNTS4", "TRAINS")),
+                       ("cosmos_search.dayone.single_cal", ("FAMILIES", "SINGLE_FAMILIES", "TARGET_FAMILIES")),
+                       ("cosmos_search.inject.classes.dimming", ("FAMILIES",))):
+        try:
+            m = importlib.import_module(mod)
+        except ImportError:
+            continue
+        for n in names:
+            used |= set(getattr(m, n, ()))
+    assert not used & set(lc.HELD_OUT_FAMILIES)
