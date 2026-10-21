@@ -95,7 +95,7 @@ def process_file(info, out, durable=None, feature_cut=None, sketch=None, blend=N
     """Process one bulk file. feature_cut: pandas query string for which feature rows to keep (default all).
     blend: Parquet of gaia_source's stage0.BLEND_COLS; without it Stage 0 leaves quiet sources untested.
     inject: sealed injection plan, applied to every chunk before Stage 0 and features.
-    keep: (|z| threshold, control fraction) for which light curves to keep (features.keep_light_curve).
+    keep: (|z| threshold, control fraction, keep table) for which light curves to keep (features.keep_light_curve).
     sketch: factory for a per-file accumulator with add(features DataFrame) and to_dict() (for example
     sketches.MirrorSketches); it sees every source, before feature_cut, and is written as gzipped JSON."""
     out = Path(out)
@@ -240,15 +240,17 @@ def main(argv=None):
     ap.add_argument("--blend", help="Parquet of source_id + stage0.BLEND_COLS from gaia_source, for Stage 0")
     ap.add_argument("--inject", help="sealed injection plan (inject.classes.gaia_stream); needs COSMOS_REVEAL_KEY")
     ap.add_argument("--keep-z", type=float, help="keep light curves with |z| >= this (both sides), not the DR3 rule")
+    ap.add_argument("--keep-table", help="keep light curves whose G3 |W| reaches this table's per-G-bin thresholds "
+                    "(dayone.keep); the DR4 rule")
     ap.add_argument("--keep-controls", type=float, default=features.CONTROL_FRACTION,
-                    help="with --keep-z: fraction of random controls whose light curves are kept")
+                    help="with --keep-z or --keep-table: fraction of random controls whose light curves are kept")
     ap.add_argument("--consolidate", metavar="DEST")
     a = ap.parse_args(argv)
     if a.consolidate:
         consolidate(a.durable or a.out, a.consolidate)
         return 0
     sketch = sketches.MirrorSketches if a.sketch else None
-    keep = (a.keep_z, a.keep_controls) if a.keep_z else None
+    keep = (a.keep_z, a.keep_controls, a.keep_table) if (a.keep_z or a.keep_table) else None
     return 1 if run(a.out, a.workers, a.limit, a.durable, a.shard, a.feature_cut, sketch=sketch, blend=a.blend,
                     inject=a.inject, keep=keep) else 0
 

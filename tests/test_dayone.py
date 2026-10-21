@@ -80,3 +80,34 @@ def test_score_v1_counts_rare_astrophysics_as_interesting():
     assert rep["controls_flagged"]["k"] == 0
     assert len(rep["shortlist"]) == 1
     assert rep["auc_s_target_vs_controls"] == 1.0
+
+
+def test_keep_table_keeps_g3_selections_and_matches_dr3_g3_statistics(tmp_path):
+    import importlib.util
+    import json
+
+    from cosmos_search.dayone import keep
+    from cosmos_search.gaia import features
+
+    spec = importlib.util.spec_from_file_location("dr3_g3", "scripts/dr3_g3.py")
+    g3 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(g3)
+    rng = np.random.default_rng(1)
+    n = 400
+    f = pd.DataFrame({"source_id": np.arange(n, dtype=np.int64), "n_g": rng.integers(5, 80, n),
+                      "med_flux_g": 10 ** ((25.6874 - rng.uniform(8, 20, n)) / 2.5),
+                      "min_z_rob": -rng.exponential(5, n), "max_z_rob": rng.exponential(5, n),
+                      "min_partner_z": -rng.exponential(5, n), "max_partner_z": rng.exponential(5, n)})
+    absw, g_bin = features.g3_abs_w(f)
+    for name, dim, bright in g3.statistics(f):
+        if name in absw:
+            fin = np.isfinite(dim)
+            assert np.allclose(absw[name][fin], np.fmax(dim, bright)[fin])
+    assert (g_bin == g3.strata(f)[0]).all()
+    _, q = g3.run(f)
+    t = keep.table(q, level=0.5, margin=1.0)
+    path = tmp_path / "t.json"
+    path.write_text(json.dumps(t))
+    kept = features.keep_light_curve(f, controls=0, table=path)
+    assert kept[keep.selected(q, 0.5)].all()
+    assert kept.mean() < 1

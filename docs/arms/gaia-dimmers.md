@@ -166,7 +166,7 @@ Record changes of approach here, with the evidence that prompted them.
 - **2026-10-21.** Day-one dress rehearsal on DR3 (docs/dayone.md). Of 6,000 sealed injections, G3 selected 54 hosts, but only 21
   because of the injection (re-pulled without it, the other 33 pass on their own variability); 21 of the 56 dips sampled
   at > 100σ were selected. Sampling and a ~100σ threshold set the recall;
-  the `|z| ≥ 8` keep rule keeps 9% of sources and does not prefer injections, so it is replaced before D2. The
+  the `|z| ≥ 8` keep rule keeps 9% of sources (~0.4 TB at DR4 scale); keep rule v2 (G3 |W| per G bin) keeps 0.37% and every G3 selection. The
   `grey` flag outside tier 3 picked out 17 injections and 3 real sources (two VSX EBs), so ranking v1 sorts on it.
   Stage A called 0 of 5 queued injections unexplained (they read as ε Aur-like or EB), so the shortlist rule
   needs to count rare astrophysical classes as interesting.

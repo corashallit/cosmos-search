@@ -19,6 +19,9 @@ These are ingredients for the dimmer detectors (docs/arms/gaia-dimmers.md), not 
   in vetting pilot 3 about half the non-EB triggers were G-only faults with reject flags 0.
 """
 
+import functools
+import json
+
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -252,12 +255,43 @@ def _features(table):
     return df
 
 
-def keep_light_curve(feat, z=None, controls=CONTROL_FRACTION):
+G_ZP = 25.6874      # as scripts/dr3_g3.py
+MIN_TRANSITS = 10   # as scripts/dr3_g3.py
+
+
+def g3_abs_w(feat):
+    """|W| = max(dim, bright) of G3's `single` and `fov` statistics (scripts/dr3_g3.statistics) and the integer
+    G bin it competes in (dr3_g3.strata). NaN where a statistic is undefined."""
+    ok = feat["n_g"].to_numpy() >= MIN_TRANSITS
+    dim, bright = -feat["min_z_rob"].to_numpy(float), feat["max_z_rob"].to_numpy(float)
+    pdim, pbright = -feat["min_partner_z"].to_numpy(float), feat["max_partner_z"].to_numpy(float)
+    with np.errstate(invalid="ignore"):
+        single = np.where(ok, np.fmax(dim, bright), np.nan)
+        fov = np.where(ok, np.fmax(np.minimum(dim, pdim), np.minimum(bright, pbright)), np.nan)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        g = G_ZP - 2.5 * np.log10(feat["med_flux_g"].to_numpy(dtype=float))
+    g_bin = np.clip(np.floor(np.nan_to_num(g, nan=21.0)), 8, 21).astype(np.int16)
+    return {"single": single, "fov": fov}, g_bin
+
+
+@functools.lru_cache(maxsize=4)
+def _keep_table(path):
+    with open(path) as fh:
+        t = json.load(fh)
+    return {stat: {int(b): float(v) for b, v in t[stat].items()} for stat in ("single", "fov")}
+
+
+def keep_light_curve(feat, z=None, controls=CONTROL_FRACTION, table=None):
     """Loose, symmetric rule for which full light curves to keep from the DR3 pass.
 
-    With z set, the DR4-sized rule instead: |z| >= z on either side, plus a `controls` fraction of random
-    controls (a subset of `control`, by the same hash). The DR3 rule keeps ~13-25% of sources, which on DR4's
-    1.8e9 would be ~10^8 light curves; storage.md budgets ~10^6 random ones plus the candidates.
+    With `table` (a JSON path from `dayone.keep.table`), the DR4 rule: keep a source when its G3 `single` or
+    `fov` |W| reaches that statistic's threshold for its G bin, plus a `controls` fraction of random controls.
+    The table holds a margin times the |W| at which DR3's G3 selected (q <= 0.1); bins where G3 selected
+    nothing keep no light curves beyond the controls. On DR3 at margin 0.6 it keeps 0.37% of sources and every
+    G3 selection. Selections that miss on DR4 are pulled through DataLink afterwards (`dayone.keep.missing`).
+
+    With z set, the rehearsal rule: |z| >= z on either side, plus the controls. At z = 8 it kept 8.25% of DR3
+    (9.2% with 1% controls), ~0.6 TB at DR4 scale; storage.md budgets ~10^6 random ones plus the candidates.
 
     Faint-side and bright-side criteria are mirrored so the kept set carries its own null, and random
     controls are always kept. Criteria are in robust-sigma units only: fractional depth cuts select
@@ -265,6 +299,15 @@ def keep_light_curve(feat, z=None, controls=CONTROL_FRACTION):
     both are left to the ranking stage, which works from the features. Keeps ~13% of sources.
     """
     f = feat
+    if table is not None:
+        thr = _keep_table(str(table))
+        ctrl = control_mask(f["source_id"].to_numpy(), controls) if controls else np.zeros(len(f), bool)
+        absw, g_bin = g3_abs_w(f)
+        keep = ctrl.copy()
+        for stat, w in absw.items():
+            t = np.array([thr[stat].get(int(b), np.inf) for b in g_bin])
+            keep |= np.nan_to_num(w, nan=-np.inf) >= t
+        return keep
     if z is not None:
         ctrl = control_mask(f["source_id"].to_numpy(), controls) if controls else False
         return ((f["min_z_rob"] <= -z) | (f["max_z_rob"] >= z)).to_numpy() | ctrl

@@ -66,7 +66,7 @@ Signals are drawn over DR3's whole span, so most dips fall between epochs, as re
 | Stage | Injections | Note |
 |---|---|---|
 | In the stream | 6,000 | |
-| Light curve kept (\|z\| ≥ 8 or control) | 603 (10%) | background keeps 9.2%: the rule does not prefer injected sources |
+| Light curve kept (\|z\| ≥ 8 or control) | 603 (10%) | 9.2% of the background; most injections have no sampled dip, and of those sampled above 30σ the rule kept 97% |
 | Prefilter (α = 10⁻⁴) | 18 | |
 | G3 selected (q ≤ 0.1, `single` or `fov`) | 54 | ~10 expected by chance from host variability (background rate 0.17%) |
 | of which a dip was sampled | 24 | the other 30 have no epoch inside the injected signal: selected for the host's own variability |
@@ -140,9 +140,9 @@ two highest scores of the 44 are injections.
 
 ## Changes to make before the D2 freeze
 
-1. **Keep rule.** Replace "|z| ≥ 8 either side" (9% of sources, ~0.4 TB at DR4 scale, no preference for
-   injections) with the G3 statistics computed in the stream and a per-G-bin keep threshold set from DR3,
-   and store features for every source as now.
+1. **Keep rule.** Replace "|z| ≥ 8 either side" (9% of sources, ~0.4 TB at DR4 scale) with the G3
+   statistics computed in the stream and a per-G-bin keep threshold set from DR3, and store features for
+   every source as now. Done after the rehearsal: see "Keep rule v2" below.
 2. **Shortlist rule v1.** Pre-register a rule on 1 − P(common classes), or rank by P(u) relative to the
    controls, and test it on a fresh blind batch, because the post-hoc numbers above were chosen after seeing
    the labels.
@@ -178,3 +178,23 @@ numbers that suggested it do not count as its test.
 - **Decision.** Adopt v1 for the D2 freeze if target recall ≥ 0.5, at most 1 of the 14 controls is flagged,
   and AUC(S) ≥ AUC(P(u)). Otherwise revise it and test again on another fresh batch. The batch is small, so
   the result decides which rule goes forward, while the shortlist FP figure still waits for V3's calibration run.
+
+## Keep rule v2 (after the rehearsal)
+
+The stream keeps a light curve when the source's G3 `single` or `fov` |W| reaches 0.6 × the |W| at which G3
+selected on DR3, for its G bin and statistic (`features.keep_light_curve(table=…)`, table from
+`python -m cosmos_search.dayone.keep table --q g3/q.parquet`, stream flag `--keep-table`). Bins where G3
+selected nothing keep only the random controls, set to 0.05% for DR4 (~10⁶ sources, docs/storage.md).
+Measured on all of DR3's features, with the injections in them:
+
+| Rule | Sources kept | G3 selections kept | Injections sampled > 30σ kept | > 100σ kept |
+|---|---|---|---|---|
+| \|z\| ≥ 8 (rehearsal) | 8.25% | 100% | 97% | |
+| \|W\| ≥ 16, any G | 2.9% | 98.9% | 51% | |
+| v2, margin 0.6 | 0.37% (0.42% with controls) | 100% | 37% | 55% |
+
+v2 keeps all of G3's selections at a twentieth of the old volume, ~20 GB of light curves at DR4 scale
+against ~0.4 TB. The sampled injections it drops are ones G3 does not select either, so nothing downstream
+loses them; a more sensitive detector would need its own keep table. A two-file stream run kept 39 of 10,140
+sources (0.38%). DR4 thresholds will differ (about twice the epochs, other noise), so after G3 runs on DR4,
+`python -m cosmos_search.dayone.keep missing` lists selections without a light curve for a DataLink pull.
