@@ -8,7 +8,7 @@ from pyrage import encrypt, x25519
 from cosmos_search.inject.classes.vetting_decoys import DECOY_SPECS, make_decoy, vetting_batch
 from cosmos_search.vetting import coincidence, design, quantify, scoring, taxonomy
 from cosmos_search.vetting.anonymise import ecliptic_latitude, galactic_latitude, leak_scan, scrub_source
-from cosmos_search.vetting.batch import build_batch, harmonise
+from cosmos_search.vetting.batch import build_batch, harmonise, simple_dips
 from cosmos_search.vetting.candidate import Candidate
 from cosmos_search.vetting.commit import CommitError, commit, load_verdicts, reveal
 from cosmos_search.vetting.packet import LeakError, build
@@ -115,7 +115,8 @@ def test_batch_harmonises_fields_and_shuffles():
 @pytest.mark.parametrize("spec", sorted(DECOY_SPECS))
 def test_every_decoy_spec_injects(spec):
     host = gaia_like(seed=5)
-    cand, extra, truth = make_decoy(host, spec, np.random.default_rng(1))
+    detect = None if spec in ("secular_fade", "step") else simple_dips  # not what a dip detector is for
+    cand, extra, truth = make_decoy(host, spec, np.random.default_rng(1), max_tries=3000, detect=detect)
     assert extra["kind"] == "decoy" and extra["label"] in taxonomy.LEAVES
     assert truth["host"] == host.candidate_id
     assert truth["visibility"]["max_dev"] >= 4
@@ -336,7 +337,8 @@ def test_decoys_are_visible_before_the_tail_cut():
     t0, t1 = host.time_span()
     cut = t0 + 0.8 * (t1 - t0)
     for spec in ("grey_dip", "step", "chromatic_flip", "single_band_dip"):
-        cand, extra, truth = make_decoy(host, spec, np.random.default_rng(3), t_cut=cut)
+        detect = None if spec == "step" else simple_dips
+        cand, extra, truth = make_decoy(host, spec, np.random.default_rng(3), t_cut=cut, max_tries=3000, detect=detect)
         assert truth["visibility"]["max_dev"] >= 4 and truth["visibility"]["n_dev3"] >= 2
     # A dip placed entirely in the withheld tail is not visible.
     hidden = lcinj.Dip(t0=t1 - 5, covering=0.5, ingress=1, egress=1, flat=3)
@@ -359,8 +361,8 @@ def test_anomaly_probes_must_defeat_every_single_period():
 
 def test_anomaly_probe_decoys_pass_the_identifiability_check():
     host = gaia_like(seed=11, n=150)
-    cand, extra, truth = make_decoy(host, "grey_primes", np.random.default_rng(5))
-    assert extra["role"] == "anomaly_probe" and truth["visibility"]["n_events"] >= 3
+    cand, extra, truth = make_decoy(host, "grey_primes", np.random.default_rng(5), max_tries=3000)
+    assert extra["role"] == "anomaly_probe" and truth["visibility"]["n_events"] >= 4
 
 
 def test_random_packet_ids_never_trip_the_leak_scan():
@@ -369,3 +371,65 @@ def test_random_packet_ids_never_trip_the_leak_scan():
         packet, _ = build(cand)
         assert leak_scan(packet["text"]) == []
     assert leak_scan("source 4567890123456789") == ["long_integer"]
+
+
+def test_injection_reaches_every_flux_channel_with_photon_noise():
+    from cosmos_search.inject.classes.vetting_decoys import inject_candidate
+    from cosmos_search.inject import lightcurve as lcinj
+    host = gaia_like(seed=2, n=4000)
+    for lc in host.lightcurves:
+        lc.meta["flux_small_aperture"] = lc.flux.copy()
+        lc.meta["flux_small_aperture_err"] = lc.flux_err.copy()
+    t0, t1 = host.time_span()
+    dip = lcinj.Dip(t0=0.5 * (t0 + t1), covering=0.75, ingress=1, egress=1, flat=0.6 * (t1 - t0))
+    cand = inject_candidate(host, dip, rng=np.random.default_rng(0))
+    g, g0 = cand.lightcurves[0], host.lightcurves[0]
+    k = dip.factor(g.time, "G")
+    inside = k < 0.3
+    assert inside.sum() > 1000
+    # Every channel dips; errors follow sqrt(k), not k.
+    assert np.allclose(g.meta["flux_small_aperture"][inside].mean(), g.flux[inside].mean(), rtol=0.01)
+    assert np.allclose(g.flux_err[inside], g0.flux_err[inside] * np.sqrt(k[inside]))
+    assert np.allclose(g.meta["flux_small_aperture_err"][inside], g0.flux_err[inside] * np.sqrt(k[inside]))
+    # In-dip scatter matches the quoted errors (photon-limited), as for a real dimming.
+    pull = (g.flux[inside] - k[inside]) / g.flux_err[inside]
+    assert 0.9 < np.std(pull) < 1.1
+
+
+def test_single_period_test_allows_an_eccentric_secondary():
+    from cosmos_search.inject.classes.vetting_decoys import single_period_fits
+    t = np.sort(np.random.default_rng(1).uniform(0, 1000, 400))
+    per, w = 41.7, 0.3
+    ph = ((t - 3.0) / per) % 1 * per
+    d = np.minimum(np.minimum(ph, per - ph), np.abs(ph - 0.31 * per))
+    # w is the full duration; epochs on ingress/egress are neither clearly in nor clearly out, as in visibility().
+    assert single_period_fits(t[d < 0.35 * w], t[d > 0.5 * w], w, 1000)
+
+
+def test_decoy_signals_can_continue_into_the_withheld_tail():
+    host = gaia_like(seed=7, n=150)
+    t0, t1 = host.time_span()
+    cut = t0 + 0.8 * (t1 - t0)
+    tail = host.lightcurves[0].time[host.lightcurves[0].time >= cut]
+    in_tail = 0
+    for seed in range(8):
+        cand, extra, truth = make_decoy(host, "periodic_grey", np.random.default_rng(seed), t_cut=cut)
+        in_tail += np.any(cand.lightcurves[0].flux[-len(tail):] < 0.97)
+    assert in_tail >= 1
+
+
+def test_chromatic_flip_decoys_show_both_halves():
+    host = gaia_like(seed=4, n=150)
+    cand, extra, truth = make_decoy(host, "chromatic_flip", np.random.default_rng(2), max_tries=3000)
+    bp, rp = (next(lc for lc in cand.lightcurves if lc.band == b) for b in ("BP", "RP"))
+    i = np.argmin(bp.flux)
+    assert bp.flux[i] < 1 - 3 * 0.004 and rp.flux[i] > 1 + 3 * 0.003
+
+
+def test_decoys_trigger_the_candidate_detector():
+    host = gaia_like(seed=9, n=150)
+    for spec in ("grey_dip", "dust_dip", "single_band_dip"):
+        cand, extra, truth = make_decoy(host, spec, np.random.default_rng(4))
+        assert simple_dips(cand)
+        if spec == "single_band_dip":
+            assert truth["bands"] == ["G"]

@@ -45,8 +45,11 @@ null "this false-positive class does not explain the signal": a small p supports
 3. If the packet has prediction targets, answer them from your leading explanations, weighted by how much you
    believe each, before you fix the class probabilities. They are scored against withheld data; an explanation
    that predicts nothing is not an explanation.
-4. Assign class probabilities over the listed classes. "unexplained" is the probability that none of the listed
-   explanations fits the data in the packet. It is not a vote for anything exotic.
+4. Assign class probabilities over the listed classes, for the cause of the detected dips (the packet's "Detected
+   dips"; if none are listed, for the star's variability as a whole). A star can vary in one way and dip for a
+   different reason: say what the star does otherwise in the explanation, but put the probability on what causes
+   the dips. "unexplained" is the probability that none of the listed explanations fits the data in the packet.
+   It is not a vote for anything exotic.
 5. If you believe this is a specific known object, name it in recognised_as. Recognition is recorded separately;
    still reason from the data.
 

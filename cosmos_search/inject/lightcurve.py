@@ -248,12 +248,15 @@ def sample(rng, family, t_min, t_max):
     if family == "step":
         return Step(t_step=rng.uniform(t_min, t_max), fraction=float(rng.choice([-1, 1]) * _loguniform(rng, 0.002, 0.1)))
     if family == "chromatic_flip":
-        # BP dims while RP brightens: no single screen does this.
+        # BP dims while RP brightens: no single screen does this. The brightening scales with the dip so that
+        # both halves are present whenever the event is: with independent amplitudes one half usually swamps
+        # the other and the result is an ordinary chromatic dip or a red brightening.
         dur = _loguniform(rng, 0.1, 10.0)
         t0 = rng.uniform(t_min, t_max)
+        covering = _loguniform(rng, 0.01, 0.2)
         return Composite([
-            Dip(t0=t0, covering=_loguniform(rng, 0.01, 0.2), tau_ref=1.0, beta=4.0, ingress=dur / 2, egress=dur / 2, shape="gaussian"),
-            Flare(t0=t0, amplitude=_loguniform(rng, 0.005, 0.05), rise=dur / 4, decay=dur / 2, gamma=-4.0),
+            Dip(t0=t0, covering=covering, tau_ref=1.0, beta=4.0, ingress=dur / 2, egress=dur / 2, shape="gaussian"),
+            Flare(t0=t0, amplitude=covering * rng.uniform(0.5, 1.5), rise=dur / 4, decay=dur / 2, gamma=-4.0),
         ])
     if family == "flare":
         return Flare(t0=rng.uniform(t_min, t_max), amplitude=_loguniform(rng, 0.005, 1.0),

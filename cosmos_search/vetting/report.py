@@ -74,6 +74,23 @@ def score(verdicts, keys):
         # False "unexplained" on known-answer controls is the shortlist's main contaminant.
         rep["control_false_unexplained"] = _rate(sum(decision(v) == "unexplained" for v in controls), len(controls))
 
+    probes = by_role.get("anomaly_probe", [])
+    if probes and controls:
+        # Stage A's job in the queue is ranking. What matters is whether P(unexplained) puts planted anomalies
+        # above known-answer controls, whichever group wins the argmax. In pilot 2, probes got P(u) 0.20-0.40,
+        # the largest single class, but "astrophysical" summed over many leaves still won.
+        pu = [v.groups["unexplained"] for v in probes + controls]
+        lab = [True] * len(probes) + [False] * len(controls)
+        top = max(v.groups["unexplained"] for v in controls)
+        rep["unexplained_ranking"] = {
+            "auc_probes_vs_controls": scoring.auc(pu, lab),
+            "auc_p": scoring.auc_permutation_p(pu, lab),
+            "max_control_p_unexplained": top,
+            "probes_above_every_control": _rate(sum(v.groups["unexplained"] > top for v in probes), len(probes)),
+            "probes_unexplained_top_leaf": _rate(sum(max(v.class_probs, key=v.class_probs.get) == "unexplained"
+                                                     for v in probes), len(probes)),
+        }
+
     rep["held_out"] = held_out_skill(ok, keys)
     return rep
 
