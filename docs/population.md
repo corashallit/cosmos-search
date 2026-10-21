@@ -1,6 +1,6 @@
 # Population test for one-visit dips (pre-registered plan)
 
-Status: **plan, frozen before any event was extracted from the real light curves.** The commit that adds this
+Status: **DR3 rehearsal run (results in §12).** The plan was frozen before any event was extracted from the real light curves. The commit that adds this
 file is the pre-registration. Changes after it are listed in §10 with their reason and date, and the DR3 run
 reports results under the rules as they stood here.
 
@@ -230,3 +230,74 @@ masked events had been seen at that point; nothing about where on the sky or at 
   and `vari_classifier_result`. 11,754,237 rows, on the share at
   `data/gaia-dr3-epoch/aux/aux_astrometry.parquet`.
 - Code: `cosmos_search/population/` (`run.py` drives the steps, `calibrate.py` the universes).
+
+## 12. DR3 results (2026-10-21)
+
+**Summary.** The machinery works end to end on all of DR3, and its null model is honest only with the
+overdispersion term. Half A gives five windows at family-wise p < 0.05. Four replicate in half B, which is what
+steady populations do. DPAC class mix plus all-Gaia source density accounts for four of them. The fifth sits toward
+the southern bulge and coincides with the strongest hotspot of the single-epoch artefact monitor. Under §6 it is
+"not attributed", and the bulge population and DR3's known |b| 10–20° south processing anomaly are the leads.
+Injected excess regions are recovered once they add about 12 single one-visit dips to half A, and not at 8 or fewer.
+
+**Sample and events.** 11,327,348 stars with ≥ 15 good G epochs, outside the Magellanic zones. Half A: 26,531 SOV
+events before the time masks and 23,131 after (half B: 25,727 after its own mask). The half-A mask removed 26% of all
+events and 8.6% of epochs, over 421 whole-sky hours and 560 hour × pixel cells on 123 days. Most of what it removed
+is single-epoch brightenings.
+
+**Null model (half A).** The ecliptic-latitude term passed its test (LRT 564 on 2 df), so it stays: rates at
+|β| > 15° are 0.6× those near the ecliptic, which points to solar-system objects or the scanning law. The forward
+eclipse model carries real information: stars in its top sextile of eclipse share have 12× the SOV rate. Unknown
+BP/RP blend fraction gives 3.5×. Overdispersion is large: φ = 2.2–3.5 for all-distance windows (up to 6.1 at some
+scales), so a Poisson-only scan would overstate significance. Its maximum LLR is 150, against 43 for the quasi-Poisson
+statistic. Refitting the GLM in null realisations leaves the null maximum unchanged (median 9.4 against 9.8).
+
+**Candidates (frozen at 34a5fc2) and replication.**
+
+| window (RA, Dec, radius, distance) | l, b | A: O / E | B: O / E (φ_B) | B p (NB) | replicated | E with class + density, A / B |
+|---|---|---|---|---|---|---|
+| 273.0, −45.0, 8°, all | 348°, −12° | 517 / 216 | 490 / 238 (4.2) | < 10⁻⁴ | yes | 333 / 385 |
+| 286.9, +7.2, 8°, all | 41°, 0° | 559 / 316 | 606 / 341 (4.2) | < 10⁻⁴ | yes | 456 / 513 |
+| 208.9, −48.1, 8°, all | 314°, +13° | 256 / 127 | 223 / 115 (4.2) | < 10⁻⁴ | yes | 175 / 164 |
+| 284.1, −9.6, 8°, 500–4000 pc | 25°, −5° | 289 / 160 | 155 / 117 (3.2) | 0.033 | no | 226 / 159 |
+| 256.5, −60.4, 8°, all | 330°, −12° | 514 / 328 | 583 / 407 (4.2) | 10⁻⁴ | yes | 407 / 517 |
+
+**Attribution.**
+
+- No window overlaps a listed star-forming region at its distance, apart from Serpens/Aquila (window 2) and UCL/LCC
+  (window 3), whose hosts are not YSOs.
+- The SOV hosts are mostly DPAC ECL, LPV and RS.
+- Refitting with DPAC class, then with all-Gaia source density per nside-64 pixel (attribution only, §1 point 4),
+  closes most of each excess. Re-scanning half A under class + density leaves one window at p < 0.05:
+  window 1, with 517 observed against 333 expected (B: 490 against 385).
+- Window 1 in more detail:
+  - Under the class + density model, every bulge-direction window at |b| ≈ 12° and 2–8 kpc shows O/E of 1.2–1.4.
+    Window 1's position is the strongest of them, at 1.7 in A and 1.4 in B.
+  - The single-epoch dip monitor (SOV-1) has its top window there too (272.8°, −41.8°, 4–8 kpc; 2,038 against
+    1,153).
+  - The leads are the bulge population, which the colour–magnitude covariates do not encode, and the DR3
+    rejected-point excess at |b| 10–20° south (docs/infra/gaia-epoch.md).
+- The mirror class shows no excess there.
+
+**Calibration (12 sealed universes, 15 regions; candidates committed before the reveal).**
+
+- Recovered: 4 of 4 regions that added ≥ 12 half-A SOV events (12, 15, 32 and 41 events, ranks 1–3), and 0 of 11
+  that added ≤ 8.
+- The plan's target counts were rarely reached. A region's stars got many dips each, and a star with more than one
+  event is no longer a single one-visit dip, so small regions saturate. A second calibration should spread
+  strengths across regions of 10³–10⁴ stars.
+- The real windows appear as candidates in every universe, as they should.
+
+**Dispersion checks.** Under the same model, the mirror class has φ up to 4.4 and SOV-1 up to 10.9 (8° windows,
+4–8 kpc and beyond). With SOV-1's φ the bulge windows would not pass. That is a reason to treat window 1 as an
+instrument-or-population lead, not a candidate.
+
+**What this means for DR4.** The test runs on all of DR4 with the same code, a few CPU-hours per pass on 4 cores
+for DR3's 11 M stars. Before DR4:
+
+- Add source density to the null's covariates. It is not read from the dips, and §1 point 4 allows it.
+- Add a bulge or Galactic-population term, for example a Besançon-model mix per window or kinematics from proper
+  motions, so the null can represent populations.
+- DR4's quiet stars change everything measured here. The covariate effects and φ must be re-estimated on DR4's
+  half A.
+- Use GOST's predicted transits (the coverage thread's `gaia/gost.py`) for exposure and scan-angle attribution.
