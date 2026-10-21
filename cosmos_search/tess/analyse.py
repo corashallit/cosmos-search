@@ -89,7 +89,7 @@ def _get(r, name, default=0.0):
 def analyse(out):
     out = Path(out)
     feats, events, inj = load(out)
-    real = feats[feats.variant == "real"].set_index("row")
+    real = feats[feats.variant == "real"].set_index("row").sort_index()
     meta = real[GROUP + ["tmag", "tic"]]
     n_per_group = real.groupby(GROUP).size().to_dict()
 
@@ -135,15 +135,17 @@ def analyse(out):
 
     # --- Injection recovery (dip detector) ---
     inj = inj.set_index("row").reindex(rows)
-    real_det = det[(det.variant == "real")]
+    empty = det.iloc[:0]
+    inj_by_row = dict(tuple(det[det.variant == "injected"].groupby("row")))
+    real_by_row = dict(tuple(det[det.variant == "real"].groupby("row")))
     rec_rows = []
     for row in rows:
         tr = inj.loc[row]
         if not isinstance(tr.family, str):
             continue
         wins = json.loads(tr.windows)
-        cand = det[(det.variant == "injected") & (det.row == row)]
-        host = real_det[real_det.row == row]
+        cand = inj_by_row.get(row, empty)
+        host = real_by_row.get(row, empty)
         best_snr, best_far, sudden = 0.0, 1.0, False
         for e in cand.itertuples(index=False):
             if not any(e.t_start <= b + 0.05 and a - 0.05 <= e.t_end for a, b in wins):

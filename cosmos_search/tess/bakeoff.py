@@ -162,6 +162,24 @@ def cmd_process(args):
     print("merged")
 
 
+def cmd_merge(args):
+    """Combine processed runs into one directory, offsetting row ids so they stay unique."""
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    frames = {n: [] for n in ("targets", "features", "events", "injections")}
+    for k, src in enumerate(args.runs):
+        for name in frames:
+            df = pd.read_parquet(Path(src) / f"{name}.parquet")
+            df["row"] = df["row"] + k * ROW_OFFSET
+            frames[name].append(df)
+    for name, dfs in frames.items():
+        pd.concat(dfs, ignore_index=True).to_parquet(out / f"{name}.parquet")
+    print(f"merged {len(args.runs)} runs into {out}")
+
+
+ROW_OFFSET = 1_000_000
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="cosmos_search.tess.bakeoff")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -175,6 +193,10 @@ def main(argv=None):
     r.add_argument("--out", required=True)
     r.add_argument("--workers", type=int, default=8)
     r.set_defaults(fn=cmd_process)
+    m = sub.add_parser("merge")
+    m.add_argument("--out", required=True)
+    m.add_argument("runs", nargs="+")
+    m.set_defaults(fn=cmd_merge)
     args = p.parse_args(argv)
     args.fn(args)
 
