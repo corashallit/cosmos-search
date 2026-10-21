@@ -6,6 +6,12 @@ pyvo
 astroquery
 astropy
 pyarrow
+pandas
+scipy
+scikit-learn
 
 [dev]
 pytest
+
+[plots]
+matplotlib

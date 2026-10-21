@@ -28,6 +28,7 @@ to a star's output must do, and from what Gaia can test.
 | **Dip colour** | Small dust grains redden (extinction rising toward the blue); bodies much larger than the wavelength are grey; some physics makes dips bluer | R = (ΔF/F)_RP / (ΔF/F)_BP. R ≈ 1 is grey. Plot against depth; natural dust dippers sit at R < 1 |
 | **Secular fading or brightening** | Boyajian's star faded ~0.34 %/yr over Kepler's first ~3 years, then ~2.5 % in 200 days (Montet & Simon 2016); quiet main-sequence stars change far less | Trend over 66 months relative to stars with the same magnitude, colour and sky region (which removes calibration drift); extend with DR3, Hipparcos/Tycho for bright stars |
 | **Energy budget** | Absorbed starlight must come out somewhere. Covering fraction f ≈ depth × duty cycle implies an infrared excess L_IR ≈ f L_* at T ≈ 280 K × (L_*/L_☉)^¼ (r/1 au)^-½ | Predict the W3/W4 excess from the measured dimming and compare with AllWISE/unWISE. A dimmer with *no* excess where one is predicted is more interesting than one with it: the material is cold, far out, reflective or not absorbing |
+| **Per-event physics** | Sparse epochs rarely reveal timing structure: on 12 DR3 hosts, 1 in 4,800 aperiodic dip trains was recognisable as aperiodic (docs/vetting.md §10). What one event can carry is a contradiction with every orbit around this star | A dip seen in both fields of view lasts ≥ 106.5 min, and one seen on consecutive scans lasts ≥ ~6 h. For an occulter on a bound orbit, a duration D across a star of radius R* and mass M* needs speed ≲ 2R*/D (for occulters smaller than the star; an extended cloud loosens this), hence a ≳ G M* D² / (4 R*²) and P ≳ 2π a / v. That sets a minimum recurrence, to compare with the dips the epochs show. Depth gives the occulter's projected size, ≥ √depth × R*, against the companion that size implies and its light. Colour (grey vs reddened) separates bodies from dust. R* and M* come from parallax, G and BP−RP |
 | **Asymmetry** | Instrumental noise is roughly symmetric about the median, real occultation is one-sided | Compare the faint tail with the bright tail for the same star and for its strata (statistics.md §2) |
 
 The usual "no infrared excess" cut removes young-star dippers, but used as a binary filter it throws away
@@ -89,7 +90,7 @@ so the per-CCD test is DR4-only.
 ## Ranking
 
 Score = calibrated significance after invariance tests × physics flags (grey dips, energy-budget tension,
-secular trend) × verifiability (G ≲ 13 for amateur photometry, recent activity, TESS coverage, sky
+secular trend, per-event orbit tension) × verifiability (G ≲ 13 for amateur photometry, recent activity, TESS coverage, sky
 position) × not already explained (SIMBAD/VSX types, literature). The weights are not fixed by hand. They
 start flat, then are fitted to injection recovery and vetting outcomes, with a random-audit stream below the
 threshold so we can estimate what the ranking misses (statistics.md §5).
