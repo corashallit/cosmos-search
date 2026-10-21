@@ -24,12 +24,27 @@ Nulls are built from the data so that they keep its systematics:
 - **Invariance nulls.** Gaia's redundancy gives tests whose null is exact: agreement across the 9 CCDs of a
   transit, across the two fields of view, between G and BP/RP. An artefact usually fails at least one.
 
+**How far out a null reaches.** An empirical null of n draws resolves p down to 1/(n + 1), and the
+add-one form (1 + #exceedances)/(1 + n) is valid for exchangeable draws. The mirror null has one draw per
+source, so a stratum holding 10⁶ sources resolves p ≈ 10⁻⁶ directly. For N = 10⁹ and a budget of 10³ false
+alarms the threshold is p ≈ 10⁻⁶, which sits at that resolution. Strata should therefore be coarse enough to
+hold ≳ 10⁶ sources wherever the threshold has to be set.
+
+Beyond the last few exceedances, p comes from a generalised Pareto fit to the null's top 1% (the
+Pickands–Balkema–de Haan theorem makes this nearly assumption-free). Shape uncertainty compounds with
+distance, so the default fit uses the 90th bootstrap percentile of the shape and never a short tail.
+On test nulls of 10⁵ draws this costs a factor of a few to ~10² in p six decades out, and is too small by
+more than 3× in ≲ 10% of nulls. Those far-tail p-values decide order within the shortlist, never whether
+the threshold is met. Code: `cosmos_search.stats.nulls`.
+
 ## 3. Multiple testing
 
 Within a source, combine statistics with a method robust to correlation (Cauchy combination, or minimum p
 with a Šidák correction). Across sources, control the false discovery rate (Benjamini–Hochberg, or Storey
 q-values when nearly all sources are null). Periodogram and dip searches carry a per-light-curve
-look-elsewhere effect; calibrate it with injections and nulls, not analytically.
+look-elsewhere effect; calibrate it with injections and nulls, not analytically. Code:
+`cosmos_search.stats.multiple`. The Cauchy combination stays valid under the strong dependence between
+detectors run on the same light curve, which Fisher's method does not.
 
 ## 4. Injection-recovery
 
@@ -47,7 +62,7 @@ The light-curve families are implemented in `cosmos_search/inject/lightcurve.py`
 Occultations are parametrised physically (covering fraction × (1 − e^−τ(λ)), τ ∝ λ^−β), so grey, reddened
 and blue dips come from one model. Hosts are drawn from the real sample with matched magnitude, colour and
 sky distributions. Report
-completeness as maps over the family's parameters. Split injections into a visible **tuning** set and a
+completeness as maps over the family's parameters, with Wilson intervals (`cosmos_search.inject.recovery`). Split injections into a visible **tuning** set and a
 **sealed** set made by the truth repo; final numbers come only from the sealed set (blinding.md).
 
 ## 5. Ranking as a decision
@@ -62,7 +77,9 @@ recovery accumulate (with monotone constraints so a stronger anomaly never ranks
 
 **Random audit.** Spend ~5–10% of vetting slots on candidates drawn at random from below the threshold,
 with known inclusion probabilities. Weighting their outcomes by those probabilities gives an unbiased
-estimate of what the ranking misses, which is the only honest check on its built-in assumptions.
+estimate of what the ranking misses, and that estimate is the only check on its built-in assumptions.
+Inclusion probabilities lean towards higher scores but have a floor, so every source can be drawn
+(`cosmos_search.stats.audit`, Horvitz–Thompson with its standard error).
 
 ## 6. Decoys and controls for vetting
 

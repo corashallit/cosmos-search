@@ -49,10 +49,10 @@ These apply to every arm and every thread.
 | **Gaia dimmers (main)** | | | |
 | G1 | DR3 rehearsal sample: full DR3 epoch photometry (11.75 M) plus random controls | I2 | unassigned |
 | G2 | Detectors v0: invariance tests (FoV pairs, bands), dip colour, secular trend, surprisal score | G1 | TESS thread's survey-agnostic detector in `dimming/`, then Gaia-specific tests |
-| G3 | Empirical nulls (brightening mirror, stratified permutation) and calibrated false-alarm rates | G2 | unassigned |
-| G4 | Injection families (library ✓ `inject/lightcurve.py`) and recovery maps on DR3 | G2 | DR4 plan thread (library); detector owner (maps) |
+| G3 | Empirical nulls (brightening mirror, stratified permutation) and calibrated false-alarm rates | G2 | DR4 plan thread (library ✓ `stats/`); detector owner (strata and runs) |
+| G4 | Injection families (library ✓ `inject/lightcurve.py`) and recovery maps on DR3 (binning ✓ `inject/recovery.py`) | G2 | DR4 plan thread (library); detector owner (maps) |
 | G5 | Energy-budget test against WISE | I5, G2 | unassigned |
-| G6 | Ranking with value term, plus a random-audit stream below threshold | G3, G4, G5 | unassigned |
+| G6 | Ranking with value term, plus a random-audit stream below threshold (audit sampler ✓ `stats/audit.py`) | G3, G4, G5 | unassigned |
 | G7 | DR4 adapters from the draft data model (per-CCD G, new vari tables) | I3 | Archive thread |
 | **TESS dimmers (side)** | | | |
 | T1–T4 | FFI access, detector in `dimming/`, injections, 10⁴-target comparison run | I1 | TESS thread |
