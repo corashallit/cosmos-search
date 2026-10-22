@@ -1,0 +1,20 @@
+{
+ "batch": "astrometry-blind-1",
+ "flags_sha256": "860363c32adf5d7d776d4fcc65d8e5fece0baaa538fab4836c6ad1c60c155f5b",
+ "plan": {
+  "n": 1100,
+  "n_nat": 800,
+  "n_nongrav": 240,
+  "n_instrument": 60,
+  "amp_range": [
+   3.0,
+   50.0
+  ],
+  "batch_sha256": "76d1d35c5e55f853bfd41b18934bbb8000f2f50002ed55a60915cac63f8edf46",
+  "truth_sha256": "29ef5c54a2f1c0eae6fcee562ef47ca90dfdc44a6cfa3270c3f122cb2c403588",
+  "code_commit": "a7f12a6dc975f40136e7fd4f1ee990dd2c93985e",
+  "rule": "astrometry-v1"
+ },
+ "code_commit": "a7f12a6dc975f40136e7fd4f1ee990dd2c93985e",
+ "rule": "astrometry-v1"
+}
