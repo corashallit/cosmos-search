@@ -1,5 +1,6 @@
 """DR3 check of the DR4 null (docs/population.md §9): LRTs for the new terms, overdispersion before and after,
-the frozen windows under the new null, and a half-A rescan with phi = max(phi_SOV, phi_SOV1) (review R21).
+the frozen windows under the new null, and a half-A rescan under the DR4 rule: phi from the SOV and SOV-1
+curves in E, the larger at each window's E (review R21).
 Exploratory: both DR3 halves are already open, so nothing here is confirmatory."""
 import argparse, json
 import numpy as np, pandas as pd
@@ -9,6 +10,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--out", default="/home/user/pop/full")
 ap.add_argument("--density", default="/home/user/pop/aux/density_hpx6.parquet")
 ap.add_argument("--write", default="/home/user/pop/dr4null/check.json")
+ap.add_argument("--skip-lrt", action="store_true")
 a = ap.parse_args()
 
 stars = analysis.load_stars(a.out, density=a.density)
@@ -23,7 +25,7 @@ dr4 = list(glm.DR4)
 res = {"n_stars": len(stars), "frozen_terms": frozen, "dr4_terms": dr4, "lrt_A": {}}
 
 base = list(frozen)
-for t in ("dens", "vt", "gal"):
+for t in ([] if a.skip_lrt else ("dens", "vt", "gal")):
     stat, df, p = glm.lrt(codes, y["A"], E["A"], base, t)
     res["lrt_A"][t] = {"stat": stat, "df": df, "p": p}
     print("LRT", t, round(stat, 1), df, p, flush=True)
@@ -31,13 +33,16 @@ for t in ("dens", "vt", "gal"):
 
 win = scan.Windows()
 px, sh = stars.pixel.to_numpy(), stars.shell.to_numpy()
-lam, phi = {}, {}
+lam, phi, phi_w = {}, {}, {}
 for name, terms in (("frozen", frozen), ("dr4", dr4)):
     for h in "AB":
         m = glm.fit(codes, y[h], E[h], terms)
         lam[(name, h)] = m["predict"](codes, E[h])
-        phi[(name, h, "SOV")] = scan.dispersion(win, scan.cell_sums(px, sh, y[h]), scan.cell_sums(px, sh, lam[(name, h)]))[1]
+        obs, lc = scan.cell_sums(px, sh, y[h]), scan.cell_sums(px, sh, lam[(name, h)])
+        phi[(name, h, "SOV")] = scan.dispersion(win, obs, lc)[1]
         phi[(name, h, "SOV1")] = analysis.monitor_dispersion(stars, y1[h], E[h], terms, win)
+        phi_w[(name, h)] = scan.phi_from_curves(win, lc, scan.dispersion_curve(win, obs, lc),
+                                                analysis.monitor_dispersion(stars, y1[h], E[h], terms, win, curve=True))
         if name == "dr4" and h == "A":
             res["dr4_coef_A"] = {l: round(float(b), 3) for l, b in zip(m["labels"], m["beta"])
                                  if l.split("=")[0] in ("dens", "vt", "gal")}
@@ -55,9 +60,11 @@ for c in rep["results"]:
     for name in ("frozen", "dr4"):
         for h in "AB":
             o, e = float(y[h][mem].sum()), float(lam[(name, h)][mem].sum())
-            f = float(max(phi[(name, h, "SOV")][ri, j], phi[(name, h, "SOV1")][ri, j]))
+            f = float(phi_w[(name, h)][c["disc"], j])
             p = float(stats.nbinom.sf(o - 1, e / (f - 1), 1 / f)) if f > 1 else float(stats.poisson.sf(o - 1, e))
-            row[f"{name}_{h}"] = {"O": o, "E": round(e, 1), "phi_max": round(f, 2), "p_nb": p}
+            row[f"{name}_{h}"] = {"O": o, "E": round(e, 1), "phi": round(f, 2), "p_nb": p,
+                                  "phi_scale_sov": round(float(phi[(name, h, "SOV")][ri, j]), 2),
+                                  "phi_scale_sov1": round(float(phi[(name, h, "SOV1")][ri, j]), 2)}
     rows.append(row); print(json.dumps(row), flush=True)
 res["frozen_windows"] = rows
 
@@ -67,13 +74,12 @@ info.pop("_lam")
 for c in cands:
     mem = analysis.window_members(stars, win, c)
     o, e = float(y["B"][mem].sum()), float(lam[("dr4", "B")][mem].sum())
-    ri, j = int(win.disc[c["disc"], 1]), c["shell_window"]
-    f = float(max(phi[("dr4", "B", "SOV")][ri, j], phi[("dr4", "B", "SOV1")][ri, j]))
-    c["B"] = {"O": o, "E": e, "phi_max": f,
+    f = float(phi_w[("dr4", "B")][c["disc"], c["shell_window"]])
+    c["B"] = {"O": o, "E": e, "phi": f,
               "p_nb": float(stats.nbinom.sf(o - 1, e / (f - 1), 1 / f)) if f > 1 else float(stats.poisson.sf(o - 1, e))}
     print("rescan", round(c["ra"], 1), round(c["dec"], 1), c["radius_deg"], c["distance"], c["O"], round(c["E"], 1),
           c["p_fw"], "B", o, round(e, 1), c["B"]["p_nb"], flush=True)
 res["rescan_A"] = {"candidates": cands, "max_llr": info["max_llr"], "null_quantiles": info["null_quantiles"],
-                   "phi_sov": info["phi_sov_per_scale"], "phi_monitor": info["phi_monitor_per_scale"]}
+                   "phi_curves": info["phi_curves"]}
 json.dump(res, open(a.write, "w"), indent=1, default=float)
 print("done", flush=True)

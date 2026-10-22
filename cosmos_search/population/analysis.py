@@ -193,6 +193,33 @@ def refit_check(stars, lam, e, terms, win, n=10, rng=None):
     return out
 
 
+def scan_coincidence(t, ra, dec, dt=0.1, sep_deg=2.0):
+    """Events of one window that share a scan: deepest epochs within dt days and sep_deg degrees of another event.
+    Returns (n_events, n_coincident, n_declustered), declustered counting each coincident group once. Gaia
+    crosses a 2-degree patch in seconds, so a group is one scan, and independent dips almost never share one (DR4
+    attribution, §9)."""
+    t, ra, dec = (np.asarray(x, float) for x in (t, ra, dec))
+    n = len(t)
+    parent = np.arange(n)
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    order = np.argsort(t)
+    for a_i, i in enumerate(order):
+        for j in order[a_i + 1:]:
+            if t[j] - t[i] > dt:
+                break
+            if _angdist(ra[i], dec[i], ra[j], dec[j]) < sep_deg:
+                parent[root(j)] = root(i)
+    roots = np.array([root(i) for i in range(n)])
+    size = np.bincount(roots, minlength=n)[roots] if n else np.array([], int)
+    return n, int((size > 1).sum()), int(len(np.unique(roots)))
+
+
 def permutation_p(stars, y, members, n=9999, rng=None):
     """One-sided p for a fixed window's event count when events are permuted among stars within full covariate
     cells: per cell, the window's count is hypergeometric (cell size, cell events, cell members in the window)."""

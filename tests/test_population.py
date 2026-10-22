@@ -157,3 +157,11 @@ def test_dispersion_curve_tracks_relative_scatter():
     assert np.all(np.diff(ph) >= 0) and ph[-1] > ph[0]
     phi = scan.phi_from_curves(win, lam, curves)
     assert phi.min() >= 1.0
+
+
+def test_scan_coincidence_groups_one_scan():
+    from cosmos_search.population import analysis
+    t = [10.0, 10.02, 10.05, 50.0, 90.0, 90.01]
+    ra = [100.0, 100.5, 101.0, 100.0, 100.0, 110.0]       # last pair: same time, 10 degrees apart
+    dec = [-20.0] * 6
+    assert analysis.scan_coincidence(t, ra, dec) == (6, 3, 4)
