@@ -172,6 +172,16 @@ reveal step will decrypt. Pass criteria, fixed with the thresholds:
 - **P3** instrument: ≥ 80% of FoV jumps with amplitude ≥ 10 σ_tr labelled instrument, and ≤ 10% of all FoV jumps
   labelled unexplained.
 
+**Result, astrometry-blind-1 (2026-10-22): passed on all three criteria.** Flags archived and pushed in 5b1d072
+before the reveal (code a7f12a6; `prereg/verdicts/astrometry-blind-1/`).
+
+- P1: 2 of 800 naturals flagged (0.25%, 95% upper 0.78% ≤ 1.5%). Both were blends; 19 naturals went to
+  `neighbour`, 2 to `instrument`.
+- P2: 27 of 79 injections at ≥ 20 σ_tr flagged (0.34, 95% lower 0.25; line 0.17). By kind over all amplitudes:
+  square 32/61, step 12/60, kick 0/54, thrust 0/65.
+- P3: 26 of 29 FoV jumps at ≥ 10 σ_tr labelled instrument (0.90 ≥ 0.80); 4 of 60 (6.7% ≤ 10%) labelled
+  unexplained.
+
 The blind batch is drawn from the same simulator as the calibration, so it tests that the frozen thresholds and the
 pipeline generalise to fresh draws and that nothing leaks; it cannot test whether the simulator's natural mix
 resembles the sky. That test is DR4 itself (see "DR4 day one").

@@ -60,7 +60,7 @@ These apply to every arm and every thread.
 | **Astrometry (secondary)** | | | |
 | A1 | Reproduce the 12 pre-release sources ✓ (own fit: parallax factors to 2.5e-3, BH3, HD 114762, Gaia-4 orbits recovered) | I1 | Astrometry thread |
 | A2 | Nested model fits ✓ (5p/7p/9p, K1, K2, lens, neighbour, VIM, scan-angle terms) with physical plausibility; DR3 Kepler-bound rehearsal ✓ | A1 | Astrometry thread |
-| A3 | Injections into GOST-cadence simulations and into the 12 real pre-release series; rule astrometry-v1 pre-registered, sealed blind test (docs/arms/astrometry.md) | A2 | Astrometry thread |
+| A3 | Injections into GOST-cadence simulations and into the 12 real pre-release series; rule astrometry-v1 pre-registered, sealed blind test passed ✓ (docs/arms/astrometry.md) | A2 | Astrometry thread |
 | **Vetting** | | | |
 | V1 | Packet builder, anonymiser and leak scan; FP-class catalogue; Stage 0 cross-candidate coincidence, band consistency and SSO check ✓ | G6 for real input | Vetting thread |
 | V2 | Stage A / Stage B agents, decoy generator, commit-then-reveal, scoring, held-out targets ✓. Known-answer control lists (Gaia: vetting; TESS: `tess/controls.csv`) | V1, truth repo ✓ | Vetting thread |
