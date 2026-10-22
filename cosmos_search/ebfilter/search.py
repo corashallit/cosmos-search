@@ -60,15 +60,17 @@ def _robust_sigma(x):
     return 1.4826 * np.median(np.abs(x - np.median(x)))
 
 
-def labels(lcs, skip=SKIP_BANDS):
+def labels(lcs, skip=SKIP_BANDS, with_index=False):
     """Time-sorted (t, lab, band_index, z, band_names, frac) over usable bands; lab is 1 dip, 0 flat, -1 neither,
-    frac = 1 - flux / median. lcs: objects with band, time, flux (vetting.candidate.LightCurve)."""
-    ts, labs, bis, zs, names, fr = [], [], [], [], [], []
-    for lc in lcs:
+    frac = 1 - flux / median. lcs: objects with band, time, flux (vetting.candidate.LightCurve). with_index also
+    returns, per epoch, the index of its light curve in lcs and its position in that light curve's arrays."""
+    ts, labs, bis, zs, names, fr, src = [], [], [], [], [], [], []
+    for li, lc in enumerate(lcs):
         if lc.band in skip:
             continue
         t, f = np.asarray(lc.time, float), np.asarray(lc.flux, float)
         ok = np.isfinite(t) & np.isfinite(f)
+        pos = np.flatnonzero(ok)
         t, f = t[ok], f[ok]
         if len(t) < MIN_EPOCHS_BAND:
             continue
@@ -92,12 +94,15 @@ def labels(lcs, skip=SKIP_BANDS):
         bis.append(np.full(len(t), bi, np.int8))
         zs.append(z)
         fr.append(1 - f / med)
+        src.append(np.stack([np.full(len(t), li), pos], axis=1))
     if not ts:
         e = np.array([])
-        return e, e.astype(np.int8), e.astype(np.int8), e, names, e
-    t, lab, bi, z, frac = (np.concatenate(x) for x in (ts, labs, bis, zs, fr))
+        out = (e, e.astype(np.int8), e.astype(np.int8), e, names, e)
+        return out + (np.empty((0, 2), int),) if with_index else out
+    t, lab, bi, z, frac, idx = (np.concatenate(x) for x in (ts, labs, bis, zs, fr, src))
     o = np.argsort(t, kind="stable")
-    return t[o], lab[o], bi[o], z[o], names, frac[o]
+    out = (t[o], lab[o], bi[o], z[o], names, frac[o])
+    return out + (idx[o],) if with_index else out
 
 
 # -- code lengths (bits) -----------------------------------------------------------------------------------------
