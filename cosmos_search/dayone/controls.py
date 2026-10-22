@@ -5,10 +5,15 @@ calibration, so every control false-flag rate quoted so far is in-sample. The co
 eclipsing binaries, while the DR4 queue will be dominated by spotted and other active stars. This module draws a
 fresh pool, stratified by DPAC class, from stars no batch, calibration or review has touched, and reserves it:
 
-- the pool (source_id, stratum, known-answer label) is sealed with age to the reveal key and Cora's key, so it
-  takes a deliberate decrypt to see which stars are in it;
-- salted sha256 hashes of its ids are public, so any calibration or decoy-host draw can leave the pool out
-  without decrypting it (`reserved`). dayone.decoys.hosts does.
+- the pool (source_id, stratum, known-answer label) is sealed with age to the reveal key and Cora's key, so the
+  list with its strata and labels is not something one reads by accident;
+- sha256 hashes of its ids with a fixed, public salt are in the repo, so any calibration or decoy-host draw can
+  leave the pool out without the key (`reserved`); dayone.decoys.hosts does.
+
+Membership is therefore public by design: anyone can hash a list of candidate ids (the ranked list, say) and see
+which are in the pool. The salt only stops a hash from matching other tables of Gaia ids. What keeps the pool
+untouched is procedure, not secrecy: nothing may be tuned or calibrated on a reserved star, every draw filters
+with `reserved`, and the confirmatory batch reports only from this pool (review finding R19).
 
 The pool is used once, for the confirmatory batch that decides the D2 rule (docs/dayone.md). Control rates are
 quoted only from it; numbers measured on the old controls are in-sample.

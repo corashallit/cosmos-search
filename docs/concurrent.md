@@ -50,7 +50,13 @@ Gaia alone reproduces the step back: 75% of caught 1–10 d dips are one-look on
 1. **The TESS data that DR4 overlaps were being thrown away.** `external._bin` binned TGLC to 30 min and dropped
    bins with fewer than two points. Sectors 1–26 are 30-min FFIs, so every epoch from them was dropped (one star:
    937 clean cadences in sector 4, 0 kept). This explains the "about 1 TESS epoch per star in the window" of the
-   single-dip calibration. Fixed: single-point bins are kept, with errors from the robust point-to-point scatter.
+   single-dip calibration. Fixed: single-point bins are kept. Their error is the robust point-to-point
+   scatter / sqrt(n), inflated by a red-noise factor (`external.red_noise_beta`, review finding R18): the median
+   over 0.25, 0.5, 1 and 2 d of the robust scatter of bin means over what white noise predicts, at least 1. It is
+   1.0–1.6 on the sectors checked, and its 95th percentile on pure white noise is 1.21. The estimator is robust,
+   so a short excursion (a 13% systematic dip on 2.6% of one sector's points) stays an event and does not inflate
+   every error. The gates and tests above use the robust scatter of the fluxes, not these errors, so the
+   coverage numbers do not change. The errors reach the Stage A packets and Stage 0's cross-band check.
 2. **The fetch now ranks TESS sectors by closeness to the Gaia dip** (`t_deepest`; without it, sectors inside
    DR4's span first) before `max_sectors` cuts the list. Sector times are in `tess/sectors.csv`, measured from one
    light curve per sector (S1–S98).

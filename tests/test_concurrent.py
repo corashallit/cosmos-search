@@ -74,3 +74,17 @@ def test_gate_one_look_then_testable_with_concurrent_epochs():
     status, det = concurrent.gate([g, z])
     assert status == "testable"
     assert "ztf_r" in det["bands"]
+
+
+def test_red_noise_beta_inflates_correlated_noise_only():
+    rng = np.random.default_rng(2)
+    t = np.arange(1300) / 48.0                     # one 27-d sector at 30 min
+    white = 1 + 0.001 * rng.standard_normal(len(t))
+    assert external.red_noise_beta(t, white, 0.001) < 1.2
+    # Add a 1-d-scale wander of the same amplitude as the white noise per point: bin means scatter far more than
+    # white noise predicts, and the binned errors grow by that factor.
+    red = white + 0.002 * np.sin(2 * np.pi * t / 1.7)
+    beta = external.red_noise_beta(t, red, 0.001)
+    assert beta > 3
+    _, _, eb = external._bin(t, red, external.TESS_BIN_DAYS)
+    assert np.isclose(np.median(eb), beta * 0.001, rtol=0.2)

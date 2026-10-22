@@ -59,16 +59,27 @@ def decide(lcs, source=None, t_target=None, delta_bits=DELTA_BITS, **search_kw):
     """Verdict dict for one star. lcs: light curves (vetting.candidate.LightCurve, any surveys; BP/RP skipped);
     source: dict with phot_g_mean_mag, bp_rp, parallax, parallax_error (for the duration check); t_target: time of
     the selected dip (None: not required)."""
-    t, lab, bi, z, names, frac = S.labels(lcs)
-    res = S.search(t, lab, bi, names, **search_kw)
+    lab = S.labels(lcs)
+    return judge(lab, S.search(*lab[:3], lab[4], **search_kw), source, t_target, delta_bits)
+
+
+def good_solutions(res, delta_bits=DELTA_BITS):
+    """The solutions that may explain anything: delta >= delta_bits and within ALIAS_MARGIN of the best."""
+    sols = res.get("solutions", [])
+    floor = max(delta_bits, sols[0]["delta_bits"] - ALIAS_MARGIN) if sols else delta_bits
+    return [s for s in sols if s["delta_bits"] >= floor]
+
+
+def judge(labels, res, source=None, t_target=None, delta_bits=DELTA_BITS):
+    """`decide` on labels (`search.labels`) and a search result already computed. The verdict carries the solution
+    that explains the star (`solution`, None if none does)."""
+    t, lab, bi, z, names, frac = labels[:6]
     sp = physics.stellar_params(source) if source else None
     out = {k: v for k, v in res.items() if k != "solutions"}
     out.update({"explained": False, "periodic_unphysical": False, "duration_ok": None, "target_covered": None,
                 "r_star": sp[0] if sp else np.nan, "m_star": sp[1] if sp else np.nan, "p_null_bound":
-                float(min(1.0, 2.0 ** -res["delta_bits"])), "bands": names})
-    sols = res.get("solutions", [])
-    floor = max(delta_bits, sols[0]["delta_bits"] - ALIAS_MARGIN) if sols else delta_bits
-    good = [s for s in sols if s["delta_bits"] >= floor]
+                float(min(1.0, 2.0 ** -res["delta_bits"])), "bands": names, "solution": None})
+    good = good_solutions(res, delta_bits)
     if not good:
         return out
     keep = lab >= 0
@@ -80,14 +91,11 @@ def decide(lcs, source=None, t_target=None, delta_bits=DELTA_BITS, **search_kw):
         elif window_purity(t, lab, bi, s["period"], s["s1"], s["q1"]) < MIN_PURITY:
             continue
         dur_lo = duration_lo(tk, labk, s)
-        dur_ok = None
-        if sp:
-            dmax = max(max_duration_days(s["period"], *sp), max_duration_days(2 * s["period"], *sp))
-            dur_ok = bool(dur_lo <= dmax)
+        dur_ok = duration_fits(dur_lo, s["period"], sp)
         if cov_target is not False and dur_ok is not False:
             out.update({"explained": True, "period": s["period"], "delta_bits": s["delta_bits"],
                         "duration_ok": dur_ok, "target_covered": cov_target, "duration_lo_d": dur_lo,
-                        "solution_rank": res["solutions"].index(s)})
+                        "solution_rank": res["solutions"].index(s), "solution": s})
             return out
         if cov_target is not False and dur_ok is False:
             out["periodic_unphysical"] = True
@@ -95,6 +103,13 @@ def decide(lcs, source=None, t_target=None, delta_bits=DELTA_BITS, **search_kw):
     s = good[0]
     out["target_covered"] = None if t_target is None else target_explained(t, lab, bi, frac, t_target, s)
     return out
+
+
+def duration_fits(dur_lo, period, sp):
+    """Whether a dip run of dur_lo days fits a stellar eclipse at period or twice it (None without stellar params)."""
+    if not sp:
+        return None
+    return bool(dur_lo <= max(max_duration_days(period, *sp), max_duration_days(2 * period, *sp)))
 
 
 def duration_lo(t, lab, sol):

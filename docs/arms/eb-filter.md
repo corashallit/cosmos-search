@@ -195,6 +195,7 @@ after D2.
 
 - Ranking v1 (owner: the day-one chain): run `python -m cosmos_search.ebfilter` on the queue after
   `dayone.external fetch`, and move `explained` rows to the control pool.
-- Residual depth test for targets inside an eclipse window (the 17% above).
+- Residual depth test for targets inside an eclipse window (the 17% above): built in `cosmos_search/residual/`,
+  with framing 2 above; see docs/arms/residual.md.
 - TESS epochs in the calibration: this set had none, because the TGLC route needs per-star fetches.
 - A dip-independent binarity covariate (RUWE, NSS orbits) for the population test's null model.
