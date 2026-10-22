@@ -166,15 +166,23 @@ def _colour_targets(cand):
     return targets, {"dip_colour_ratio": float(depth_rp / depth_bp)}, ("BP", "RP")
 
 
+# Everything that would give the infrared answer away: the excess itself, the photometry it comes from, and the G5
+# energy-budget measurements derived from it (energy.run.PACKET_CONTEXT).
+IR_CONTEXT = ("ir_excess_sigma", "W1", "W2", "W3", "W4", "Ks", "waste_heat_max_fraction_150K",
+              "waste_heat_max_fraction_300K", "waste_heat_max_fraction_1000K", "warm_shell_excluded_above_K")
+
+
 def _context_targets(cand):
-    """Withhold the infrared excess; ask whether there is one (energy budget, docs/arms/gaia-dimmers.md)."""
+    """Withhold the infrared excess; ask whether there is one (energy budget, docs/arms/energy-budget.md)."""
+    from cosmos_search.energy.run import Z_EXCESS
+
     sigma = cand.context.get("ir_excess_sigma")
     if sigma is None or not math.isfinite(float(sigma)):
         return [], {}, ()
     targets = [{"id": "ir_excess", "kind": "binary",
-                "question": "Infrared photometry is withheld. Probability that the source shows a mid-infrared (W3 or W4) "
-                            "excess over its photosphere at more than 3 sigma?"}]
-    return targets, {"ir_excess": bool(float(sigma) > 3)}, ("ir_excess_sigma",)
+                "question": "Infrared photometry is withheld. Probability that the source shows a near- or mid-infrared "
+                            f"(Ks or W1-W4) excess over its photosphere at {Z_EXCESS:g} sigma or more?"}]
+    return targets, {"ir_excess": bool(float(sigma) >= Z_EXCESS)}, tuple(k for k in IR_CONTEXT if k in cand.context)
 
 
 HOLDOUTS = ("tail", "colour", "ir")

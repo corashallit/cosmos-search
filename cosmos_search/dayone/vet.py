@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from cosmos_search.energy import run as energy_run
 from cosmos_search.inject import lightcurve as lc_families
 from cosmos_search.vetting import coincidence, sso, stage0
 from cosmos_search.vetting.batch import build_batch, simple_dips
@@ -37,6 +38,7 @@ COINCIDENCE_WINDOW = 5.0    # days
 CONTEXT_KEYS = {"allwise_w1mpro": "W1", "allwise_w2mpro": "W2", "allwise_w3mpro": "W3", "allwise_w4mpro": "W4",
                 "allwise_p_cal": "wise_match_p", "2mass_k_m": "Ks", "2mass_p_cal": "twomass_match_p"}
 EXTERNAL_CONTEXT_KEYS = {"blend_tess_contamination": "tess_contamination"}
+G5_CONTEXT_KEYS = energy_run.PACKET_CONTEXT
 EXTERNAL_BANDS = ("ztf_g", "ztf_r", "ztf_i", "TESS")
 P_U_SHORTLIST = 0.25        # pilots 2-3: probes 4/8 and controls 0/26 at P(unexplained) >= 0.25
 # Shortlist rule v1 (docs/dayone.md, pre-registered before batch 2): for a technosignature search the rare
@@ -45,7 +47,8 @@ INTERESTING = ("disk_occultation", "debris_transit", "other_astrophysical", "une
 S_SHORTLIST = 0.35
 # The shortlist rule in force for the D2 freeze (docs/dayone.md). score_batch's headline keys, the printed summary
 # and shortlist.csv come from this rule; every other rule is reported under report["rules"] as a comparison.
-ADOPTED_RULE = "v3b"
+# v5 passed all four pre-registered criteria on the confirmatory batch (docs/dayone.md, "Confirmatory result").
+ADOPTED_RULE = "v5"
 # Injected families an ideal v1 shortlist should keep; the others should read as EB, YSO or instrumental.
 TRAIN_FAMILIES = ("dip_train_poisson", "dip_train_primes", "dip_train_geometric")
 SINGLE_FAMILIES = ("grey_dip", "blue_dip", "chromatic_flip")
@@ -76,6 +79,8 @@ def candidate_dicts(queue, ranked, lc_dir, wide=None, plan_map=None, external=No
         ext_by_id = {int(k): v for k, v in external.groupby("source_id")}
     df = lc.to_pandas()
     df["band"] = df["band"].astype(str)
+    # G5 energy-budget columns (python -m cosmos_search.energy rank), when the context table carries them.
+    g5_keys = G5_CONTEXT_KEYS if ctx is not None and "g5_z_excess" in ctx.columns else {}
     out = []
     for _, row in queue.iterrows():
         sid = int(row["source_id"])
@@ -102,7 +107,7 @@ def candidate_dicts(queue, ranked, lc_dir, wide=None, plan_map=None, external=No
         source = {k: float(row[k]) for k in SOURCE_KEYS if k in row and pd.notna(row[k])}
         context = {}
         if ctx is not None and sid in ctx.index:
-            for col, name in {**CONTEXT_KEYS, **(EXTERNAL_CONTEXT_KEYS if external is not None else {})}.items():
+            for col, name in {**CONTEXT_KEYS, **(EXTERNAL_CONTEXT_KEYS if external is not None else {}), **g5_keys}.items():
                 v = ctx.at[sid, col] if col in ctx.columns else np.nan
                 context[name] = float(v) if pd.notna(v) else float("nan")
         out.append({"candidate_id": f"gaia_dr3:{sid}", "arm": "gaia", "source": source, "lightcurves": lcs,
@@ -284,6 +289,9 @@ def score_batch(out, batch, plan=None, remote="origin"):
     if held.any():
         rep["held_out_recall"] = {r: score_v1(table, flag="aperiodic" if r == "v3b" else None,
                                               targets=HELD_OUT_FAMILIES)["target_decoy_recall"] for r in ("v3a", "v3b")}
+    # Rule v5 (docs/dayone.md, confirmatory batch): S alone, no pipeline flag shortlists (review R16). Its pass
+    # criteria are in dayone.confirm; here it is scored like the others, on the held-out families when present.
+    rules["v5"] = score_v1(table, targets=HELD_OUT_FAMILIES if held.any() else TARGET_FAMILIES)
     rep["rules"] = rules
     adopted = rules[ADOPTED_RULE]
     rep["adopted_rule"] = ADOPTED_RULE
@@ -359,6 +367,7 @@ def main(argv=None):
     b.add_argument("--ranked", required=True)
     b.add_argument("--lightcurves", required=True)
     b.add_argument("--context")
+    b.add_argument("--g5", help="python -m cosmos_search.energy candidates output: energy-budget context for the packets")
     b.add_argument("--out", required=True)
     b.add_argument("--no-sso", action="store_true")
     b.add_argument("--external", help="dayone.external fetch output: ZTF and TESS bands for the packets")
@@ -374,6 +383,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd == "build":
         wide = pd.read_parquet(a.context) if a.context else None
+        if a.g5:
+            g5 = pd.read_parquet(a.g5)[["source_id", *energy_run.PACKET_CONTEXT]]
+            wide = g5 if wide is None else wide.merge(g5, on="source_id", how="left")
         from cosmos_search.inject.classes.gaia_stream import load_plan
         packets, _ = build(pd.read_parquet(a.queue), pd.read_parquet(a.ranked), a.lightcurves, a.out, wide,
                            sso_check=not a.no_sso, plan_map=load_plan(a.plan) if a.plan else None,

@@ -125,7 +125,8 @@ two highest scores of the 44 are injections.
 
 ## Gaps
 
-- G5 (energy budget against WISE) is not built; the packets carry WISE photometry without a test.
+- G5 (energy budget) is built (`cosmos_search/energy`, docs/arms/energy-budget.md). Packets get its measurements
+  with `vet build --g5`; batches built before it carry WISE magnitudes without a test.
 - V3's calibration run (~400 packets) has not happened, so the FP figure has no real precision yet.
 - SkyBoT returned 502 and then tripped the client's breaker, so the packets went out without the
   solar-system test. It is a single external dependency on day one.
@@ -145,6 +146,8 @@ two highest scores of the 44 are injections.
    every source as now. Done after the rehearsal: see "Keep rule v2" below.
 2. **Shortlist rule.** v1 (S = P(rare astrophysical) + P(u) ≥ 0.35) was pre-registered and failed on a fresh
    blind batch: 0/11 target decoys (below). The packets need external light curves before a rule can work.
+   Done: the same S threshold on packets with external light curves and pipeline tests (rule v5) passed the
+   confirmatory batch on 2026-10-22 (see "Confirmatory result" below).
 3. **Grey and non-EB first.** Ranking v1 should sort on the `grey` flag within tier 1 and 2 and remove VSX/
    ASAS-SN eclipsing types before vetting.
 4. **G3 power.** A per-source scale from a quiet reference (or a variability-class-specific null) would let
@@ -453,6 +456,107 @@ calls in all, about 6 times batch 4.
 Recall on the old families (Poisson, prime, geometric trains) is no longer a pass criterion: the recurrence flag
 was calibrated on them. If the confirmatory batch fails, a new rule needs a new held-out set and a new control
 pool, since these will have been seen.
+
+### Rule v5 and the confirmatory build (pre-registered 2026-10-22, before the held-out plan was drawn)
+
+**R16: the recurrence flag stops shortlisting on its own.** The residual-search thread measured it on real DR3
+stars with ZTF (docs/arms/residual.md, halves A and B pooled, testable stars). It fires on 74% of active stars
+(RS, SOLAR_LIKE, S; 82 of 111, 95% CI 65–81%), 67% on their residual light curves, 70% of other non-EB variables,
+45% of AGN and 10% of EBs, against 37% of injected dip trains. Under v3b it would shortlist about two thirds of the
+active stars that reach the vetter, at twice the rate it catches the signals it is for. So it ranks (ranking v1
+counts it as a priority flag) and the vetter sees it in the packet, but it no longer bypasses the vetter.
+
+**R18: TESS in the recurrence test.** On a G-matched sample of the review's Gaia + ZTF stars (not the reserved
+pool), adding TGLC light curves with #51's red-noise errors raised the flag from 10 to 44 of the
+302 stars that have TESS (testable 37 → 71). Two causes. (a) A bug: a band too noisy to show an eclipse (TESS on a faint or blended
+star, sigma ~0.2) put "normal brightness" epochs inside the eclipse window, the purity check failed and a clean
+EB read as aperiodic. `recurrence.search` now counts an epoch as normal brightness only if its band could have
+shown the dips (median in-dip depth >= DIP_SIGMA x the band's sigma); a test reproduces the old failure. With the
+fix the flag fires on 38: EBs go from 3 of 32 back to 0, while SOLAR_LIKE stays at 14 of 87 (0 without TESS),
+DSCT|GDOR|SXPHE 9 of 83 (3) and LPV 5 of 39 (1). (b) Real short low excursions in TESS (0.1–0.5 d) on spotted, S-type and
+long-period variables, which are the star's own variability or TGLC systematics and which no period explains. That
+part is not a bug: it is the activity problem of R16, and it is why the flag no longer shortlists. The flag's
+inputs did not change with #51, since the dip threshold uses each band's robust scatter, not its errors; what #51
+changes is the error column the vetter reads.
+
+**Rule v5.** Shortlist a packet when the blind vetter's S = P(disk occultation + debris transit + other
+astrophysical + unexplained) >= 0.35. No pipeline flag shortlists. `dayone.confirm.evaluate` scores it against the
+four criteria above. If all four pass, `ADOPTED_RULE` becomes v5; otherwise it stays v3b with the review's
+caveats, and the next attempt needs a new held-out set and control pool.
+
+**What is built (code: this PR's head when the packets are built, recorded in `commit.json` as `code_commit`).**
+
+- *Packets.* `dayone.vet build` as for batch 4: Gaia epochs with the tail holdout, ZTF and TESS (TGLC, every
+  sector, #51 errors) on the Gaia clock, the coincidence test, the solar-system check if SkyBoT answers (a
+  failure is recorded in the packet, as before), and the recurrence (band-aware) and single-event tests.
+- *Held-out decoys, 48.* `decoys plan --counts confirm` (12 per held-out family) on the 90 hosts drawn on
+  2026-10-21 by urandom: unranked stars with no DPAC dip class, matched in G to batch 2's real candidates, none used
+  before or reserved. Only hosts with >= 100 epochs in some external band (68 of 90) are eligible. Each signal must
+  move some visible G epoch by >= 5 robust sigma, as in every batch; nothing is conditioned on the external epochs.
+  Sealed to Cora's key and the reveal key; its SHA-256 goes into `commit.json`.
+- *Reserved controls, 135.* All of `dayone-controls-v1`, with or without external data (118 have >= 100 external
+  epochs). Labels by stratum (`dayone.controls.STRATA`). Per-class rates are also reported among covered stars.
+- *Queue sample, 100.* 150 stars were drawn by urandom on 2026-10-22 at 00:19 UTC (ids only; nothing about them has
+  been looked at) from the 1,362 tier-1 stars of the rehearsal ranking that ranking v1 keeps in tier 1 by class
+  (not RS, SOLAR_LIKE, S or AGN) and that no batch, calibration, review or decoy draw has used. Their external
+  light curves go through `python -m cosmos_search.residual`; demoted stars are dropped, and the first 100 of the
+  rest in drawn order are the arm. That is a uniform draw from ranking v1's tier 1. If fewer than 100 survive, all
+  are used and n is reported.
+- *Flag-hidden arm, 93.* The 48 decoys and 45 controls (5 per class, chosen by urandom) rebuilt with
+  `--hide-pipeline-flags` as a second batch with its own packet ids.
+- *Stage A.* One blind subagent per packet (283 + 93), two tool calls: read the prompt, write the reply. Every
+  transcript is audited. A packet whose transcript is not clean is re-run once with a fresh agent; if it is still not
+  clean, or the reply does not parse, it counts against the rule: a decoy not shortlisted, a control or queue star
+  shortlisted.
+- *Commit and reveal.* `vetting commit --archive prereg/verdicts/confirm-main` (and `confirm-hidden`) with
+  `--plan`, pushed to the PR before `dayone.vet score`; then `python -m cosmos_search.dayone.confirm`.
+
+Reported whatever the outcome: the four criteria, recall per held-out family, per-class control rates (all and
+covered), the queue sample's rate as the headline DR4 false-positive figure, and shown vs hidden flags.
+
+### Confirmatory result: v5 adopted (2026-10-22)
+
+All 376 Stage A transcripts were clean (read the prompt, write the reply, nothing else) and every reply parsed, so
+no packet was re-run and none counted against the rule by default. Verdicts were committed before the reveal
+(`prereg/verdicts/confirm-main`, sha256 `d59bcb43…`, and `confirm-hidden`, `8e239aa1…`; plan sha256 `cfda7e62…`)
+and pushed to PR #53 before `dayone.vet score` ran. Intervals are one-sided 95% Clopper–Pearson, as pre-registered.
+
+| criterion | result | bound | pass |
+|---|---|---|---|
+| held-out recall | 22/48 = 46% (lower 33.4%) | lower ≥ 30% | yes |
+| reserved controls, pooled | 3/135 = 2.2% (upper 5.6%) | upper ≤ 15% | yes |
+| controls, each class | max 2 of 15 (RS) | ≤ 3 | yes |
+| queue sample | 1/100 = 1.0% (upper 4.7%) | upper ≤ 10% | yes |
+
+`ADOPTED_RULE` is now v5. The recall criterion passed narrowly: three fewer hits would have failed it.
+
+- **Recall by held-out family:** clustered trains 8/12, drifting trains 6/12, swarms 5/12, irregular dips 3/12.
+  15 of the 26 misses were called eclipsing binaries, 10 instrumental (detector defect, blend, calibration,
+  shared systematic), 1 rotation. EB confusion is still the main way a real signal would be lost.
+- **Controls:** the three false hits are all active stars (RS 2 of 15, SOLAR_LIKE 1 of 15), the classes R16 named;
+  two of them carried the aperiodic flag. Every other class is 0 of 15. Among the 118 controls with ≥ 100
+  external epochs: 3/118 (upper 6.4%), the same three.
+- **Queue sample (the DR4 false-positive figure):** 1 of 100 tier-1 stars of ranking v1 is shortlisted. The vetter's
+  top class for the 100 was EB for 69, an instrumental class for 30, and YSO dipper for 1. So even after the EB
+  filter and the residual demotion, most of tier 1 still reads as eclipsing binaries to the vetter; that is the
+  next place to cut expert load. Median S 0.04, 90th percentile 0.10.
+- **The one shortlisted real star:** Gaia DR3 5862265011945308544 (G 12.7, BP−RP 1.38, parallax 0.45 mas,
+  b = −0.3°, no DPAC class), S = 0.38. Two 18–25% fades ~150 d apart in G, BP and RP, both fields of view,
+  reddened about as interstellar dust would redden them, one recovering in under 0.4 d; TESS shows 2–4 h
+  aperiodic 2% dips and rules out a 4.4 d eclipse alias. Top class YSO dipper (0.35), with P(unexplained) 0.16 and
+  debris transit 0.12 because Ks−W3 shows no hot inner dust (only W4 is in excess). Discriminating test: youth or
+  accretion signs (Hα, spectra) and whether the W4 excess is a real point source. It is a lead for the expert
+  queue, not a claim.
+- **Rule v3b on the same packets (comparison):** 28/48 decoys, 20/135 controls, 8/100 queue stars. v5 gives up 6
+  decoys to remove 17 false controls and 7 queue stars, which is the trade R16 predicted.
+- **Flags shown vs hidden (report only, same 48 decoys and 45 controls):** recall 22/48 with the pipeline tests in
+  the packet, 18/48 without; controls 0/45 shown, 1/45 hidden (an RS star). Decoys with the aperiodic flag were
+  shortlisted 14 of 20 times, without it 8 of 28. The vetter uses the tests without being bound by them.
+
+What this does not settle: the four held-out families are dip trains and irregular dips on hosts with external
+coverage (68 of 90 eligible), so the recall applies to signals that leave events ZTF or TESS can see. Single dips
+are batch 5's problem (v4 not adopted). The control classes have 15 stars each, so a per-class rate below about
+18% cannot be told from zero.
 
 ## Keep rule v2 (after the rehearsal)
 
