@@ -254,3 +254,23 @@ was not pre-registered and was not run. (Hosts are drawn with replacement, 60 pe
 several injections and the Wald interval is somewhat narrow.) Since rule v5 (PR #53) takes the flag out of the
 shortlist, the stakes are now one priority flag in ranking. DR4's epoch count (about twice DR3's, so about twice the
 close pairs) will tighten the score; a re-test on DR4's own stars, with the conditioned cost, is the natural next try.
+
+## Noise-aware recurrence purity (review R18)
+
+`vetting.recurrence.search(..., sigma=)` (ported from the rehearsal branch, PR #53) counts an epoch as normal
+brightness in a purity window only if its band could have shown the dips. The residual search and its calibration
+pass it. It was found with TESS, but it matters on Gaia + ZTF alone, where faint stars' ZTF g or i epochs are often
+too noisy to see the dips the G band sees. Raw flag, full span, testable stars of the review table (both halves), and
+target-family injections of half B, without and with sigma:
+
+| population | testable | flag without | flag with |
+|---|---|---|---|
+| real ECL | 372 | 37 | 13 |
+| real RS, SOLAR_LIKE, S | 148 | 82 | 63 |
+| real, other classes and unclassified | 98 | 42 | 30 |
+| injected dip_train_poisson / primes / geometric | 78 | 56 | 53 |
+| injected dip_train_periodic | 34 | 4 | 4 |
+| injected single dips and other families | 66 | 33 | 29 |
+
+So it removes about two thirds of the flags on real binaries and a quarter on active stars, for about 5% of the
+flags on aperiodic trains. D3 was decided without it; the trade above is the reason to keep it rather than re-run D3.
