@@ -1,0 +1,59 @@
+{
+ "written_utc": "2026-10-22T11:46:33Z",
+ "note": "Written before any TESS or ASAS-SN data for these stars was downloaded. Ephemerides fitted on raw Gaia DR3 epochs + ZTF (external_all.parquet, unmodified) only. sigma_d is a conservative timing error (fit grid + 0.02 d).",
+ "gaia_dr3_243022138810511360": {
+  "P_d": 22.145979,
+  "T0_btjd": 1810.0343,
+  "depth_gaia_ztf": "~0.45 (V-shaped, ~0.4 d total)",
+  "tess_dilution": "contamination ratio ~17, so expect ~2-3% in TESS aperture photometry",
+  "predicted_primary": {
+   "S18": [
+    {
+     "E": 0,
+     "btjd": 1810.0343,
+     "sigma_d": 0.03
+    },
+    {
+     "E": -1,
+     "btjd": 1787.8883,
+     "sigma_d": 0.03
+    }
+   ],
+   "S58": [
+    {
+     "E": 49,
+     "btjd": 2895.1873,
+     "sigma_d": 0.031
+    }
+   ],
+   "S86": [
+    {
+     "E": 83,
+     "btjd": 3648.1506,
+     "sigma_d": 0.033
+    }
+   ]
+  },
+  "secondary_hint": "EB-filter second window at phase ~0.72 after primary (eccentric); low confidence, not a test"
+ },
+ "gaia_dr3_4226323994806052480": {
+  "P_d": 19.819663,
+  "T0_btjd": 2519.6573,
+  "depth_gaia_ztf": "~0.2-0.3 (V-shaped, ~0.3 d total)",
+  "predicted_primary": {
+   "S81": [
+    {
+     "E": 50,
+     "btjd": 3510.6404,
+     "sigma_d": 0.031
+    },
+    {
+     "E": 51,
+     "btjd": 3530.4601,
+     "sigma_d": 0.031
+    }
+   ]
+  },
+  "asassn": "epochs within 0.1 d of T0+E*P should be 10-30% faint in g/V; epochs elsewhere normal; odd vs even E depths equal if P is the true period"
+ }
+}

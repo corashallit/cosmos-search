@@ -84,11 +84,15 @@ def _lcs(df, bands):
 
 
 def _apply(df, signal):
+    # By position: label lookups mix bands whose rows share index labels (dayone.external.apply).
     out = df.copy()
-    for b, idx in out.groupby("band").groups.items():
-        k = np.clip(signal.factor(out.loc[idx, "t"].to_numpy(), b), 0, None)
-        out.loc[idx, "flux"] = out.loc[idx, "flux"].to_numpy() * k
-        out.loc[idx, "err"] = out.loc[idx, "err"].to_numpy() * np.sqrt(k)
+    band, t = out["band"].astype(str).to_numpy(), out["t"].to_numpy(float)
+    flux, err = out["flux"].to_numpy(float).copy(), out["err"].to_numpy(float).copy()
+    for b in np.unique(band):
+        m = band == b
+        k = np.clip(signal.factor(t[m], b), 0, None)
+        flux[m], err[m] = flux[m] * k, err[m] * np.sqrt(k)
+    out["flux"], out["err"] = flux, err
     return out
 
 

@@ -822,6 +822,24 @@ def test_external_apply_dilutes_tess_and_skips_g_only():
     assert 0.99 < crowded.flux.iloc[0] < 1.0
 
 
+def test_external_apply_ignores_repeated_index_labels():
+    # Batch 7's external table was concatenated from shards without ignore_index, so every label appeared for
+    # several stars, and label lookups injected the decoys' signals into controls and queue stars too.
+    from cosmos_search.dayone.external import apply
+    from cosmos_search.ebfilter.cal import _apply
+    from cosmos_search.inject import lightcurve as lcinj
+    from cosmos_search.inject.classes.gaia_stream import signal_from_truth
+    dip = lcinj.truth(lcinj.Dip(t0=10.0, covering=0.5, ingress=0.1, egress=0.1, flat=1.0))
+    ext = pd.DataFrame({"source_id": [1, 1, 2, 2], "band": ["ztf_r", "TESS", "ztf_r", "TESS"],
+                        "t": [10.5, 10.5, 10.5, 10.5], "flux": 1.0, "err": 0.01}, index=[0, 1, 0, 1])
+    out = apply(ext, {1: {"signal": dip, "bands": None}})
+    assert out.flux.tolist() == pytest.approx([0.5, 0.5, 1.0, 1.0])
+    assert out.err.tolist() == pytest.approx([0.01 * 0.5 ** 0.5] * 2 + [0.01] * 2)
+    assert out.index.tolist() == [0, 1, 0, 1]
+    one = ext.iloc[:2].set_axis([0, 0])            # one star whose bands share a label
+    assert _apply(one, signal_from_truth(dip)).flux.tolist() == pytest.approx([0.5, 0.5])
+
+
 def test_dip_trains_continue_past_the_span():
     from cosmos_search.inject import lightcurve as lcinj
     for fam in ("dip_train_periodic", "dip_train_poisson", "dip_train_primes"):

@@ -222,6 +222,10 @@ def apply(ext, plan_map, contamination=None):
     at ~2" and is not diluted. A g_only plan (an instrument fault in Gaia's G) leaves other surveys alone.
     Noise is scaled with the factor as for Gaia; the extra photon-noise draw is left out because external errors
     are scatter estimates, not photon counts.
+
+    Rows are selected by position, never by index label: a table concatenated from shards without ignore_index
+    repeats labels across stars, and label lookups then carried one star's signal into every other star sharing
+    those labels (batch 7, docs/dayone.md "Batch 7 packets carried leaked injections").
     """
     from cosmos_search.inject.classes.gaia_stream import signal_from_truth
 
@@ -229,19 +233,28 @@ def apply(ext, plan_map, contamination=None):
         return ext
     ext = ext.copy()
     contamination = contamination or {}
-    for sid, rows in ext.groupby("source_id").groups.items():
-        rec = plan_map.get(int(sid))
-        if rec is None or rec.get("bands"):
+    sid_all = ext["source_id"].to_numpy().astype("int64")
+    band_all = ext["band"].astype(str).to_numpy()
+    t_all = ext["t"].to_numpy(float)
+    flux = ext["flux"].to_numpy(float).copy()
+    err = ext["err"].to_numpy(float).copy()
+    for sid in sorted(set(np.unique(sid_all).tolist()) & set(plan_map)):
+        rec = plan_map[sid]
+        if rec.get("bands"):
             continue
         sig = signal_from_truth(rec["signal"])
-        for band, idx in ext.loc[rows].groupby("band").groups.items():
-            k = sig.factor(ext.loc[idx, "t"].to_numpy(), band)
+        star = sid_all == sid
+        for band in np.unique(band_all[star]):
+            m = star & (band_all == band)
+            k = sig.factor(t_all[m], band)
             if band == "TESS":
-                c = contamination.get(int(sid), 0.0)
+                c = contamination.get(sid, 0.0)
                 k = 1 - (1 - k) / (1 + (c if np.isfinite(c) and c >= 0 else 0.0))
             k = np.clip(k, 0, None)
-            ext.loc[idx, "flux"] = ext.loc[idx, "flux"].to_numpy() * k
-            ext.loc[idx, "err"] = ext.loc[idx, "err"].to_numpy() * np.sqrt(k)
+            flux[m] = flux[m] * k
+            err[m] = err[m] * np.sqrt(k)
+    ext["flux"] = flux
+    ext["err"] = err
     return ext
 
 
@@ -256,7 +269,7 @@ def main(argv=None):
     q = pd.read_parquet(a.queue)
     q = q[[c for c in ("source_id", "ra", "dec", "t_deepest") if c in q]].drop_duplicates("source_id")
     ext = fetch(q, a.max_sectors)
-    ext.to_parquet(a.out)
+    ext.to_parquet(a.out, index=False)
     cov = coverage(ext) if len(ext) else pd.DataFrame()
     print(f"{len(ext)} external epochs for {ext.source_id.nunique()} of {len(q)} stars -> {a.out}")
     if len(cov):
