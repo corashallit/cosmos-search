@@ -20,7 +20,8 @@ Statistics per source (all from the same fits):
                     BIC(best possible natural model) - BIC(best impossible orbit): > 0 when the data demand an orbit
                     gravity cannot provide (needs > 100 Msun, or periastron inside the star)
     acc_min_mass    smallest companion mass that produces the 7p acceleration without visible curvature
-    fov_pair_z      do the two fields of view agree on the residual? (large: instrument, not sky)
+    fov_pair_z      do the two fields of view agree on the residual? largest robust shift of the paired
+                    FoV difference (large: instrument, not sky)
 """
 
 import numpy as np
@@ -42,18 +43,28 @@ def covariance_diag(fit, src):
     return np.diag(M.covariance(fit.columns, src.s))
 
 
-def fov_pair_z(t, fov, resid, sigma, max_gap_days=0.08):
-    """Residual consistency of the two fields of view: transits 106.5 min apart (preceding then following FoV) see
-    the same sky through different optics and calibrations, so their residuals should agree within noise. A per-FoV
-    calibration jump does not. Wilson-Hilferty z of sum (r1 - r2)^2 / (s1^2 + s2^2) over such pairs."""
+def fov_pair_z(t, fov, resid, sigma, max_gap_days=0.08, min_pairs=5):
+    """Do the two fields of view agree? Transits 106.5 min apart (preceding then following FoV) see the same sky
+    through different optics and calibrations, so the difference of their residuals, u = (r_P - r_F) / s, is noise
+    for anything on the sky. A per-FoV calibration jump makes u shift and stay shifted. The statistic is the largest
+    |median u| over the pairs after (or before) any pair, scaled to ~N(0, 1) per window. Medians, because a real
+    abrupt change on the sky can land between the two transits of one pair; that is one pair, not a shift."""
     if fov is None:
         return np.nan
     fov = np.asarray(fov)
     i = np.where((np.diff(t) * 365.25 < max_gap_days) & (fov[1:] != fov[:-1]))[0]
-    if len(i) < 5:
+    if len(i) < 2 * min_pairs:
         return np.nan
-    chi2 = np.sum((resid[i] - resid[i + 1]) ** 2 / (sigma[i] ** 2 + sigma[i + 1] ** 2))
-    return float(wilson_hilferty(chi2, len(i)))
+    ref = np.unique(fov)[0]
+    sign = np.where(fov[i] == ref, 1.0, -1.0)
+    u = sign * (resid[i] - resid[i + 1]) / np.sqrt(sigma[i] ** 2 + sigma[i + 1] ** 2)
+    m = len(u)
+    best = 0.0
+    for k in range(m - min_pairs + 1):
+        best = max(best, abs(np.median(u[k:])) * np.sqrt((m - k) * 2 / np.pi))
+    for k in range(min_pairs, m + 1):
+        best = max(best, abs(np.median(u[:k])) * np.sqrt(k * 2 / np.pi))
+    return float(best)
 
 
 def wilson_hilferty(chi2, dof):

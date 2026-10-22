@@ -6,7 +6,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from cosmos_search.astrometry import detect, dips, fit, geometry, kepler_bound, models, physics, simulate
+from cosmos_search.astrometry import (
+    detect,
+    dips,
+    fit,
+    geometry,
+    kepler_bound,
+    models,
+    physics,
+    simulate,
+)
 
 DATA = Path(__file__).parent / "fixtures" / "dr4_prerelease_transits.csv"  # Gaia DR4 pre-release (ESA, CC BY-SA 3.0 IGO)
 BH3 = 4318465066420528000
@@ -111,3 +120,27 @@ def test_simulate_and_cascade_runs():
     data, truth = simulate.simulate(rng, cad, "square", amp=40.0)
     out = detect.cascade(data)
     assert max(out["dbic_cp"], out["dbic_implausible"]) > 20
+
+
+def test_fov_pair_test_sees_a_fov_jump_but_not_one_sky_flip():
+    rng = np.random.default_rng(2)
+    t = np.sort(np.concatenate([u := rng.uniform(-2.5, 2.5, 40), u + 106.5 / 1440 / 365.25]))
+    fov = np.tile([1, 2], 40)
+    sig = np.ones(80)
+    r = rng.normal(0, 1, 80)
+    flip = r.copy()
+    flip[41] += 30.0  # an abrupt change on the sky between the two transits of one pair
+    jump = r + 3.0 * ((fov == 2) & (t > 0))
+    assert detect.fov_pair_z(t, fov, flip, sig) < 4
+    assert detect.fov_pair_z(t, fov, jump, sig) > 6
+
+
+def test_vim_only_when_the_flux_varies():
+    rng = np.random.default_rng(3)
+    t = np.linspace(-2.5, 2.5, 80)
+    psi = rng.uniform(0, 2 * np.pi, 80)
+    zero = np.zeros(80)
+    noise = 1 + rng.normal(0, 0.003, 80)
+    assert not fit.Source(t, psi, zero, zero, np.ones(80), noise, 0.003).fixed
+    var = noise * (1 + 0.1 * np.sin(t * 7))
+    assert fit.Source(t, psi, zero, zero, np.ones(80), var, 0.003).fixed

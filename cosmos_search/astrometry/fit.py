@@ -58,11 +58,20 @@ class Source:
         self.y = np.asarray(w, float)
         self.s = np.asarray(sigma, float)
         self.flux = None if flux is None else np.asarray(flux, float)
-        # VIM rides in every model when per-transit flux is known (DR4 always has it): 2 columns, and without it a
-        # variable unresolved pair looks like anything from an orbit to a jump
-        self.fixed = [] if self.flux is None or np.ptp(self.flux) == 0 else [M.vim(self.psi, self.flux)]
         self.n = len(self.y)
         self.flux_err = None if flux_err is None else np.asarray(flux_err, float) * np.ones(self.n)
+        # VIM rides in every model when the flux really varies: 2 columns, and without it a variable unresolved pair
+        # looks like anything from an orbit to a jump. Flux measurement noise moves no light, so on a constant star
+        # the VIM columns are random regressors that soak up whatever the model misses (coefficients of hundreds of
+        # mas); they are left out unless the flux varies beyond its errors at 5 sigma.
+        self.flux_chi2 = np.nan
+        if self.flux is not None and self.flux_err is not None:
+            rel = self.flux / np.median(self.flux) - 1
+            self.flux_chi2 = float(np.sum((rel / self.flux_err) ** 2))
+            variable = self.flux_chi2 > self.n + 5 * np.sqrt(2 * self.n)
+        else:
+            variable = self.flux is not None and np.ptp(self.flux) > 0
+        self.fixed = [M.vim(self.psi, self.flux)] if variable else []
         self.span = self.t.max() - self.t.min()
         self.sw = 1.0 / self.s
 
