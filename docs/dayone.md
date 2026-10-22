@@ -680,6 +680,17 @@ harmonisation keeps them and their presence marks nothing.
   so far including batch 6.
 - *Queue sample, 100.* 150 tier-1 stars of ranking v1 drawn by urandom from those never used (batch 6's 150
   excluded), through the residual demotion, first 100 in drawn order.
+- *Draw notes (2026-10-22, after the above was pushed; only counts were looked at).* The exclusion list is
+  rehearsal-inputs' 25,458 plus batch 6's hosts, queue oversample and controls, the activity calibration
+  (residual/act_A, act_B), the concurrent-coverage sample and the GOST sample: 31,402 ids. The G5 run's 4,002
+  stars are not excluded: G5 is not in v6 packets and nothing in v6 was set on them; excluding them would have
+  emptied every stratum of G3-selected stars but ECL. Two draws of `dayone-controls-v2` were discarded unread
+  (never committed): the first counted the ranked list's classes before the exclusions, so it did not top up
+  from the archive and came out with 78 stars; the second had only 3 ACV stars, because DPAC classified ACV/CP
+  almost only at G < 10 (18 at G 10-15.5, 15 of them in v1). `dayone.controls` now counts after the exclusions,
+  draws ACV from G 8-15.5, and orders the archive top-up by random_index (before, TOP took the first rows of the
+  window, which run along the sky; v1 was drawn that way). The pool kept is the third draw: 135 stars, 100
+  G3-selected (v1: 105).
 - *Context comparison, 78 (report only).* The same 48 decoys plus the 15 ECL and 15 RS controls, built without
   `--v6-context`, as a second batch with its own packet ids. It says how much of any change comes from the
   context and how much from the cut.

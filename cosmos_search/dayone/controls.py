@@ -53,6 +53,9 @@ STRATA = {
 N_PER_STRATUM = 15
 G_RANGE = (10.0, 15.5)         # the real candidates' range in batches 2-4 (G 7.7-14.8, median 12.5)
 G_RANGE_BY_STRATUM = {"AGN": (14.0, 18.0)}     # hardly any AGN are brighter; DR4's will be fainter still
+# DPAC classified ACV/CP stars almost only at G < 10 (18 at G 10-15.5, all but 3 in the first pool), so the
+# second pool reaches to G 8, inside the real candidates' range (G 7.7-14.8).
+G_RANGE_BY_STRATUM["ACV|CP|MCP|ROAM|ROAP|SXARI"] = (8.0, 15.5)
 RANDOM_FRACTION = {"AGN": 1.0, "ACV|CP|MCP|ROAM|ROAP|SXARI": 1.0, "BE|GCAS|SDOR|WR": 0.5, "YSO": 0.3}
 
 
@@ -104,8 +107,8 @@ def queue_sample(ranked, n, rng, exclude=(), tier=1):
 
 def extra_sample(tap, classes, per_class=200, g_range=G_RANGE):
     """DPAC-classified stars of the given classes from the archive, for strata the ranked list lacks. One query
-    per class over a random_index window sized to the class's rarity, so TOP does not just return the first
-    rows in storage order."""
+    per class over a random_index window sized to the class's rarity, ordered by random_index so that TOP returns
+    a random subset of the window, not the first rows in storage order (which run along the sky)."""
     parts = []
     for cls in classes:
         lo, hi = G_RANGE_BY_STRATUM.get(cls, g_range)
@@ -113,7 +116,7 @@ def extra_sample(tap, classes, per_class=200, g_range=G_RANGE):
         adql = (f"SELECT TOP {int(per_class)} c.source_id, c.best_class_name, s.phot_g_mean_mag "
                 "FROM gaiadr3.vari_classifier_result AS c JOIN gaiadr3.gaia_source AS s ON s.source_id = c.source_id "
                 f"WHERE c.best_class_name = '{cls}' AND s.random_index < {int(frac * 1_811_709_771)} "
-                f"AND s.phot_g_mean_mag BETWEEN {lo} AND {hi}")
+                f"AND s.phot_g_mean_mag BETWEEN {lo} AND {hi} ORDER BY s.random_index")
         parts.append(tap.query(adql).to_pandas())
     return pd.concat(parts, ignore_index=True)
 
@@ -168,6 +171,7 @@ def main(argv=None):
     d.add_argument("--exclude-plan", nargs="*", default=[], help="sealed plans whose hosts are excluded")
     d.add_argument("--name", required=True)
     d.add_argument("--n", type=int, default=N_PER_STRATUM)
+    d.add_argument("--extra-per-class", type=int, default=200, help="archive top-up rows per short class")
     a = ap.parse_args(argv)
     from cosmos_search.gaia.archive import tap
     from cosmos_search.inject.classes.gaia_stream import load_plan
@@ -176,9 +180,12 @@ def main(argv=None):
     for p in a.exclude_plan:
         excl |= {int(k) for k in load_plan(p)}
     ranked = pd.read_parquet(a.ranked, columns=["source_id", "best_class_name", "phot_g_mean_mag", "tier"])
-    have = ranked[ranked["phot_g_mean_mag"].between(*G_RANGE)].groupby("best_class_name").size()
+    sid = ranked["source_id"].astype("int64")
+    # Count what is left after the exclusions: by the second pool most ranked stars of some classes are used.
+    free = ranked[ranked["phot_g_mean_mag"].between(*G_RANGE) & ~sid.isin(excl) & ~reserved(sid)]
+    have = free.groupby("best_class_name").size()
     short = [c for c in STRATA if have.get(c, 0) < 3 * a.n]
-    extra = extra_sample(tap(), short) if short else None
+    extra = extra_sample(tap(), short, per_class=a.extra_per_class) if short else None
     rng = np.random.default_rng(int.from_bytes(os.urandom(16), "little"))
     rows = draw(ranked, excl, rng, extra, a.n)
     print(json.dumps({**seal(rows, a.name), "excluded": len(excl), "topped_up_from_archive": short}, indent=2))
