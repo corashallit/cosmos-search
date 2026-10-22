@@ -145,6 +145,8 @@ two highest scores of the 44 are injections.
    every source as now. Done after the rehearsal: see "Keep rule v2" below.
 2. **Shortlist rule.** v1 (S = P(rare astrophysical) + P(u) ≥ 0.35) was pre-registered and failed on a fresh
    blind batch: 0/11 target decoys (below). The packets need external light curves before a rule can work.
+   Done: the same S threshold on packets with external light curves and pipeline tests (rule v5) passed the
+   confirmatory batch on 2026-10-22 (see "Confirmatory result" below).
 3. **Grey and non-EB first.** Ranking v1 should sort on the `grey` flag within tier 1 and 2 and remove VSX/
    ASAS-SN eclipsing types before vetting.
 4. **G3 power.** A per-source scale from a quiet reference (or a variability-class-specific null) would let
@@ -510,6 +512,50 @@ caveats, and the next attempt needs a new held-out set and control pool.
 
 Reported whatever the outcome: the four criteria, recall per held-out family, per-class control rates (all and
 covered), the queue sample's rate as the headline DR4 false-positive figure, and shown vs hidden flags.
+
+### Confirmatory result: v5 adopted (2026-10-22)
+
+All 376 Stage A transcripts were clean (read the prompt, write the reply, nothing else) and every reply parsed, so
+no packet was re-run and none counted against the rule by default. Verdicts were committed before the reveal
+(`prereg/verdicts/confirm-main`, sha256 `d59bcb43…`, and `confirm-hidden`, `8e239aa1…`; plan sha256 `cfda7e62…`)
+and pushed to PR #53 before `dayone.vet score` ran. Intervals are one-sided 95% Clopper–Pearson, as pre-registered.
+
+| criterion | result | bound | pass |
+|---|---|---|---|
+| held-out recall | 22/48 = 46% (lower 33.4%) | lower ≥ 30% | yes |
+| reserved controls, pooled | 3/135 = 2.2% (upper 5.6%) | upper ≤ 15% | yes |
+| controls, each class | max 2 of 15 (RS) | ≤ 3 | yes |
+| queue sample | 1/100 = 1.0% (upper 4.7%) | upper ≤ 10% | yes |
+
+`ADOPTED_RULE` is now v5. The recall criterion passed narrowly: three fewer hits would have failed it.
+
+- **Recall by held-out family:** clustered trains 8/12, drifting trains 6/12, swarms 5/12, irregular dips 3/12.
+  15 of the 26 misses were called eclipsing binaries, 10 instrumental (detector defect, blend, calibration,
+  shared systematic), 1 rotation. EB confusion is still the main way a real signal would be lost.
+- **Controls:** the three false hits are all active stars (RS 2 of 15, SOLAR_LIKE 1 of 15), the classes R16 named;
+  two of them carried the aperiodic flag. Every other class is 0 of 15. Among the 118 controls with ≥ 100
+  external epochs: 3/118 (upper 6.4%), the same three.
+- **Queue sample (the DR4 false-positive figure):** 1 of 100 tier-1 stars of ranking v1 is shortlisted. The vetter's
+  top class for the 100 was EB for 69, an instrumental class for 30, and YSO dipper for 1. So even after the EB
+  filter and the residual demotion, most of tier 1 still reads as eclipsing binaries to the vetter; that is the
+  next place to cut expert load. Median S 0.04, 90th percentile 0.10.
+- **The one shortlisted real star:** Gaia DR3 5862265011945308544 (G 12.7, BP−RP 1.38, parallax 0.45 mas,
+  b = −0.3°, no DPAC class), S = 0.38. Two 18–25% fades ~150 d apart in G, BP and RP, both fields of view,
+  reddened about as interstellar dust would redden them, one recovering in under 0.4 d; TESS shows 2–4 h
+  aperiodic 2% dips and rules out a 4.4 d eclipse alias. Top class YSO dipper (0.35), with P(unexplained) 0.16 and
+  debris transit 0.12 because Ks−W3 shows no hot inner dust (only W4 is in excess). Discriminating test: youth or
+  accretion signs (Hα, spectra) and whether the W4 excess is a real point source. It is a lead for the expert
+  queue, not a claim.
+- **Rule v3b on the same packets (comparison):** 28/48 decoys, 20/135 controls, 8/100 queue stars. v5 gives up 6
+  decoys to remove 17 false controls and 7 queue stars, which is the trade R16 predicted.
+- **Flags shown vs hidden (report only, same 48 decoys and 45 controls):** recall 22/48 with the pipeline tests in
+  the packet, 18/48 without; controls 0/45 shown, 1/45 hidden (an RS star). Decoys with the aperiodic flag were
+  shortlisted 14 of 20 times, without it 8 of 28. The vetter uses the tests without being bound by them.
+
+What this does not settle: the four held-out families are dip trains and irregular dips on hosts with external
+coverage (68 of 90 eligible), so the recall applies to signals that leave events ZTF or TESS can see. Single dips
+are batch 5's problem (v4 not adopted). The control classes have 15 stars each, so a per-class rate below about
+18% cannot be told from zero.
 
 ## Keep rule v2 (after the rehearsal)
 

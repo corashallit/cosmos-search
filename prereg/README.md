@@ -40,3 +40,11 @@ The code and rule commits they cite were squashed out of `main` but survive in t
 
 Times are UTC on 2026-10-21, from commit metadata (author-set, so not independent evidence). The rule commits
 precede the verdicts in each PR's history. Batch 1's rule was set in the pilots before the rehearsal.
+
+## Batches recorded under the procedure
+
+| batch | rule pre-registered | verdicts archive | result |
+|---|---|---|---|
+| 5 | v4, in `docs/dayone.md` | `verdicts/dayone-batch5` cf60d94 | v4 not adopted |
+| confirm-main, confirm-hidden | v5: d167af0 (PR #53) | `verdicts/confirm-main` e3ea437, `verdicts/confirm-hidden` 7d23f83, pushed 2026-10-22 ~03:07 UTC | v5 adopted (`docs/dayone.md`, "Confirmatory result") |
+
