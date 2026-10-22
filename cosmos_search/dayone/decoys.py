@@ -43,6 +43,8 @@ COUNTS4 = {"dip_train_poisson": 4, "dip_train_primes": 4, "dip_train_geometric":
 # The confirmatory batch (docs/dayone.md, review fixes): the held-out families only, 12 each. The only plan that
 # may draw them.
 COUNTS_CONFIRM = {f: 12 for f in lcinj.HELD_OUT_FAMILIES}
+# The batch that tests rule v6 (docs/dayone.md, "Rule v6"): the second held-out set, 12 each.
+COUNTS_CONFIRM2 = {f: 12 for f in lcinj.HELD_OUT_FAMILIES_V2}
 MIN_SIGMA = 5.0
 MAX_DRAWS = 200
 MAX_DRAWS_EXTERNAL = 3000   # most trains leave < 4 external events, so the conditioned draw needs more tries
@@ -179,7 +181,7 @@ def main(argv=None):
     p.add_argument("--recipient-file", action="append", required=True)
     p.add_argument("--min-external-events", type=int, default=0, help="dip trains must leave this many external dip events")
     p.add_argument("--half", default="batch3", help="label stored in each plan record")
-    p.add_argument("--counts", choices=("batch3", "batch4", "confirm"), default="batch3")
+    p.add_argument("--counts", choices=("batch3", "batch4", "confirm", "confirm2"), default="batch3")
     p.add_argument("--context", help="parquet with source_id, blend_tess_contamination (TESS dilution)")
     a = ap.parse_args(argv)
     rng = np.random.default_rng(int.from_bytes(os.urandom(32), "little"))
@@ -203,9 +205,9 @@ def main(argv=None):
             ctx = pd.read_parquet(a.context, columns=["source_id", "blend_tess_contamination"])
             contamination = dict(zip(ctx["source_id"].astype("int64"), ctx["blend_tess_contamination"]))
         records = plan(pd.read_parquet(a.hosts), a.lightcurves, pd.read_parquet(a.external), rng,
-                       counts={"batch4": COUNTS4, "confirm": COUNTS_CONFIRM}.get(a.counts, COUNTS),
+                       counts={"batch4": COUNTS4, "confirm": COUNTS_CONFIRM, "confirm2": COUNTS_CONFIRM2}.get(a.counts, COUNTS),
                        min_external_events=a.min_external_events, half=a.half, contamination=contamination,
-                       allow_held_out=a.counts == "confirm")
+                       allow_held_out=a.counts in ("confirm", "confirm2"))
         digest = write_sealed(records, a.out, a.recipient_file)
         # Counts only. Never print anything derived from the plan beyond its size.
         print(f"sealed {len(records)} decoys to {a.out} (sha256 {digest})")

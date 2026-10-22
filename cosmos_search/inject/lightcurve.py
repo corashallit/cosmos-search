@@ -251,7 +251,7 @@ def sample(rng, family, t_min, t_max, t_ext=None, allow_held_out=False):
         dips = [Dip(t0=float(t0), covering=depth, ingress=dur / 4, egress=dur / 4, flat=dur / 2)
                 for t0 in event_times(rng, kind, t_min, t_end, **kw)]
         return Composite(dips)
-    if family in HELD_OUT_FAMILIES:
+    if family in HELD_OUT_FAMILIES + HELD_OUT_FAMILIES_V2:
         if not allow_held_out:
             raise HeldOutError(f"{family!r} is held out for the confirmatory batch; calibration and tuning may not "
                                "draw it (docs/dayone.md, review fixes)")
@@ -290,6 +290,10 @@ FAMILIES = (
 # modules' family lists. Use them only in confirmatory
 # batches, and once a rule has been adjusted after seeing their results, they are no longer held out.
 HELD_OUT_FAMILIES = ("dip_train_clustered", "dip_train_drifting", "dip_swarm", "dip_irregular")
+# The first set was spent by the confirmatory batch of rule v5 (docs/dayone.md). This second set is for the batch
+# that tests rule v6 (docs/dayone.md, "Rule v6"), under the same conditions: no calibration, flag or rule has used
+# them, and nobody looks at how a flag responds to them before that batch is revealed.
+HELD_OUT_FAMILIES_V2 = ("dip_intermittent", "dip_depth_trend", "dip_chromatic_train", "dip_doublets")
 
 
 def _held_out(rng, family, t_min, t_end, span):
@@ -328,6 +332,50 @@ def _held_out(rng, family, t_min, t_end, span):
         return Composite([dip(t, float(min(0.9, med * np.exp(scatter * rng.standard_normal()))),
                               _loguniform(rng, 0.05, max_dur), str(rng.choice(["trapezoid", "gaussian", "tail"])))
                           for t in times])
+    if family == "dip_intermittent":
+        # One strict period, but the occulter is there in only some cycles (a clumpy ring, a body that comes and
+        # goes): eclipses never skip a cycle.
+        period = _loguniform(rng, span / 30, span / 3)
+        duty = rng.uniform(0.25, 0.6)
+        start = t_min + rng.uniform(0, period)
+        times = np.arange(start, t_end, period)
+        on = rng.random(len(times)) < duty
+        if len(times) >= 2 and on.sum() < 2:
+            on[rng.choice(len(times), 2, replace=False)] = True
+        depth, dur = _loguniform(rng, 0.005, 0.3), _loguniform(rng, 0.05, max_dur)
+        return Composite([dip(t, depth * rng.uniform(0.8, 1.2), dur) for t in times[on]])
+    if family == "dip_depth_trend":
+        # One strict period with a depth that grows or shrinks by a factor of ~5-20 over the span (something
+        # being built, or breaking up): an eclipse keeps its depth.
+        period = _loguniform(rng, span / 30, span / 3)
+        start = t_min + rng.uniform(0, period)
+        times = np.arange(start, t_end, period)
+        rate = float(rng.choice([-1, 1]) * rng.uniform(1.5, 3.0)) / span
+        d0 = _loguniform(rng, 0.005, 0.15)
+        dur = _loguniform(rng, 0.05, max_dur)
+        return Composite([dip(t, float(min(0.6, d0 * np.exp(rate * (t - t_min)))), dur) for t in times])
+    if family == "dip_chromatic_train":
+        # Dips at random times whose colour differs from one event to the next (grey, reddened, or deeper in the
+        # red): one occulting population of fixed composition cannot do that.
+        times = event_times(rng, "poisson", t_min, t_end, rate_per_day=_loguniform(rng, 3 / span, 30 / span))
+        parts = []
+        for t in times:
+            tau = _loguniform(rng, 0.05, 2.0)
+            depth = _loguniform(rng, 0.005, 0.3)
+            dur = _loguniform(rng, 0.05, max_dur)
+            parts.append(Dip(t0=float(t), covering=float(min(0.95, depth / (1 - np.exp(-tau)))), tau_ref=tau,
+                             beta=rng.uniform(-3.0, 4.0), ingress=dur / 4, egress=dur / 4, flat=dur / 2))
+        return Composite(parts)
+    if family == "dip_doublets":
+        # Pairs of dips a fixed interval apart, the pairs at random times: two bodies moving together on a path
+        # that is not a closed orbit we see, or one body seen twice.
+        parents = event_times(rng, "poisson", t_min, t_end, rate_per_day=_loguniform(rng, 2 / span, 12 / span))
+        gap, ratio = _loguniform(rng, 0.2, 5.0), rng.uniform(0.3, 1.0)
+        depth, dur = _loguniform(rng, 0.005, 0.3), _loguniform(rng, 0.05, max(0.06, min(max_dur, gap / 2)))
+        parts = []
+        for p in parents:
+            parts += [dip(p, depth, dur), dip(p + gap, depth * ratio, dur)]
+        return Composite(parts)
     if family == "dip_irregular":
         # A few complex events, each several overlapping dips of very different depth and duration.
         n = int(rng.integers(3, 16))

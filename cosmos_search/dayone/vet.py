@@ -26,7 +26,7 @@ import pandas as pd
 
 from cosmos_search.energy import run as energy_run
 from cosmos_search.inject import lightcurve as lc_families
-from cosmos_search.vetting import coincidence, sso, stage0
+from cosmos_search.vetting import coincidence, context_tests, sso, stage0
 from cosmos_search.vetting.batch import build_batch, simple_dips
 
 from .rank import _blend_map, read_lightcurves
@@ -50,6 +50,7 @@ P_U_SHORTLIST = 0.25        # pilots 2-3: probes 4/8 and controls 0/26 at P(unex
 # astrophysical leaves are as interesting as "unexplained", so the score is their sum. YSO dippers stay common.
 INTERESTING = ("disk_occultation", "debris_transit", "other_astrophysical", "unexplained")
 S_SHORTLIST = 0.35
+S_SHORTLIST_V6 = 0.2      # rule v6 (docs/dayone.md): packets with the context tests, Stage B for precision
 # The shortlist rule in force for the D2 freeze (docs/dayone.md). score_batch's headline keys, the printed summary
 # and shortlist.csv come from this rule; every other rule is reported under report["rules"] as a comparison.
 # v5 passed all four pre-registered criteria on the confirmatory batch (docs/dayone.md, "Confirmatory result").
@@ -59,11 +60,12 @@ TRAIN_FAMILIES = ("dip_train_poisson", "dip_train_primes", "dip_train_geometric"
 SINGLE_FAMILIES = ("grey_dip", "blue_dip", "chromatic_flip")
 COMMON_VARIABILITY = ("eclipsing_binary", "rotation_or_spots", "pulsation_or_irregular", "extragalactic")
 HELD_OUT_FAMILIES = lc_families.HELD_OUT_FAMILIES
+HELD_OUT_FAMILIES_V2 = lc_families.HELD_OUT_FAMILIES_V2
 TARGET_FAMILIES = ("grey_dip", "blue_dip", "dip_train_poisson", "dip_train_primes", "dip_train_geometric",
                    "chromatic_flip", "secular_fade")
 
 
-def candidate_dicts(queue, ranked, lc_dir, wide=None, plan_map=None, external=None):
+def candidate_dicts(queue, ranked, lc_dir, wide=None, plan_map=None, external=None, known_variables=False):
     """Candidate dicts (vetting.candidate shape) for the queue, from the stream's kept light curves.
 
     plan_map (a decrypted sealed plan) injects into the Gaia epochs here, before Stage 0, as the stream would have,
@@ -116,6 +118,12 @@ def candidate_dicts(queue, ranked, lc_dir, wide=None, plan_map=None, external=No
                 v = ctx.at[sid, col] if col in ctx.columns else np.nan
                 context[name] = float(v) if pd.notna(v) else float("nan")
             context = wise_limits(context, ctx.loc[sid])
+        if known_variables:
+            # Rule v6 packets: a variable-star catalogue entry not built from Gaia (vetting.context_tests). Every
+            # packet carries the keys, so a packet without an entry looks like any other.
+            kv = context_tests.known_variable(ctx.loc[sid].to_dict()) if ctx is not None and sid in ctx.index else None
+            context["known_variable_type"] = kv["type"] if kv else "none"
+            context["known_variable_period_d"] = kv["period_d"] if kv and kv["period_d"] else float("nan")
         out.append({"candidate_id": f"gaia_dr3:{sid}", "arm": "gaia", "source": source, "lightcurves": lcs,
                     "context": context, "role": row["role"],
                     "control_label": row["control_label"] if "control_label" in row and pd.notna(row.get("control_label"))
@@ -180,6 +188,65 @@ def add_tests(cands, coinc, sso_check=True, holdout_tail=True):
     return cands
 
 
+NSS_COLUMNS = ("source_id", "nss_solution_type", "period", "period_error", "t_periastron", "t_periastron_error",
+               "eccentricity", "arg_periastron")
+
+
+def fetch_nss(ids, tap=None):
+    """Gaia DR3 two-body orbits (nss_two_body_orbit) for the given source ids, one row per id (the first solution)."""
+    from astropy.table import Table
+
+    if tap is None:
+        from cosmos_search.gaia.archive import tap as gaia_tap
+        tap = gaia_tap()
+    up = Table({"source_id": np.asarray(list(ids), dtype=np.int64)})
+    t = tap.query(f"SELECT {', '.join('n.' + c for c in NSS_COLUMNS)} FROM gaiadr3.nss_two_body_orbit AS n "
+                  "JOIN TAP_UPLOAD.ids AS u ON u.source_id = n.source_id", uploads={"ids": up}).to_pandas()
+    for c in t.columns:
+        if t[c].dtype == object:
+            t[c] = t[c].map(lambda x: x.decode() if isinstance(x, bytes) else x)
+    return t.drop_duplicates("source_id")
+
+
+def add_context_tests(cands, nss=None, holdout_tail=True):
+    """Rule v6 packets (docs/dayone.md, "Rule v6"): the strict-period, catalogue-ephemeris and orbit-conjunction
+    tests (vetting.context_tests) on the epochs Stage A will see. Every packet carries all three, with
+    applicable = 0 where a star has no catalogue period or no orbit, because batch building keeps only tests that
+    every packet has (vetting.batch.harmonise), and a test only some packets carry would mark them."""
+    from cosmos_search.vetting.candidate import Candidate, LightCurve
+    from cosmos_search.vetting.packet import HOLDOUT_TAIL
+
+    orbits = {} if nss is None else {int(r["source_id"]): r for r in nss.to_dict("records")}
+    for c in cands:
+        cand = Candidate.from_dict(c)
+        t0, t1 = cand.time_span()
+        cut = t0 + (1 - HOLDOUT_TAIL) * (t1 - t0) if holdout_tail else np.inf
+        lcs = []
+        for lc in cand.lightcurves:
+            keep = (lc.time < cut) | (lc.time > t1)
+            lcs.append(LightCurve(lc.band, lc.time[keep], lc.flux[keep], lc.flux_err[keep],
+                                  {k: np.asarray(v)[keep] for k, v in lc.meta.items()}))
+        g = next((lc for lc in lcs if lc.band == "G"), None)
+        t_target = float(g.time[int(np.argmin(g.flux))]) if g is not None and len(g.time) else None
+        tests = c.setdefault("tests", {})
+        sp = context_tests.strict_period(lcs, c.get("source"), t_target)
+        tests["strict_period"] = sp or {"delta_bits": 0.0, "n_dip_epochs": 0, "visible_only": True,
+                                        "description": "Strict-period test: no dip epochs to test."}
+        per = c.get("context", {}).get("known_variable_period_d")
+        eph = context_tests.catalogue_ephemeris(lcs, per, c.get("source")) if per is not None and np.isfinite(per) else None
+        tests["catalogue_ephemeris"] = {"applicable": 1, **eph} if eph else {
+            "applicable": 0, "visible_only": True,
+            "description": "Catalogue ephemeris: no period from a variable-star catalogue not built from Gaia, or no "
+                           "dip events to fold (see context known_variable_type)."}
+        sid = int(str(c["candidate_id"]).split(":")[-1])
+        oc = context_tests.orbit_conjunction(lcs, orbits.get(sid), c.get("source"))
+        tests["orbit_conjunction"] = {"applicable": 1, **oc} if oc else {
+            "applicable": 0, "visible_only": True,
+            "description": "Orbit conjunction: the star has no Gaia DR3 two-body orbit from radial velocities or "
+                           "astrometry (most stars do not; it is not evidence either way)."}
+    return cands
+
+
 def coincidence_at(ranked):
     """A function (t, candidate_id) -> coincidence record for that star's dip at t against the other ranked stars'
     deepest epochs."""
@@ -215,13 +282,15 @@ def interesting_score(class_probs):
 
 
 def build(queue, ranked, lc_dir, out, wide=None, rng=None, sso_check=True, plan_map=None, external=None,
-          pipeline_flags=True):
+          pipeline_flags=True, v6_context=False, nss=None):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     rng = rng or np.random.default_rng(int.from_bytes(__import__("os").urandom(16), "little"))
-    cands = candidate_dicts(queue, ranked, lc_dir, wide, plan_map, external)
+    cands = candidate_dicts(queue, ranked, lc_dir, wide, plan_map, external, known_variables=v6_context)
     _, flagged = coincidence_tests(ranked)
     cands = add_tests(cands, coincidence_at(ranked), sso_check)
+    if v6_context:
+        cands = add_context_tests(cands, nss)
     # Roles starting "control" are known-answer controls (batch 5 adds "control_single_eb").
     entries = [(c, {"kind": "control" if c["role"].startswith("control") else "real", "role_in_queue": c["role"],
                     **(_control_label(c) if c["role"].startswith("control") else {})})
@@ -309,7 +378,11 @@ def score_batch(out, batch, plan=None, remote="origin"):
                                               targets=HELD_OUT_FAMILIES)["target_decoy_recall"] for r in ("v3a", "v3b")}
     # Rule v5 (docs/dayone.md, confirmatory batch): S alone, no pipeline flag shortlists (review R16). Its pass
     # criteria are in dayone.confirm; here it is scored like the others, on the held-out families when present.
-    rules["v5"] = score_v1(table, targets=HELD_OUT_FAMILIES if held.any() else TARGET_FAMILIES)
+    held2 = (table.kind == "decoy") & table.injected_family.isin(HELD_OUT_FAMILIES_V2)
+    v5_targets = HELD_OUT_FAMILIES_V2 if held2.any() else HELD_OUT_FAMILIES if held.any() else TARGET_FAMILIES
+    rules["v5"] = score_v1(table, targets=v5_targets)
+    # Rule v6 (docs/dayone.md, "Rule v6"): the lower cut, on packets with the context tests; criteria in confirm.
+    rules["v6"] = score_v1(table, threshold=S_SHORTLIST_V6, targets=v5_targets)
     rep["rules"] = rules
     adopted = rules[ADOPTED_RULE]
     rep["adopted_rule"] = ADOPTED_RULE
@@ -333,7 +406,7 @@ def score_v1(table, threshold=S_SHORTLIST, flag=None, targets=TARGET_FAMILIES):
     if flag is not None:
         hit = hit | ok[flag].fillna(False).astype(bool)
     target = (ok.kind == "decoy") & ok.injected_family.isin(targets)
-    other = (ok.kind == "decoy") & ~ok.injected_family.isin(TARGET_FAMILIES + HELD_OUT_FAMILIES)
+    other = (ok.kind == "decoy") & ~ok.injected_family.isin(TARGET_FAMILIES + HELD_OUT_FAMILIES + HELD_OUT_FAMILIES_V2)
     ctrl = ok.kind == "control"
 
     def rate(mask):
@@ -373,7 +446,7 @@ DECOY_LABELS = {
     "chromatic_flip": {"label": "unexplained", "acceptable": ["unexplained", "instrumental"], "role": "incoherent"},
     "g_only": {"label": "other_instrumental", "acceptable": ["instrumental"], "role": "incoherent"},
     **{f: {"label": "unexplained", "acceptable": ["astrophysical", "unexplained"], "role": "ambiguous"}
-       for f in HELD_OUT_FAMILIES},
+       for f in HELD_OUT_FAMILIES + HELD_OUT_FAMILIES_V2},
 }
 
 
@@ -390,6 +463,13 @@ def main(argv=None):
     b.add_argument("--no-sso", action="store_true")
     b.add_argument("--external", help="dayone.external fetch output: ZTF and TESS bands for the packets")
     b.add_argument("--plan", help="sealed decoy plan to inject at build time (dayone.decoys; needs COSMOS_REVEAL_KEY)")
+    b.add_argument("--v6-context", action="store_true",
+                   help="rule v6 packets: known-variable context and the strict-period, catalogue-ephemeris and "
+                        "orbit-conjunction tests (vetting.context_tests)")
+    b.add_argument("--nss", help="parquet of Gaia DR3 two-body orbits (python -m cosmos_search.dayone.vet nss)")
+    n = sub.add_parser("nss")
+    n.add_argument("--queue", required=True)
+    n.add_argument("--out", required=True)
     b.add_argument("--hide-pipeline-flags", action="store_true",
                    help="leave the pipeline's tests (recurrence) out of the packets; they stay in the key for scoring")
     s = sub.add_parser("score")
@@ -408,10 +488,15 @@ def main(argv=None):
         packets, _ = build(pd.read_parquet(a.queue), pd.read_parquet(a.ranked), a.lightcurves, a.out, wide,
                            sso_check=not a.no_sso, plan_map=load_plan(a.plan) if a.plan else None,
                            external=pd.read_parquet(a.external) if a.external else None,
-                           pipeline_flags=not a.hide_pipeline_flags)
+                           pipeline_flags=not a.hide_pipeline_flags, v6_context=a.v6_context,
+                           nss=pd.read_parquet(a.nss) if a.nss else None)
         from cosmos_search.vetting.__main__ import main as vmain
         vmain(["prompts", "--packets", str(Path(a.out) / "products.json"), "--out", str(Path(a.out) / "prompts")])
         print(f"{len(packets)} packets")
+    elif a.cmd == "nss":
+        t = fetch_nss(pd.read_parquet(a.queue, columns=["source_id"])["source_id"].astype("int64"))
+        t.to_parquet(a.out, index=False)
+        print(f"{len(t)} two-body orbits -> {a.out}")
     else:
         rep, table = score_batch(a.out, a.batch, a.plan, remote=None if a.unpublished else "origin")
         adopted = rep["rules"][rep["adopted_rule"]]

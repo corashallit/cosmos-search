@@ -592,6 +592,124 @@ cross-match restricted to non-Gaia discoveries, and a conjunction-phase test for
 orbit or, in DR4, epoch RVs). The confirmatory result is unchanged. Its queue criterion counts shortlisted stars
 as false positives, and this one was a false positive.
 
+## Rule v6: eclipsing-binary confusion and a lower cut (pre-registered 2026-10-22, before batch 7 is drawn)
+
+**Why the confirmatory misses read as eclipsing binaries.** The 48 held-out decoys of batch 6 were rebuilt from
+the raw Gaia epochs, the sealed plan and the external epochs, so each packet can be compared with what was
+injected into it. Recall follows how many injected events the packet shows:
+
+| injected events visible in the packet | decoys | shortlisted | missed as EB | missed as instrumental |
+|---|---|---|---|---|
+| one (all Gaia-only, mostly one pair of transits) | 13 | 1 | 6 | 6 |
+| host is itself an eclipsing binary | 3 | 0 | 3 | 0 |
+| 2–3 | 16 | 8 | 3 | 5 |
+| 4 or more | 16 | 13 | 3 | 0 |
+
+So the one-event decoys are an information limit (a single Gaia look at a dip; that is the population test's job,
+docs/population.md), and the decoys on EB hosts are honestly ambiguous. The rest are mostly near misses: 12
+of the 15 misses called EB had S between 0.16 and 0.28, with the vetter holding EB at 0.3–0.45 and putting the
+remainder on the interesting classes. The 0.35 cut, more than an EB prior, is what drops them. Seen post hoc on
+spent data, batch 6 at lower cuts would have given:
+
+| cut on S | held-out decoys | reserved controls | queue sample |
+|---|---|---|---|
+| 0.35 (v5) | 22/48 | 3/135 | 1/100 |
+| 0.25 | 24/48 | 9/135 | 2/100 |
+| 0.20 | 30/48 | 12/135 (RS 5, BE 3, YSO 2, ECL 1, SOLAR_LIKE 1) | 2/100 |
+| 0.15 | 38/48 | 18/135 | 6/100 |
+
+The queue's EB calls (69 of 100) are mostly right: ECL controls were called EB 15 of 15, and the EB filter
+explains a third of the queue sample outright. They cost Stage A slots but no shortlist slots.
+
+The transcripts show four gaps in what the packet tells the vetter:
+
+1. *Chance periods.* The recurrence test prints the period that lines up the most events (1.5 d from ZTF noise
+   epochs, 63 d from the scanning law) with no measure of how often chance does as well on sparse epochs, and
+   vetters cite those periods as eclipse periods.
+2. *RUWE.* Vetters cite high RUWE as evidence for an eclipsing companion. Decoys with RUWE > 1.4 were shortlisted
+   3 of 13 times, the rest 19 of 35. A companion Gaia's astrometry can see orbits in months to years, and the
+   chance such an orbit eclipses is a few per cent at most.
+3. *Known variables.* Packets hold back VSX because it imports Gaia's own classes, but 80 of batch 6's 375
+   cross-matched stars have VSX entries from other surveys (mostly EA types in the queue), and the v5 lead was
+   such a star (WY Cen, above).
+4. *Gaia orbits.* 16 of the 283 stars have a DR3 two-body orbit from RVs or astrometry, which predicts when an
+   eclipse can happen. WY Cen's dips all fall at its conjunctions.
+
+(The single-event test runs only when exactly one event is seen, and host noise events, a lone 4σ G epoch or a
+TESS systematic, kept it off 9 of the 13 one-event decoys. That is left for the single-dip work; v6 does not
+change it.)
+
+**Step back: is a per-object EB call needed?** For precision, no. Stage A exists to hand Stage B (which has the
+literature and catalogue tools) a short enough list; Stage B can tell a catalogued EB from an anomaly far better
+than a blind vetter can. The budget is about 10³ objects into Stage A (docs/vetting.md §7) and a shortlist of order
+10², so a queue shortlist rate up to about 10% is affordable, and v5 runs at 1–2%. The cut was set for a
+precision Stage A does not need. What the blind vetter does need is evidence on what an eclipse explanation
+predicts, so that EBs fall below even a lower cut. The residual search already removes stars a strict period
+explains before they are vetted; v6 shows the vetter the same test's significance on what remains.
+
+**Rule v6.** Shortlist a packet when S >= 0.20 (`dayone.vet.S_SHORTLIST_V6`), on packets built with
+`dayone.vet build --v6-context --nss <file>`, which adds:
+
+- `strict_period`: the EB filter's compression test (`ebfilter.search`) on the epochs the packet shows,
+  delta_bits and the bound P(delta_bits >= k | random placement) <= 2^-k;
+- context `known_variable_type`, `known_variable_period_d`: a VSX entry not named after a Gaia release and with
+  a calibrated match probability >= 0.5, or "none";
+- `catalogue_ephemeris`: dip events folded at that period, with windows as wide as the longest eclipse the
+  star's size allows and the share of the orbit they cover;
+- `orbit_conjunction`: for stars with a DR3 SB1, SB2, AstroSpectroSB1 or Orbital solution (never DPAC's
+  EclipsingBinary fits, which use the photometry shown), each dip event's distance from the nearest conjunction,
+  with the orbit's timing error;
+- in the Stage A prompt, a paragraph on what RUWE does and does not say, and one on catalogue context. Neither
+  quotes a calibration figure (R5).
+
+Every packet carries all three tests, with `applicable: 0` where a star has no period or orbit, so that batch
+harmonisation keeps them and their presence marks nothing.
+
+**Batch 7 (all fresh).**
+
+- *Held-out decoys, 48.* A second held-out set, `inject.lightcurve.HELD_OUT_FAMILIES_V2`, written before batch 7
+  and never drawn by any calibration: intermittent strict-period trains (each cycle on with probability
+  0.25–0.6), strict-period trains whose depth grows or decays by a factor e^1.5–e^3 over the span, Poisson trains
+  whose dips each have their own colour (optical depth 0.05–2, extinction slope −3 to 4), and doublets (Poisson
+  parents, each followed by a second dip at a fixed gap of 0.2–5 d). 12 per family, `decoys plan --counts
+  confirm2`, sealed to Cora's key and the reveal key. Hosts: 90 drawn by urandom as for batch 6 (unranked, no DPAC
+  dip class, G-matched to the ranked list, never used or reserved), eligible if >= 100 epochs in some external
+  band. The first two families are periodic on purpose: they test whether the vetter, given the strict-period
+  test, still credits what an EB cannot do (missing cycles, a changing depth).
+- *Reserved controls, 135.* A new pool, `dayone-controls-v2`, 15 per stratum as for v1, excluding every star used
+  so far including batch 6.
+- *Queue sample, 100.* 150 tier-1 stars of ranking v1 drawn by urandom from those never used (batch 6's 150
+  excluded), through the residual demotion, first 100 in drawn order.
+- *Context comparison, 78 (report only).* The same 48 decoys plus the 15 ECL and 15 RS controls, built without
+  `--v6-context`, as a second batch with its own packet ids. It says how much of any change comes from the
+  context and how much from the cut.
+- *Stage A, commit, reveal* exactly as for batch 6 (one blind agent per packet, transcripts audited, a failed
+  packet counts against the rule, verdicts committed with `--archive prereg/verdicts/confirm2-main` and
+  `confirm2-context-off` and pushed before `dayone.vet score`). Then
+  `python -m cosmos_search.dayone.confirm --rule v6 --score ... --compare ... --strata ...`.
+
+**Criteria (`dayone.confirm.evaluate_v6`).** One-sided 95% Clopper–Pearson bounds. The control strata are split
+by tier: ranking v1 moves RS, SOLAR_LIKE, S and AGN to tier 2 (R1), so they reach Stage A only after tier 1 and
+are held to a looser bound. The planning values are batch 6's rates at S >= 0.2, which were seen post hoc; this
+is the reason the criteria are tested on batch 7 and not quoted from batch 6.
+
+| arm | n | criterion | passes at planning value | passes a bad rule |
+|---|---|---|---|---|
+| held-out decoys (second set) | 48 | recall lower bound >= 0.40 | 0.91 at 0.625 | 0.03 at 0.40 |
+| tier-1 control strata pooled (ACV, ECL, LPV, DSCT, YSO, BE) | 90 | upper bound <= 0.20 (k <= 11) | 0.98 at 0.067 | 0.04 at 0.20 |
+| each tier-1 stratum | 15 | <= 4 of 15 | 0.84 at 0.20 (BE in batch 6) | 0.22 at 0.40 |
+| activity strata pooled (SOLAR_LIKE, RS, AGN) | 45 | upper bound <= 0.40 (k <= 12) | 0.995 at 0.133 | 0.05 at 0.40 |
+| queue sample | 100 | upper bound <= 0.10 (k <= 4) | 0.95 at 0.02 | 0.02 at 0.10 |
+
+Joint power at the planning values is about 0.69 (simulated), higher if the context raises recall; a rule with
+one tier-1 class at 0.4 passes 15% of the time, and one with every tier-1 class at 0.2 passes 3%. v5's per-class
+criterion (<= 3 of 15 in every class, activity classes included) would have had joint power 0.46 here, which is
+why the per-class bound moved to 4 for tier 1 and the activity classes are pooled. If all five pass, `ADOPTED_RULE`
+becomes v6; otherwise it stays v5, and another attempt needs a third held-out set and control pool.
+
+Reported whatever the outcome: the five criteria, v5's cut on the same verdicts, recall per family and by the
+number of injected events the packet shows, per-class control rates, and the context comparison at both cuts.
+
 ## Keep rule v2 (after the rehearsal)
 
 The stream keeps a light curve when the source's G3 `single` or `fov` |W| reaches 0.6 × the |W| at which G3

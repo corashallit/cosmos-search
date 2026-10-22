@@ -58,6 +58,18 @@ warm_shell_excluded_above_K is the temperature above which (up to 1500 K) absorb
 to cause that dimming, would have shown (absent if none is excluded). Absorbers confined to one orbit through our
 sightline intercept far less light and need not show at all.
 
+Astrometry on a Gaia packet. ruwe is how badly a single-star model fits the source's positions (about 1 for a single
+star; above about 1.4, a poor fit). A companion that makes the photocentre wobble by an amount Gaia can see orbits
+in months to years, and such orbits are rarely seen edge-on enough to eclipse (the chance is about the stars' size
+over their separation: a few per cent at most, under 1% for periods of a year or more); a resolved neighbour raises
+ruwe too. So a high ruwe says the star probably has a companion, not that the dips are eclipses by it.
+
+Catalogue context on a Gaia packet. known_variable_type and known_variable_period_d come from a variable-star
+catalogue entry made from other surveys' data, not from Gaia's (none: no such entry). Catalogue types use VSX/GCVS
+codes: EA, EB, EW, E, ED, ESD for eclipsing binaries, ROT, BY, RS for spotted stars, SR, L, M for red giants, YSO
+and UXOR for young stars, VAR for unspecified. A catalogue type is what someone concluded from other data; a dip can
+still have another cause, and the test catalogue_ephemeris says whether the dips fall where that period puts them.
+
 Detector scores and false-positive tests in the packet are computed by the pipeline. A test's p-value is for the
 null "this false-positive class does not explain the signal": a small p supports that class.
 
