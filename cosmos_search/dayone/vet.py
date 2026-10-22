@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from cosmos_search.energy import run as energy_run
 from cosmos_search.inject import lightcurve as lc_families
 from cosmos_search.vetting import coincidence, sso, stage0
 from cosmos_search.vetting.batch import build_batch, simple_dips
@@ -37,6 +38,7 @@ COINCIDENCE_WINDOW = 5.0    # days
 CONTEXT_KEYS = {"allwise_w1mpro": "W1", "allwise_w2mpro": "W2", "allwise_w3mpro": "W3", "allwise_w4mpro": "W4",
                 "allwise_p_cal": "wise_match_p", "2mass_k_m": "Ks", "2mass_p_cal": "twomass_match_p"}
 EXTERNAL_CONTEXT_KEYS = {"blend_tess_contamination": "tess_contamination"}
+G5_CONTEXT_KEYS = energy_run.PACKET_CONTEXT
 EXTERNAL_BANDS = ("ztf_g", "ztf_r", "ztf_i", "TESS")
 P_U_SHORTLIST = 0.25        # pilots 2-3: probes 4/8 and controls 0/26 at P(unexplained) >= 0.25
 # Shortlist rule v1 (docs/dayone.md, pre-registered before batch 2): for a technosignature search the rare
@@ -76,6 +78,8 @@ def candidate_dicts(queue, ranked, lc_dir, wide=None, plan_map=None, external=No
         ext_by_id = {int(k): v for k, v in external.groupby("source_id")}
     df = lc.to_pandas()
     df["band"] = df["band"].astype(str)
+    # G5 energy-budget columns (python -m cosmos_search.energy rank), when the context table carries them.
+    g5_keys = G5_CONTEXT_KEYS if ctx is not None and "g5_z_excess" in ctx.columns else {}
     out = []
     for _, row in queue.iterrows():
         sid = int(row["source_id"])
@@ -102,7 +106,7 @@ def candidate_dicts(queue, ranked, lc_dir, wide=None, plan_map=None, external=No
         source = {k: float(row[k]) for k in SOURCE_KEYS if k in row and pd.notna(row[k])}
         context = {}
         if ctx is not None and sid in ctx.index:
-            for col, name in {**CONTEXT_KEYS, **(EXTERNAL_CONTEXT_KEYS if external is not None else {})}.items():
+            for col, name in {**CONTEXT_KEYS, **(EXTERNAL_CONTEXT_KEYS if external is not None else {}), **g5_keys}.items():
                 v = ctx.at[sid, col] if col in ctx.columns else np.nan
                 context[name] = float(v) if pd.notna(v) else float("nan")
         out.append({"candidate_id": f"gaia_dr3:{sid}", "arm": "gaia", "source": source, "lightcurves": lcs,
@@ -359,6 +363,7 @@ def main(argv=None):
     b.add_argument("--ranked", required=True)
     b.add_argument("--lightcurves", required=True)
     b.add_argument("--context")
+    b.add_argument("--g5", help="python -m cosmos_search.energy candidates output: energy-budget context for the packets")
     b.add_argument("--out", required=True)
     b.add_argument("--no-sso", action="store_true")
     b.add_argument("--external", help="dayone.external fetch output: ZTF and TESS bands for the packets")
@@ -374,6 +379,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd == "build":
         wide = pd.read_parquet(a.context) if a.context else None
+        if a.g5:
+            g5 = pd.read_parquet(a.g5)[["source_id", *energy_run.PACKET_CONTEXT]]
+            wide = g5 if wide is None else wide.merge(g5, on="source_id", how="left")
         from cosmos_search.inject.classes.gaia_stream import load_plan
         packets, _ = build(pd.read_parquet(a.queue), pd.read_parquet(a.ranked), a.lightcurves, a.out, wide,
                            sso_check=not a.no_sso, plan_map=load_plan(a.plan) if a.plan else None,

@@ -55,6 +55,15 @@ and the speed bound (v_required_km_s against v_escape_km_s) as usual. colour_exc
 BP and RP dimmed and the other brightened, which no occulting body does; a temperature change of the star or a colour
 error of the instrument can.
 
+Infrared context on a Gaia packet. W1-W4 are AllWISE (2010) and Ks 2MASS (1998-2001) magnitudes. Where present,
+ir_excess_sigma is how strongly the star's Gaia G, Ks and W1-W4 prefer a photosphere plus a warm emitter over the
+photosphere alone (fitted over 50-1800 K); waste_heat_max_fraction_<T> is the largest fraction of the star's
+luminosity that material re-radiating at temperature T could carry without showing in that photometry;
+dimming_time_avg_lower is a lower bound on the time-averaged fraction of the starlight blocked on our sightline; and
+warm_shell_excluded_above_K is the temperature above which (up to 1500 K) absorbers spread around the star, enough
+to cause that dimming, would have shown (absent if none is excluded). Absorbers confined to one orbit through our
+sightline intercept far less light and need not show at all.
+
 Detector scores and false-positive tests in the packet are computed by the pipeline. A test's p-value is for the
 null "this false-positive class does not explain the signal": a small p supports that class.
 
