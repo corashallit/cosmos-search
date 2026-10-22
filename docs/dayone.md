@@ -776,6 +776,73 @@ arms where the bounds were set from post hoc batch-6 rates (queue 2%, tier-1 con
 reproduce. A 10% queue rate is about 10² of the ~10³ Stage A slots (docs/vetting.md §7), which Stage B can
 absorb; whether that is acceptable is a budget decision, and it has to be made before a third batch is drawn.
 
+**Correction (2026-10-22, next section): batch 7's packets carried leaked injections, so the result above does not
+measure v6.** The four queue leads are two eclipsing binaries and two single-epoch artefacts.
+
+### Batch 7 packets carried leaked injections; the four queue leads (2026-10-22)
+
+Stage B on the four queue stars started by comparing each packet with the raw survey data. The Gaia epochs in the
+packets match DR3's DataLink epochs exactly, but every ZTF and TESS dip that made these stars interesting is
+missing from the raw ZTF and TGLC epochs (`confirm2/external_all.parquet`). In each case the packet's flux is the
+raw flux times a factor k < 1, and its error the raw error times √k, which is what `dayone.external.apply` does
+to a decoy host.
+
+**Cause.** Batch 7's external table was concatenated from six fetch shards without `ignore_index`, so its index
+repeated every label for several stars (689,580 of 1,084,653 rows). `external.apply` selected rows by label
+(`groupby(...).groups`, `.loc[idx]`), so each decoy's signal was applied, at their own times, to every row of
+every star that shared a label with the decoy's rows: controls, queue stars and other decoys. The Gaia
+injection (`gaia_stream.apply`) works on arrays and was not affected. Batch 6's table has a unique index, and the
+same comparison finds no modified epoch in any of its 105 controls and queue stars with ZTF coverage (28 of 29
+checked decoys show their own injection), so v5's adoption stands. `external.apply` and `ebfilter.cal._apply` now
+select rows by position, and `tests/test_vetting.py::test_external_apply_ignores_repeated_index_labels` fails on
+the old code.
+
+**Reach in batch 7** (packets' listed external epochs against the raw table, aligned on the Gaia clock; a lower
+bound, since only the listed faintest epochs can be compared):
+
+| arm | with external data | carried leaked dips | S ≥ 0.20 hits | of them leaked |
+|---|---|---|---|---|
+| tier-1 controls (ACV, BE, DSCT, ECL, LPV, YSO) | 81 of 90 | 36 | 12 | 7 |
+| activity controls (RS, SOLAR_LIKE, AGN) | 40 of 45 | 16 | 5 | 4 |
+| queue sample | 84 of 100 | 41 | 10 (4 at S ≥ 0.35) | 8 (all 4) |
+
+Queue stars with leaked dips were shortlisted at S ≥ 0.20 at 20% (8/41); those without at 3% (2/59). The
+held-out decoys also carry other decoys' signals on top of their own, so recall was measured on the wrong
+packets as well. The batch-7 result therefore says nothing for or against v6: its failing arms are mostly the
+leak. The context-off batch (78 packets) has the same defect (16 of 28 controls).
+
+**The four queue leads (Stage B verdicts on the raw data).** None is in GCVS, the ASAS-SN variable catalogue or
+VSX other than as Gaia DR3's own `VAR` entry, SIMBAD has nothing beyond Gaia, and none has a DR3 two-body orbit.
+
+- **Gaia DR3 243022138810511360: natural, an eccentric detached eclipsing binary.** On the raw Gaia and ZTF
+  epochs the EB filter finds P = 22.146 d at 63.5 bits, with 29 of 31 dip epochs in two windows. Both eclipses are
+  grey and 35-45% deep (G/BP/RP equal), the second at phase 0.728 (e cos ω ≈ 0.36). Ephemeris from Gaia and ZTF
+  only: BTJD 1810.0343 + 22.145979 E. Three times written down and pushed before any TESS data was fetched
+  (`prereg/predictions/v5-queue-leads.json`, commit c1476b4) fell at −0.018, +0.013 and −0.017 d in sectors 18,
+  58 and 86 (σ 0.03 d); the second eclipse is there 6.02 d earlier in each sector. TESS depths are ~2%, as the
+  contamination ratio of 17 predicts, and the flux loss sits on the target pixel in difference images. The packet's
+  38.4 d "second train" and the depths summing past 100% were leaked dips.
+- **Gaia DR3 4226323994806052480: natural, a detached eclipsing binary.** P = 19.820 d at 43.3 bits; every raw dip
+  deeper than 10% (Gaia's 18% grey dip in both fields of view, eight ZTF epochs) falls within 0.11 d of the
+  eclipse, and the remaining outliers are single 2-5% epochs. V-shaped, ~0.25 d long, 20-30% deep. Ephemeris
+  BTJD 2519.6573 + 19.819663 E; the two eclipses predicted in TESS sector 81 came at +0.013 and +0.047 d, 23% and
+  28% deep, on target. Odd and even eclipses look alike, so the true period may be 39.64 d with twin eclipses. Two
+  further 0.5 d dips in sector 81 coincide with the background doubling and their flux loss sits at the cutout
+  edge (scattered light). The "aperiodic events to 30-58%" and the varying depths were leaked dips; this star is
+  not the 19.77 d dust-transit star TIC 400799224 the vetter recalled (that one is at 11h10m, −66.8°).
+- **Gaia DR3 6349959239894183424: instrumental (one Gaia transit).** One field-of-view transit (FoV 2, CCD row
+  1, flagged in G/BP/RP) reads 1.3% of the normal flux in all three bands; the other field of view 0.18 d later is
+  normal. A K giant (GSP-Phot R ≈ 12 R☉) cannot be occulted by 99% and recover within hours. Raw TESS (2,391
+  half-hour bins) is flat to 0.09%; the packet's 84% TESS dip was leaked.
+- **Gaia DR3 3085451011634114560: instrumental (G only, one transit).** One G transit reads 5.5% low with 70 times
+  its usual error (flag 4) while BP and RP in the same transit are normal, which no occulter does. One ZTF g epoch
+  at 0.32 has no other epoch that night; TESS sectors 7 and 34 are flat to 0.14%. The 1.6 d TESS plateau at 16%
+  with shrunken scatter was a leaked decoy signal, not a TGLC artefact.
+
+Without the leak none of the four would have looked unusual: two are eclipsing binaries that a period search on
+the raw data explains (the same lesson as WY Cen), and two are single-epoch artefacts. Data, scripts and the per-packet leak table:
+`/mnt/project-files/leads/v5-queue-leads/` (README).
+
 ## Keep rule v2 (after the rehearsal)
 
 The stream keeps a light curve when the source's G3 `single` or `fov` |W| reaches 0.6 × the |W| at which G3
