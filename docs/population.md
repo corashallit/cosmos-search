@@ -216,6 +216,15 @@ were open (§13), so they are pre-registered for DR4 only; nothing in DR3 tests 
   such a group is one scan, and independent dips almost never share one. The window is reported with its
   declustered count (each group counted once). It is attributed to the scanning when the declustered count is
   not significant.
+- **Overdispersion diagnostic, and the count it selects** (added 2026-10-22 from §14, before any DR4 data).
+  On DR4 half A, before the search, split half A by `split.quarter_of_day` into sub-halves A1 and A2 (the hash's
+  next bit). Compute E_gen per sub-half (`exposure.generic(..., n_groups=4)`), fit the DR4 null to each, and run
+  `analysis.static_transient` at the 8°, all-distance scale. The transient share is the mean of the two
+  sub-halves' transient parts divided by mean φ − 1. If it exceeds 0.5, scatter tied to scans dominates. The
+  primary count for the search, the φ curves and replication then becomes declustered events
+  (`analysis.decluster`: one event per group within 0.1 d and 2°). Otherwise raw counts stay primary. The
+  choice, with the diagnostic's numbers, is committed before the half-A candidates file. Both counts are reported
+  either way. Nothing in DR4's light-curve classification enters the null, because it reads the dip.
 - **Per-CCD G** (DR4) adds a time-mask and attribution check.
 - **Sensitivity.** A window needs LLR/φ above the max-null's 95th percentile (11.9 on DR3), so an excess of x
   events over E is found when x ≳ 4.9 √(φ(E) E). On DR3-like stars alone, DR4's doubled exposure lowers the
@@ -404,4 +413,60 @@ transits are overestimated by random thinning (1.48 at retention < 70%) and full
 per-star use, thin by each star's measured retention. On DR4's span, the median star has 82 epochs and 36
 visits (DR3 44 and 19). E_gen per star is 2.07× DR3's (median 2.06, 16–84% 1.17–3.74), within 2.0–2.25 in every
 G and ecliptic-latitude bin. Half A holds 49.4% of it.
+
+## 14. Where the overdispersion comes from (exploratory, 2026-10-22)
+
+φ of 2–6 is the main limit on sensitivity (§13: an excess needs about 4.9 √(φ E) events), so the question is
+whether it can be modelled. All numbers are for SOV under the DR4 null at 8°, all distances, unless stated.
+Code: `scripts/population_phi_sources.py`; output `population/phi_sources.json`.
+
+**It is fixed on the sky.** Halves A and B interleave by day, so structure tied to particular scans differs
+between them, while structure fixed on the sky repeats. Window residuals z = (O − E)/√E correlate 0.87 between
+the halves (0.78 at 4°, 0.64 at 2°). The robust covariance attributes 3.45 of the excess φ − 1 = 3.80 to the
+static part. Scan-tied systematics, per-transit effects and time clustering together make up the rest, about 0.35.
+
+**Shared scans are common but not the cause.** 41% of half-A SOV events (9,560 of 23,131) share a scan with
+another event: within 0.1 d and 2°, linked into groups of up to 48. For SOV-1 the share is 75%. Some pairs are
+chance neighbours in dense fields. Declustering, which counts each group once, removes 6,446 events and lowers φ
+from 4.80 to 4.22. It removes essentially all the
+transient part (0.35 → −0.02) and leaves the static part (3.45 → 3.24).
+
+**The excess lives in deep dips on faint, non-SOLAR_LIKE hosts.** Under the same null refitted to each subset:
+
+| Subset (half A) | φ | static | corr(A, B) |
+|---|---|---|---|
+| all SOV | 4.80 | 3.45 | 0.87 |
+| depth < 5% | 1.73 | 0.80 | 0.51 |
+| depth ≥ 5% | 5.43 | 3.64 | 0.88 |
+| G < 16 | 2.13 | 0.87 | 0.63 |
+| G ≥ 16 | 4.79 | 3.47 | 0.88 |
+| DPAC `SOLAR_LIKE` hosts | 1.76 | 0.72 | 0.51 |
+| other hosts | 5.92 | 3.93 | 0.88 |
+
+**DPAC's class accounts for most of it, and the dip-blind features do not.** Adding the DPAC class to the null
+(diagnostic only, since the class reads the light curve) brings φ from 4.80 to 1.97 and the static part from
+3.45 to 0.63. Features from each light curve minus its deepest visit (`features.outside_deepest`: share of faint
+points, share of bright points, quartile skew) bring φ only to 4.03. They predict the rate well (faint-point
+share alone is +1.5 in log rate), but they do not carry the spatial pattern.
+
+**The pattern is DR3's variable selection.** 42% of SOV hosts are DPAC `ECL` (20,365 of 48,858 events in both
+halves), and most of the deep faint ones (16,432 of about 21,700). DR3 published epoch photometry only for stars
+its variability pipeline selected. A faint star with one or two deep points gets in, usually labelled `ECL`:
+57% of faint `ECL` hosts have no other faint point outside the event visit, the same share as faint `ECL` stars
+without an event (58%). How readily such stars got in varies across the sky. The faint-`ECL` share of an nside-64
+pixel runs from 8% to 36% between its quintiles, and the SOV rate per star rises with it from 14 to 33 per 10⁴.
+That is a static field selected on the outcome. No dip-blind covariate can recover it from the DR3 sample alone,
+and it is the overdispersion.
+
+**What this means for DR4.** DR4 publishes epoch photometry for every source, so this selection, and with it most
+of DR3's φ, should be absent. DR4's φ curves are estimated on DR4 half A (§9), so DR3's φ is not carried
+over. DR3 therefore understates DR4's sensitivity. The scan-tied part (about 0.35 here) will remain. §9's
+sub-half diagnostic measures it on DR4 half A and switches to declustered counts if it dominates.
+
+**A side result on eclipses.** §12 found eclipses to be about 1% of the absolute SOV count from E_EB, yet 42% of
+SOV hosts carry DPAC's `ECL` label. Both can hold. Many DR3 `ECL` labels on faint stars are themselves made from
+one or two deep points, so the label is not evidence of a binary. The forward model's normalisation assumes an
+unselected population, while the DR3 sample is enriched in variables. E_EB enters the null only as binned shares
+with fitted coefficients, so its normalisation does not bias the null. DR4's unselected sample gives the first
+fair test of it.
 

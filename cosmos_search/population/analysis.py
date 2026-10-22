@@ -220,6 +220,59 @@ def scan_coincidence(t, ra, dec, dt=0.1, sep_deg=2.0):
     return n, int((size > 1).sum()), int(len(np.unique(roots)))
 
 
+def decluster(t, ra, dec, dt=0.1, sep_deg=2.0):
+    """Index of one event per scan group (events within dt days and sep_deg of a linked event), and each event's
+    group size. Groups of three or more on one scan are instrumental, and pairs are often chance neighbours in
+    dense fields, so the declustered count is a secondary count, unless §9's DR4 diagnostic selects it."""
+    t, ra, dec = (np.asarray(x, float) for x in (t, ra, dec))
+    order = np.argsort(t, kind="stable")
+    t, ra, dec = t[order], ra[order], dec[order]
+    parent = np.arange(len(t))
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(len(t)):
+        j = i + 1
+        while j < len(t) and t[j] - t[i] <= dt:
+            if _angdist(ra[i], dec[i], ra[j], dec[j]) < sep_deg:
+                parent[root(j)] = root(i)
+            j += 1
+    r = np.array([root(i) for i in range(len(t))], dtype=np.int64)
+    size = np.bincount(r, minlength=len(t))[r] if len(t) else np.zeros(0, np.int64)
+    keep = order[r == np.arange(len(t))]
+    sizes = np.empty(len(t), np.int64)
+    sizes[order] = size
+    return np.sort(keep), sizes
+
+
+def static_transient(win, obs1, lam1, obs2, lam2, min_e=5.0, min_windows=40):
+    """Split window overdispersion into a part fixed on the sky and a part tied to particular scans, from two
+    day-interleaved subsets (DR3: halves A and B; DR4: half A's sub-halves). Per scale, with z = (O - E)/sqrt(E)
+    and s = 1.4826 MAD: phi_k = s(z_k)^2, static = (s(z_1 + z_2)^2 - s(z_1 - z_2)^2) / 4 (a robust covariance),
+    transient_k = phi_k - 1 - static. Returns {(radius index, shell window): dict}."""
+    s = lambda x: 1.4826 * np.median(np.abs(x - np.median(x)))
+    O1, E1, O2, E2 = win.totals(obs1), win.totals(lam1), win.totals(obs2), win.totals(lam2)
+    out = {}
+    for ri in range(len(scan.RADII_DEG)):
+        rows = win.disc[:, 1] == ri
+        for j in range(len(win.shells)):
+            ok = (E1[rows, j] >= min_e) & (E2[rows, j] >= min_e)
+            if ok.sum() < min_windows:
+                continue
+            z1 = (O1[rows, j][ok] - E1[rows, j][ok]) / np.sqrt(E1[rows, j][ok])
+            z2 = (O2[rows, j][ok] - E2[rows, j][ok]) / np.sqrt(E2[rows, j][ok])
+            p1, p2 = s(z1) ** 2, s(z2) ** 2
+            st = (s(z1 + z2) ** 2 - s(z1 - z2) ** 2) / 4
+            out[(ri, j)] = {"n_windows": int(ok.sum()), "phi_1": float(p1), "phi_2": float(p2), "static": float(st),
+                            "transient_1": float(p1 - 1 - st), "transient_2": float(p2 - 1 - st),
+                            "corr": float(np.corrcoef(z1, z2)[0, 1])}
+    return out
+
+
 def permutation_p(stars, y, members, n=9999, rng=None):
     """One-sided p for a fixed window's event count when events are permuted among stars within full covariate
     cells: per cell, the window's count is hypergeometric (cell size, cell events, cell members in the window)."""

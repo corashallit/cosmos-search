@@ -223,6 +223,28 @@ def cmd_exposure(a):
     print("exposure done", flush=True)
 
 
+def _features_one(path, out, keep_rejected):
+    from . import features
+    name = Path(path).stem
+    rows, stars = events.prepare(_read(path), keep_rejected=keep_rejected)
+    features.outside_deepest(rows, stars).to_parquet(Path(out) / "features" / f"{name}.parquet", index=False)
+    return name
+
+
+def cmd_features(a):
+    """Dip-blind light-curve features per star (docs/population.md §14)."""
+    out = Path(a.out)
+    (out / "features").mkdir(parents=True, exist_ok=True)
+    files = [f for f in sorted(glob.glob(f"{a.lc}/*.parquet"))[: a.limit]
+             if not (out / "features" / f"{Path(f).stem}.parquet").exists()]
+    n = len(files)
+    with ProcessPoolExecutor(a.workers) as ex:
+        for i, _ in enumerate(ex.map(_features_one, files, [out] * n, [a.keep_rejected] * n, chunksize=4), 1):
+            if i % 200 == 0:
+                print(f"{i}/{n}", flush=True)
+    print("features done", flush=True)
+
+
 def _garwood(o, cl=0.90):
     from scipy import stats
     a = (1 - cl) / 2
@@ -330,7 +352,7 @@ def _head():
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m cosmos_search.population.run")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("events", "masks", "exposure", "assemble", "search", "replicate"):
+    for name in ("events", "masks", "exposure", "features", "assemble", "search", "replicate"):
         s = sub.add_parser(name)
         s.add_argument("--out", required=True)
         s.add_argument("--lc")
@@ -347,7 +369,7 @@ def main(argv=None):
         s.add_argument("--cls", default="SOV", choices=events.CLASSES)
         s.add_argument("--replication", default=str(REPO / "population" / "replication_B.json"))
     a = ap.parse_args(argv)
-    {"events": cmd_events, "masks": cmd_masks, "exposure": cmd_exposure, "assemble": cmd_assemble,
+    {"events": cmd_events, "masks": cmd_masks, "exposure": cmd_exposure, "features": cmd_features, "assemble": cmd_assemble,
      "search": cmd_search, "replicate": cmd_replicate}[a.cmd](a)
     return 0
 

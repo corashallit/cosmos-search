@@ -31,6 +31,13 @@ def half_of_time(t):
     return half_of_day(np.floor(np.asarray(t, float)).astype(np.int64))
 
 
+def quarter_of_day(day):
+    """2 * half + sub-half, the sub-half from the hash's next bit: 0, 1 are A1, A2 and 2, 3 are B1, B2. Splitting
+    half A into sub-halves lets DR4 separate static from scan-tied overdispersion without opening half B (§9)."""
+    z = splitmix64(day)
+    return (2 * (z & np.uint64(1)) + ((z >> np.uint64(1)) & np.uint64(1))).astype(np.int8)
+
+
 def visits(gid, t):
     """For epochs sorted by (group, t): visit index per epoch (global, increasing), and the half of each visit,
     taken from the day of the visit's first epoch."""
