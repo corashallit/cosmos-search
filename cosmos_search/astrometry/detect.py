@@ -1,7 +1,8 @@
 """The cascade: best natural model by BIC, then what the residual still holds.
 
 Natural family (each nested on the 5-parameter base): 5p, 7p, 9p, K1 (on 5p or 7p, whichever BIC prefers), K2 on K1,
-lens. The winner then gets the nuisance blocks (VIM if flux is given, odd scan-angle harmonics for blends) if they
+lens (with a prior penalty unless the photometry shows its magnification), nb, and red (photocentre jitter as
+correlated noise, giants only). The winner then gets the nuisance blocks (VIM if flux is given, odd scan-angle harmonics for blends) if they
 lower BIC. Only after the natural family has had every chance does the cascade try the non-gravitational change
 points (step, kick) on top of it.
 
@@ -29,6 +30,10 @@ from . import physics
 from .fit import Source, vim_index
 
 LENS_PHOT_DCHI2 = 25.0
+# Prior odds against a dark lens, unseen in the photometry, moving the centroid of a given source during the
+# mission: Gaia-era astrometric microlensing predictions (e.g. Kluter et al. 2022) are ~1e3 events among ~1e9 sources,
+# almost all by luminous, catalogued lenses that vetting checks directly. -2 ln(1e-5), conservative by 10x.
+LENS_PRIOR = 23.0
 CLIP_Z = 5.0
 MAX_CLIP_FRAC = 0.02
 
@@ -110,10 +115,18 @@ def _cascade(data, full=True):
         out["lens_phot_dchi2"] = fits["lens"].params["phot_dchi2"]
         if out["lens_phot_dchi2"] > LENS_PHOT_DCHI2:
             implausible["lens"] = fits.pop("lens")
+        elif out["lens_phot_dchi2"] > -LENS_PHOT_DCHI2:  # no magnification seen either: the prior decides
+            fits["lens"].penalty = LENS_PRIOR
         fits["nb"] = src.neighbour()
         out.update(nb_rho=fits["nb"].params["rho"], nb_b=fits["nb"].params["b"])
-    # physical plausibility: an orbit that needs > M_CAP or puts periastron inside the star is not a natural model
     r1 = data.get("r1", physics.main_sequence_radius(data.get("m1", 1.0)))
+    # stochastic photocentre jitter, only where the star is big enough on the sky for it to matter (giants)
+    theta_star = r1 * physics.RSUN_AU * max(float(fits["5p"].x[2]), 0.0)
+    red = src.red(theta_star) if full else None
+    if red is not None:
+        fits["red"] = red
+        out.update(red_amp=red.params["amp_mas"], red_tau=red.params["tau_yr"])
+    # physical plausibility: an orbit that needs > M_CAP or puts periastron inside the star is not a natural model
     for name in ("K1", "K2"):
         if name not in fits:
             continue
@@ -143,9 +156,10 @@ def _cascade(data, full=True):
     # nuisance blocks on top of the winner (non-linear parameters held)
     nuis = src.nuisance()
     used = []
-    for sub in [[b] for b in nuis] + ([nuis] if len(nuis) > 1 else []):
+    for sub in ([[b] for b in nuis] + ([nuis] if len(nuis) > 1 else [])) if best != "red" else []:
         cand = src.solve(np.concatenate([fits[best].columns] + sub, axis=1), best + "+N",
                          k_extra=fits[best].k - fits[best].columns.shape[1])
+        cand.penalty = fits[best].penalty
         if cand.bic(n) < bf.bic(n):
             bf, used = cand, sub
     nuis = used
@@ -158,7 +172,8 @@ def _cascade(data, full=True):
         out["_vim_var"] = disp ** 2
         out["vim_noise_ratio"] = float(np.sqrt(np.mean(disp ** 2) / np.mean(src.s ** 2)))
         out["vim_amp"] = float(np.hypot(*c))
-    out["_resid_z"] = (src.y - bf.columns @ bf.x) / src.s
+    s_eff = np.sqrt(src.s ** 2 + bf.params["amp_mas"] ** 2) if best == "red" else src.s
+    out["_resid_z"] = (src.y - bf.columns @ bf.x) / s_eff
     out["fov_pair_z"] = fov_pair_z(src.t, data.get("fov"), src.y - bf.columns @ bf.x, src.s)
     out["best"] = bf.name
     out["k_best"] = bf.k
@@ -168,8 +183,14 @@ def _cascade(data, full=True):
     # non-gravitational change points on top of the best natural model
     # ... and instead of it: a change point on the bare 5-parameter star (the orbit may have absorbed the jump)
     for kind in ("step", "kick"):
+        if best == "red":  # under the jitter's own covariance; its base is already the bare star
+            cp = src.changepoint_red(kind, bf)
+            out[f"dbic_{kind}"] = out[f"dbic_{kind}_alt"] = float(bf.bic(n) - cp.bic(n))
+            out[f"t_{kind}"] = cp.params["t_k"]
+            continue
         cp = src.changepoint(kind, base=bf.columns)
         cp.k = bf.k + 3
+        cp.penalty = bf.penalty
         out[f"dbic_{kind}"] = float(bf.bic(n) - cp.bic(n))
         out[f"t_{kind}"] = cp.params["t_k"]
         alt = src.changepoint(kind, base=src.base(1) if not nuis else np.concatenate([src.base(1)] + nuis, axis=1))

@@ -223,7 +223,30 @@ giants (θ* of 0.1–10 mas).
 
 ## DR4 day one
 
-DAYONE_PLAN
+In dependency order, from the release (2026-12-02):
+
+1. **Kepler bound on the DR4 NSS tables** (`kepler_bound.orbits`, `kepler_bound.accelerations`): catalogue-level,
+   minutes. Classes `dark` (needs a companion heavier than the luminous star and invisible) and `beyond` (needs more
+   than 100 M☉, or periastron inside the star). Flags, not vetoes, for precession and half-year aliases, short
+   `OrbitalAlternative` periods, low parallax, poor fit and crowding. Every unflagged `beyond` source and the top of
+   `dark` get their epoch astrometry pulled through DataLink and the full cascade: the catalogue solution is one
+   model; the cascade asks whether any possible model fits.
+2. **The two DR3 leads**, first in the queue: Gaia DR3 4041697094653956736 (Acceleration9 solution, bulge field
+   l = 356.6°, b = −3.5°, G = 11.9, minimum companion mass 230 M☉ with no visible curvature, goodness of fit 8.2, no
+   literature) and 4467000291193143808 (f_A = 112 M☉ at P = 1,648 d, longer than DR3's span; in the El-Badry et al.
+   2023 BH1 sample). DR4's 66-month span and per-transit data settle both: a real orbit closes, a crowding artefact
+   shows up in the FoV-pair test or the multi-source flag.
+3. **Epoch-level search.** Downloads, not CPU, set the scale: the full cascade costs ~3 s per source per core and
+   the linear first stage (`detect.quick`: change point on the 9-parameter star, VIM and scan-angle terms) 7 ms.
+   Prefilter on the catalogue's RUWE, which the injections show responds to the signals this arm can claim: RUWE >
+   1.4 keeps 80% of 5–10 σ_tr steps and all square waves above 5 σ_tr; RUWE > 2 keeps only 17% of 5–10 σ_tr steps.
+   In DR3 the G < 16, ϖ/σ > 10 sample has ~3.3 M sources at RUWE > 1.5 (55.6 M in all; a 1.1% random sample, 2026-10-22). Order: pull epoch data for
+   RUWE > 1.4, run `quick` on all of it, then the cascade in descending `quick_S`; the decision rule above labels
+   the output, and the top of `unexplained` goes to vetting within the expert budget.
+4. **Neighbour stream**: sources labelled `neighbour` with large S get a resolved-neighbour model seeded from Gaia's
+   own detection of the neighbour (position, G, proper motion). Not built yet.
+5. **Dip localisation for the dimmer arms** (`dips.localise`): every dimmer candidate with epoch astrometry gets an
+   on-target / neighbour / disk-scale verdict and a 95% bound on the light centre's offset during the dips.
 
 ## Log
 

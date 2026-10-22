@@ -18,6 +18,7 @@ a q x q solve with q = 2..4.
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy.linalg import cho_factor, solve_triangular
 from scipy.optimize import minimize
 
 from . import models as M
@@ -42,9 +43,11 @@ class Fit:
     params: dict = field(default_factory=dict)
     columns: np.ndarray = None  # design matrix of the linear part
     x: np.ndarray = None  # linear solution
+    penalty: float = 0.0  # -2 ln(prior odds) of the model against the plain star, added to BIC
+    chol: np.ndarray = None  # Cholesky factor of the noise covariance when it is not diagonal (red noise)
 
     def bic(self, n):
-        return M.bic(self.chi2, self.k, n)
+        return M.bic(self.chi2, self.k, n) + self.penalty
 
 
 class Source:
@@ -292,6 +295,43 @@ class Source:
         cols = np.concatenate([base, M.neighbour(self.t, self.psi, r, t_, b, dmu, s_)], axis=1)
         return self.solve(cols, "nb", k_extra=6, params={"rho": r, "theta": t_, "b": b, "dmu": dmu, "lsf": s_})
 
+    def red(self, theta_star_mas, base=None):
+        """The star plus stochastic photocentre jitter (convection, spots) as correlated noise, amplitude capped at
+        RED_JITTER_MAX of the angular radius. None when the cap is too small to matter (main-sequence stars).
+
+        chi2 is -2 ln L up to the constant shared with the white-noise models (log det C - sum ln s^2 added), so BIC
+        compares it with them directly; k counts amplitude and time scale."""
+        base = self.base(1) if base is None else base
+        a_max = RED_JITTER_MAX * theta_star_mas
+        smed = float(np.median(self.s))
+        amps = [a_max * f for f in RED_AMP_FRAC if a_max * f >= 0.1 * smed]
+        if a_max < 0.25 * smed or not amps:
+            return None
+        ld0 = 2 * np.sum(np.log(self.s))
+        best = None
+        for tau in RED_TAU_YR:
+            for amp in amps:
+                c, _ = cho_factor(red_covariance(self.t, self.psi, self.s, amp, tau), lower=True)
+                chol = np.tril(c)
+                chi2 = gls_profile(chol, self.y, base) + 2 * np.sum(np.log(np.diag(chol))) - ld0
+                if best is None or chi2 < best[0]:
+                    best = (chi2, amp, tau, chol)
+        chi2, amp, tau, chol = best
+        yw = solve_triangular(chol, self.y, lower=True)
+        x = np.linalg.lstsq(solve_triangular(chol, base, lower=True), yw, rcond=None)[0]
+        return Fit("red", base.shape[1] + 2, float(chi2), {"amp_mas": amp, "tau_yr": tau}, base, x, chol=chol)
+
+    def changepoint_red(self, kind, red):
+        """Step or kick on top of a red-noise fit, under the same noise covariance."""
+        ts = np.sort(self.t)
+        cand = 0.5 * (ts[3:-4] + ts[4:-3])
+        fn = M.step if kind == "step" else M.kick
+        blocks = np.stack([fn(self.t, self.psi, tk) for tk in cand])
+        c2 = gls_profile(red.chol, self.y, red.columns, blocks)
+        i = int(np.argmin(c2))
+        logdet = red.chi2 - gls_profile(red.chol, self.y, red.columns)
+        return Fit(kind, red.k + 3, float(c2[i] + logdet), {"t_k": float(cand[i])}, red.columns, None)
+
     def changepoint(self, kind, base=None, extra=()):
         """Best step (position jump) or kick (proper-motion change) at a transit time, on top of base."""
         base = self.base(1, extra) if base is None else base
@@ -303,6 +343,39 @@ class Source:
         i = int(np.argmin(c2))
         cols = np.concatenate([base, fn(self.t, self.psi, cand[i])], axis=1)
         return self.solve(cols, kind, k_extra=1, params={"t_k": cand[i]})
+
+
+RED_TAU_YR = (0.03, 0.1, 0.3, 1.0, 3.0)
+RED_AMP_FRAC = (1.0, 0.5, 0.25)
+RED_JITTER_MAX = 0.1  # photocentre jitter at most 10% of the angular radius (convection; Chiavassa et al.)
+
+
+def red_covariance(t, psi, sigma, amp, tau):
+    """Per-transit noise plus an isotropic 2-D photocentre jitter of rms `amp` per axis (Matern-3/2 in time, scale
+    tau years) seen along each scan direction: C_ij = s_i^2 delta_ij + amp^2 k(|t_i - t_j|) cos(psi_i - psi_j)."""
+    r = np.sqrt(3) * np.abs(t[:, None] - t[None, :]) / tau
+    c = amp ** 2 * (1 + r) * np.exp(-r) * np.cos(psi[:, None] - psi[None, :])
+    c[np.diag_indices_from(c)] += sigma ** 2
+    return c
+
+
+def gls_profile(chol, y, base, blocks=None):
+    """Generalised least squares with lower Cholesky factor `chol`: chi2 of base (blocks None) or of base + each
+    block (K, n, q) -> (K,). Whitening turns it into the ordinary problem."""
+    yw = solve_triangular(chol, y, lower=True)
+    bw = solve_triangular(chol, base, lower=True)
+    q, _ = np.linalg.qr(bw)
+    r = yw - q @ (q.T @ yw)
+    if blocks is None:
+        return float(r @ r)
+    k, n, m = blocks.shape
+    cw = solve_triangular(chol, blocks.transpose(1, 0, 2).reshape(n, k * m), lower=True)
+    cw = cw.reshape(n, k, m).transpose(1, 0, 2)
+    cw = cw - np.einsum("np,kpq->knq", q, np.einsum("np,knq->kpq", q, cw))
+    ctc = np.einsum("knp,knq->kpq", cw, cw) + 1e-12 * np.eye(m)
+    ctr = np.einsum("knp,n->kp", cw, r)
+    beta = np.linalg.solve(ctc, ctr[..., None])[..., 0]
+    return float(r @ r) - np.einsum("kp,kp->k", ctr, beta)
 
 
 def _abfg(x):
