@@ -1,8 +1,9 @@
 # Energy budget (G5): where did the blocked light go?
 
-Status: **pre-registration.** The commit that adds this file fixes the threshold rule, the half-B pass criteria and
+Status: **adopted as a ranking column and packet context (§7, 2026-10-22).** The commit that adds this file fixes the threshold rule, the half-B pass criteria and
 the blind run on the rehearsal candidates (§5–§6) before any half-A, half-B or candidate result was looked at.
-Results go in §7; changes after this commit are listed in §8 with their reason and date.
+Results are in §7; changes after that commit are listed in §8 with their reason and date. How to run it on DR4 is
+in §9.
 
 Code: `cosmos_search/energy/` (`budget.py` physics and fit, `photosphere.py` expected colours, `photometry.py`
 catalogue rules, `dimming.py` time-averaged dimming, `inject.py` known answers, `cal.py` calibration, `run.py`
@@ -190,6 +191,22 @@ excess of 4.8 photospheres, G 10.9. Binned by the injected W4 excess, the flag r
 the criterion was wrong about the physics. Under the rule of §5 this is still a failure, so the fix is
 pre-registered in §8 and tested on fresh stars before G5 is adopted.
 
+### Half C (B5', fresh stars)
+
+Seed 7430908940562924249; 64,370 + 28,316 fresh reference stars (random_index slices disjoint from A and B), photosphere
+fitted on all of A and B, half-A thresholds.
+
+| | half C | |
+|---|---|---|
+| B5' injections below 0.3 photospheres in every band, flagged as excess | 47 / 6,547 = 0.72% (cold family alone 20 / 3,527 = 0.57%) | pass (null + 1 point = 1.78%) |
+| B1 false excess, null | 35 / 4,500 = 0.78% | (as B) |
+| B2 false deficit, pooled | 8 / 5,018 = 0.16% (shell 8/1,654, thin 0/3,364) | (as B) |
+| B3 "excluded above T" cutting a shell emitter | 11 / 1,990 = 0.55% | (as B) |
+| B4 yso_disk, rcb_shell | 82.3%, 88.8% | (as B) |
+
+**G5 is adopted** (§5, §8) as a ranking column and packet context, with Z_EXCESS = 5.0 and Z_DEFICIT = 2.0. It
+never shortlists on its own; a rule that uses it needs its own pre-registered blind batch.
+
 ### Blind run on the rehearsal candidates (§6)
 
 Scored with the photosphere model fitted on all reference stars and the half-A thresholds. 3,256 of the 4,002 have
@@ -198,8 +215,8 @@ an AllWISE best neighbour in DPAC's table (the rest are scored NaN).
 1. **Excess rate**: 130 / 3,078 candidates in G × BP−RP cells the null hosts cover (95% of the candidates' weight)
    have an excess, 4.2%, against 0.66% for the reweighted null hosts: one-sided binomial p = 7 × 10⁻⁶⁰. Dimmers carry
    infrared excesses six times as often as stars like them.
-2. **By DPAC class**: LPV 66 / 211 (31%; dusty mass loss), the one RCB and one symbiotic both, ECL 44 / 1,709 (2.6%),
-   SOLAR_LIKE/RS 1 / 345, YSO 0 / 13, unclassified 24 / 1,604 (1.5%), other classes 3 / 120.
+2. **By DPAC class**: LPV 66 / 211 (31%; dusty mass loss), the one RCB and the one symbiotic star, ECL 44 / 1,709 (2.6%),
+   SOLAR_LIKE/RS 1 / 345, YSO 0 / 13, unclassified 24 / 1,604 (1.5%), remaining classes 2 / 117.
 3. **Deficits**: deficit_shell 510, deficit_thin 0. deficit_shell falls mostly on eclipsing binaries (304 ECL,
    171 unclassified, 28 other, 4 YSO, 3 SOLAR_LIKE/RS).
 4. **Leads (§6.4)**: the 171 unclassified deficit_shell stars are listed in
@@ -231,3 +248,21 @@ eclipse": an aperiodic dimmer that is neither eclipse-like nor dust-like.
   disjoint random_index slices (`reference.SAMPLES` general_c, mid_c), scored with the photosphere fitted on all of
   A and B, a fresh os.urandom seed and the half-A thresholds. B1–B4 are re-reported on C for completeness but were
   already decided on B. G5 is adopted as a ranking column and packet context if B5' passes on C.
+
+## 9. Running it
+
+```
+python -m cosmos_search.energy reference --out ref/            # reference samples (Gaia archive, ~10 min)
+python -m cosmos_search.energy candidates --ref ref/ --ranked ranked.parquet --out g5.parquet [--plan decoys.json.age]
+python -m cosmos_search.dayone.vet build ... --g5 g5.parquet   # packets carry the energy-budget context
+```
+
+`candidates` fetches K and W1–W4 through the Gaia archive's best-neighbour tables (`reference.fetch_ids`; DR4 will need
+its own neighbour tables or `photometry.from_context` on the xmatch context table). With `--plan`, sealed decoys whose
+injected story is dust get a dust excess (`inject.DECOY_IR`), so G5 cannot tell decoys from dust-like reals by their
+infrared alone. ⟨δ⟩ comes from the ranked table's depth and episode count (§6); with light curves at hand,
+`dimming.mean_deficit` is the better estimate.
+
+DR4 to-dos: per-star ⟨δ⟩ from the DR4 light curves; NEOWISE epochs during a Gaia dip (2013–2024 overlaps DR4 fully)
+would test grain size directly, since dust ≲ 1 μm dims W1 far less than G while bodies are grey from 0.6 to 4.6 μm;
+unWISE/CatWISE W1–W2 go ~1 mag deeper than AllWISE for faint hosts, where recall drops (G > 18: ~40%).

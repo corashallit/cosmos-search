@@ -94,7 +94,9 @@ def run_half(ref_dir, h, seed, log=print):
     nat = []
     for s in ("yso", "ecl"):
         df = pd.read_parquet(Path(ref_dir) / f"{s}.parquet")
-        df = df[half_of(df) == h] if h != FRESH else df.iloc[:0]
+        if h == FRESH:      # half C checks B5' only; the natural samples were already split between A and B
+            continue
+        df = df[half_of(df) == h]
         res, _ = evaluate(df, locus)
         nat.append(res.assign(kind="natural", family=s, g=df.phot_g_mean_mag.to_numpy()))
     nat = pd.concat([n for n in nat if len(n)] or [pd.DataFrame(columns=["family", "g5_z_excess"])], ignore_index=True)
