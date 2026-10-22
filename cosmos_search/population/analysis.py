@@ -13,6 +13,9 @@ from . import glm, scan
 LMC = (80.894, -69.756, 8.0)
 SMC = (13.187, -72.829, 4.0)
 ECL_P = 0.01
+R0_KPC, Z_SUN_KPC = 8.2, 0.02          # Sun's Galactocentric radius and height
+KAPPA = 4.74047                         # km/s per (mas/yr x kpc)
+PIXEL_AREA_DEG2 = 41252.96 / 49152      # HEALPix nside 64
 
 
 def _angdist(ra1, dec1, ra2, dec2):
@@ -25,6 +28,24 @@ def ecliptic_latitude(ra, dec):
     eps = np.radians(23.4392911)
     r, d = np.radians(ra), np.radians(dec)
     return np.degrees(np.arcsin(np.sin(d) * np.cos(eps) - np.cos(d) * np.sin(eps) * np.sin(r)))
+
+
+def population_columns(df, density):
+    """Columns for the DR4 null terms (§9): log10 all-Gaia sources per deg^2 in the star's nside-64 pixel
+    (`density`: Series of counts indexed by nested pixel), tangential velocity (km/s), Galactocentric radius and
+    height (kpc), all from mean astrometry and the photogeometric distance. NaN where the distance is missing."""
+    px = scan.cell_pixel(df.source_id) if "pixel" not in df else df.pixel.to_numpy()
+    with np.errstate(divide="ignore"):
+        df["log_dens"] = np.log10(pd.Series(px).map(density).to_numpy(float) / PIXEL_AREA_DEG2)
+    r = df.r_med_photogeo.to_numpy(float) / 1000
+    r = np.where(r > 0, r, np.nan)
+    df["v_tan"] = KAPPA * np.hypot(df.pmra.to_numpy(float), df.pmdec.to_numpy(float)) * r
+    lon, lat = np.radians(df.l.to_numpy(float)), np.radians(df.b.to_numpy(float))
+    x = R0_KPC - r * np.cos(lat) * np.cos(lon)
+    y = r * np.cos(lat) * np.sin(lon)
+    df["r_gal"] = np.hypot(x, y)
+    df["abs_z"] = np.abs(r * np.sin(lat) + Z_SUN_KPC)
+    return df
 
 
 def assemble(out, aux_dir, astrometry):
@@ -51,17 +72,34 @@ def assemble(out, aux_dir, astrometry):
     df["excluded"] = (_angdist(df.ra, df.dec, LMC[0], LMC[1]) < LMC[2]) | (_angdist(df.ra, df.dec, SMC[0], SMC[1]) < SMC[2])
     df["pixel"] = scan.cell_pixel(df.source_id)
     df["shell"] = scan.shell_of(df.r_med_photogeo)
+    density = Path(aux_dir) / "density_hpx6.parquet"
+    if density.exists():
+        population_columns(df, pd.read_parquet(density).set_index("hpx").n)
     df.to_parquet(out / "stars.parquet", index=False)
     return df
 
 
+DR4_COLS = {"log_dens", "v_tan", "r_gal", "abs_z"}
 STAR_COLS = ["source_id", "ra", "dec", "pixel", "shell", "E_gen_A", "E_gen_B", "E_EB_A", "E_EB_B", "excluded",
-             *[c for c, _ in glm.BINS.values()]]
+             *[c for c, _ in glm.BINS.values() if c not in DR4_COLS]]
+POP_SRC = ["l", "b", "pmra", "pmdec", "r_med_photogeo"]
 
 
-def load_stars(out, cols=STAR_COLS):
-    s = pd.read_parquet(Path(out) / "stars.parquet", columns=list(dict.fromkeys(cols)))
-    return s[~s.excluded].reset_index(drop=True)
+def load_stars(out, cols=STAR_COLS, density=None):
+    """The star table without the Magellanic Clouds. density: counts per nside-64 pixel (or a path to
+    density_hpx6.parquet) to add the DR4 population columns when stars.parquet predates them."""
+    path = Path(out) / "stars.parquet"
+    have = set(pq.read_schema(path).names)
+    want = list(dict.fromkeys(cols))
+    if density is not None and not DR4_COLS <= have:
+        want += [c for c in POP_SRC if c not in want]
+    s = pd.read_parquet(path, columns=[c for c in want if c in have])
+    s = s[~s.excluded].reset_index(drop=True)
+    if density is not None and not DR4_COLS <= have:
+        if not isinstance(density, pd.Series):
+            density = pd.read_parquet(density).set_index("hpx").n
+        population_columns(s, density)
+    return s
 
 
 def outcome(stars, ev, half, mask, cls="SOV"):
@@ -89,8 +127,22 @@ def null_model(stars, y, e, test_ecl=True, ridge=1.0):
     return lam, info, terms
 
 
-def search(stars, y, e, win=None, n_null=scan.N_NULL, rng=None, test_ecl=True, terms=None, k_max=5):
-    """Half-A search: GLM, cells, scan, max-null, greedy candidates."""
+def monitor_dispersion(stars, y_mon, e, terms, win, curve=False):
+    """Overdispersion of a monitor class (SOV1) under the same null terms, fitted to the monitor's own counts:
+    per scale, or with curve=True as a function of E (`scan.dispersion_curve`). SOV1 has no physical eclipse model
+    to hide behind: its spatial scatter is the artefact field."""
+    codes, _ = glm.covariate_codes(stars)
+    m = glm.fit(codes, y_mon, e, [t for t in terms if t != "cmd"])
+    px, sh = stars.pixel.to_numpy(), stars.shell.to_numpy()
+    obs, lc = scan.cell_sums(px, sh, y_mon), scan.cell_sums(px, sh, m["predict"](codes, e))
+    return scan.dispersion_curve(win, obs, lc) if curve else scan.dispersion(win, obs, lc)[1]
+
+
+def search(stars, y, e, win=None, n_null=scan.N_NULL, rng=None, test_ecl=True, terms=None, k_max=5, y_monitor=None):
+    """Half-A search: GLM, cells, scan, max-null, greedy candidates.
+
+    y_monitor: counts of the SOV1 monitor class. When given (the DR4 rule, §9), each window's phi is the larger
+    of the SOV and SOV1 overdispersion curves evaluated at the window's own E (review R21 at matched counts)."""
     if terms is None:
         lam, info, terms = null_model(stars, y, e, test_ecl)
     else:
@@ -102,6 +154,12 @@ def search(stars, y, e, win=None, n_null=scan.N_NULL, rng=None, test_ecl=True, t
     obs, lc = scan.cell_sums(px, sh, y), scan.cell_sums(px, sh, lam)
     null = scan.null_max(win, lc, n=n_null, rng=rng)
     phi, phi_scale = scan.dispersion(win, obs, lc)
+    if y_monitor is not None:
+        own = scan.dispersion_curve(win, obs, lc)
+        mon = monitor_dispersion(stars, y_monitor, e, terms, win, curve=True)
+        phi = scan.phi_from_curves(win, lc, own, mon)
+        info["phi_curves"] = {f"{scan.RADII_DEG[ri]}deg/{win.shells[j]}": {"E": c[0].round(1).tolist(),
+                              "sov": c[1].round(2).tolist(), "monitor": mon[(ri, j)][1].round(2).tolist() if (ri, j) in mon else None} for (ri, j), c in own.items()}
     cands, top = scan.candidates(win, obs, lc, null, phi=phi, k_max=k_max)
     cands_poisson, top_poisson = scan.candidates(win, obs, lc, null)
     info.update(phi_per_scale=phi_scale.round(3).tolist(), candidates_poisson_only=cands_poisson,
@@ -133,6 +191,33 @@ def refit_check(stars, lam, e, terms, win, n=10, rng=None):
         E1 = win.totals(scan.cell_sums(px, sh, m["predict"](codes, e)))
         out["refit"].append(float(scan.llr(O, E1).max()))
     return out
+
+
+def scan_coincidence(t, ra, dec, dt=0.1, sep_deg=2.0):
+    """Events of one window that share a scan: deepest epochs within dt days and sep_deg degrees of another event.
+    Returns (n_events, n_coincident, n_declustered), declustered counting each coincident group once. Gaia
+    crosses a 2-degree patch in seconds, so a group is one scan, and independent dips almost never share one (DR4
+    attribution, §9)."""
+    t, ra, dec = (np.asarray(x, float) for x in (t, ra, dec))
+    n = len(t)
+    parent = np.arange(n)
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    order = np.argsort(t)
+    for a_i, i in enumerate(order):
+        for j in order[a_i + 1:]:
+            if t[j] - t[i] > dt:
+                break
+            if _angdist(ra[i], dec[i], ra[j], dec[j]) < sep_deg:
+                parent[root(j)] = root(i)
+    roots = np.array([root(i) for i in range(n)])
+    size = np.bincount(roots, minlength=n)[roots] if n else np.array([], int)
+    return n, int((size > 1).sum()), int(len(np.unique(roots)))
 
 
 def permutation_p(stars, y, members, n=9999, rng=None):

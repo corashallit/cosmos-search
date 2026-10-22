@@ -104,3 +104,64 @@ def test_scan_finds_an_injected_cell_excess():
     got, top = scan.candidates(win, obs, lam, null)
     assert got and got[0]["distance"] == "500-1000 pc"
     assert hp.rotator.angdist([got[0]["ra"], got[0]["dec"]], [120.0, -30.0], lonlat=True)[0] < np.radians(3)
+
+
+def test_population_columns_geometry():
+    import pandas as pd
+    from cosmos_search.population import analysis, glm
+    # Galactic centre at 8.2 kpc, the Sun's neighbourhood towards the pole, a fast star at 1 kpc
+    df = pd.DataFrame({"source_id": np.array([0, 1 << 47, 2 << 47], np.int64), "l": [0.0, 0.0, 90.0],
+                       "b": [0.0, 90.0, 0.0], "r_med_photogeo": [8200.0, 2000.0, 1000.0],
+                       "pmra": [0.0, 0.0, 30.0], "pmdec": [0.0, 0.0, 40.0]})
+    dens = pd.Series([1000.0, 10.0, 0.0], index=[0, 1, 2])
+    analysis.population_columns(df, dens)
+    assert df.r_gal[0] < 1e-6 and abs(df.abs_z[0] - 0.02) < 1e-9
+    assert abs(df.r_gal[1] - 8.2) < 1e-6 and abs(df.abs_z[1] - 2.02) < 1e-9
+    assert abs(df.v_tan[2] - 4.74047 * 50) < 1e-6
+    assert abs(df.log_dens[0] - np.log10(1000 / analysis.PIXEL_AREA_DEG2)) < 1e-9
+    codes, _ = glm.covariate_codes(df.assign(**{c: 1.0 for c, _ in [glm.BINS[k] for k in glm.MAIN if k != "eb"]},
+                                             log_eb_share=0.0, abs_ecl_lat=10.0))
+    assert set(glm.DR4) <= set(codes.columns)
+    assert codes.gal[0] != codes.gal[1]
+
+
+def test_monitor_dispersion_only_raises_phi():
+    import pandas as pd
+    from cosmos_search.population import analysis, scan
+    rng = np.random.default_rng(8)
+    n = 60000
+    px = rng.integers(0, 12 * 64 * 64, n)
+    stars = pd.DataFrame({"pixel": px, "shell": np.full(n, 3), "phot_g_mean_mag": rng.uniform(12, 17, n),
+                          "bp_rp": np.full(n, 1.0), "m_g": np.full(n, 4.0)})
+    e = np.full(n, 1.0)
+    # the monitor's rate varies by sky region (an artefact field); the main class is Poisson
+    patch = (px // 4096) % 2 == 0
+    y_mon = rng.poisson(np.where(patch, 0.4, 0.1) * rng.gamma(2.0, 0.5, n)).astype(float)
+    win = scan.Windows()
+    phi_mon = analysis.monitor_dispersion(stars, y_mon, e, ["g"], win)
+    assert phi_mon.max() > 1.5 and phi_mon.min() >= 1.0
+
+
+def test_dispersion_curve_tracks_relative_scatter():
+    from cosmos_search.population import scan
+    rng = np.random.default_rng(9)
+    win = scan.Windows()
+    # cell rates vary by a smooth multiplicative field: relative scatter, so window phi grows with E
+    npix = 12 * 64 * 64
+    base = np.exp(rng.uniform(np.log(0.002), np.log(0.2), npix))
+    field = np.exp(0.3 * rng.standard_normal(npix // 64)).repeat(64)
+    lam = np.zeros((npix, scan.N_SHELLS + 1)); lam[:, -1] = base
+    obs = rng.poisson(lam * field[:, None]).astype(float)
+    curves = scan.dispersion_curve(win, obs, lam)
+    em, ph = curves[(3, len(win.shells) - 1)]
+    assert np.all(np.diff(ph) >= 0) and ph[-1] > ph[0]
+    phi = scan.phi_from_curves(win, lam, curves)
+    assert phi.min() >= 1.0
+
+
+def test_scan_coincidence_groups_one_scan():
+    from cosmos_search.population import analysis
+    t = [10.0, 10.02, 10.05, 50.0, 90.0, 90.01]
+    ra = [100.0, 100.5, 101.0, 100.0, 100.0, 110.0]       # last pair: same time, 10 degrees apart
+    dec = [-20.0] * 6
+    assert analysis.scan_coincidence(t, ra, dec) == (6, 3, 4)
