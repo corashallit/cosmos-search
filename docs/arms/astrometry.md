@@ -76,7 +76,16 @@ Per source, on per-transit abscissae, with the per-transit G flux (DR4 epoch pho
 2. **Physical plausibility.** An orbit is removed from the natural family if, even with 100 M☉ in total, its
    periastron would be inside the luminous star (eccentric fits that park a periastron spike on one or two
    outlying transits), or if its mass function exceeds 100 M☉. A lens is removed if the photometry rejects its
-   magnification (Δχ² > 25). The best remaining model by BIC is the natural explanation.
+   magnification (Δχ² > 25). The best remaining model by BIC, plus its prior penalty, is the natural explanation.
+   BIC approximates a Bayes factor and ignores how rare a model is; a flexible rare model then absorbs anything.
+   So a lens whose magnification the photometry does not show carries −2 ln(10⁻⁵) = 23: Gaia-era predictions are
+   ~10³ astrometric events among ~10⁹ sources, nearly all by luminous catalogued lenses that vetting checks
+   directly.
+   **Red noise** (`red`): photocentre jitter from convection is noise, with a physical ceiling. Modelled as an
+   isotropic 2-D Matérn-3/2 process seen along each scan (time scale 0.03–3 yr) with rms at most 10% of the
+   angular radius (radius from the luminous star, parallax from the fit), compared by its full Gaussian likelihood.
+   It only exists for stars big enough on the sky for that ceiling to matter, in practice giants; change points
+   on a red-noise winner are tested under the same covariance.
 3. **Noise.** If the fitted VIM is large, flux errors themselves move the centroid; that variance is added and the
    cascade runs again. Single transits more than 5σ from the best natural model (at most 2% of transits) are
    dropped and the cascade runs again: a jump or any sustained signal is never one transit.
@@ -105,7 +114,8 @@ image, hard 1-arcsec window, so a neighbour close enough to pull the centroid al
 VIM (4%: unresolved pair at 5–60 mas, periodic or red-noise variability), giant (5%: convective photocentre jitter,
 6% of the angular radius, correlation time 0.1–1 yr), microlensing (1%, with its magnification). The detector's
 neighbour model differs from the simulator's on purpose (small-pull approximation, logistic window edge, free
-amplitude, LSF width fitted) so that calibration does not reward a model that matches the simulator exactly. Blends
+amplitude, LSF width fitted) so that calibration does not reward a model that matches the simulator exactly. Likewise
+giant jitter is simulated as an Ornstein–Uhlenbeck process and fitted with a Matérn-3/2 kernel. Blends
 also set the per-transit multi-source flag when the neighbour is more than 120 mas along scan and brighter than
 b = 0.06.
 
@@ -129,17 +139,21 @@ Labels, in order of precedence:
   a non-negligible share of the source's whole signal.
 - **natural**: everything else.
 
-### Pre-registered threshold procedure (written before calibration run 5 was read)
+### Pre-registered threshold procedure (written before any calibration run on the frozen code was read)
 
 `FRAC_MULTI = 0.10`, from the DR3 numbers above (single-like stars exceed it at 0.5–2%). The other three are set
-mechanically on run 5 (2,400 naturals, seed 51; 1,600 non-gravitational injections, seed 52; 400 FoV jumps,
+mechanically on run 6 (2,400 naturals, seed 51; 1,600 non-gravitational injections, seed 52; 400 FoV jumps,
 seed 53; amplitudes log-uniform 1–50 σ_tr):
 
 1. `FOV_Z`: the smallest of {4, 5, 6, 8, 10} that at most 0.5% of naturals and non-gravitational injections exceed.
 2. `REL`: the largest of {0, 0.01, 0.02, 0.05, 0.1} that lowers recall of non-gravitational injections with
-   amplitude ≥ 20 σ_tr by at most 2 percentage points against `REL = 0`.
+   amplitude ≥ 20 σ_tr by at most 2 percentage points against `REL = 0` (both at the lowest `S_MIN` on the grid,
+   since `S_MIN` is chosen after `REL`).
 3. `S_MIN`: the smallest of {20, 25, 30, 40, 50, 70, 100, 150, 200} at which at most 0.5% of naturals (all classes
    pooled, labels applied in the order above) are labelled unexplained.
+
+`scripts/astrometry_thresholds.py` applies this mechanically. If no `S_MIN` on the grid meets step 3, the rule is
+not adopted and the blind test does not run.
 
 ### Blind test
 
@@ -149,7 +163,7 @@ injections and 60 FoV jumps, amplitudes log-uniform 3–50 σ_tr, shuffled under
 reveal step will decrypt. Pass criteria, fixed with the thresholds:
 
 - **P1** natural false-alarm rate: Clopper–Pearson 95% upper bound ≤ 1.5%.
-- **P2** recall of non-gravitational injections with amplitude ≥ 20 σ_tr: at least run 5's recall minus 10 points.
+- **P2** recall of non-gravitational injections with amplitude ≥ 20 σ_tr: at least run 6's recall minus 10 points.
 - **P3** instrument: ≥ 80% of FoV jumps with amplitude ≥ 10 σ_tr labelled instrument, and ≤ 10% of all FoV jumps
   labelled unexplained.
 
@@ -158,6 +172,37 @@ pipeline generalise to fresh draws and that nothing leaks; it cannot test whethe
 resembles the sky. That test is DR4 itself (see "DR4 day one").
 
 ## Calibration
+
+### Injections into real abscissae (`scripts/astrometry_real_inject.py`)
+
+The 12 pre-release sources are the only real per-transit data before DR4 (54–93 transits each, G 10–14 mostly).
+Each was run as published (the null) and with 4 injections per kind and amplitude added to its own abscissae, so
+the real noise, cadence and outliers stay in. The pre-release has no per-transit flux; each source gets a constant
+star's flux with DR4-like noise so the lens check works as it will on DR4. Share with S > 20 (S > 50), 48 per cell:
+
+| kind | 5 σ_tr | 10 σ_tr | 20 σ_tr | 50 σ_tr |
+|---|---|---|---|---|
+| step | 0.19 (0.00) | 0.38 (0.02) | 0.62 (0.08) | 0.88 (0.42) |
+| square | 0.33 (0.08) | 0.42 (0.29) | 0.60 (0.44) | 0.75 (0.69) |
+| kick | 0.02 (0) | 0.06 (0) | 0.12 (0) | 0.17 (0.04) |
+| thrust | 0 (0) | 0.06 (0) | 0.12 (0.02) | 0.23 (0.04) |
+
+All 12 nulls have S ≤ 2.1, so the cascade explains the real data with natural models (5p, or K1 for the three known
+binaries). Before the lens prior, step recall was 0.46 at 20 σ_tr and 0.81 at 50 σ_tr: microlensing and orbits
+absorbed steps.
+
+What this says about the arm. A proper-motion kick or a smooth thrust over 5.5 years is, on 50–100 transits,
+indistinguishable from an acceleration or a long-period orbit by a companion that physics allows (a 20 σ_tr kick on
+a G 12 star at 1 kpc can be mimicked by a companion under 10⁻⁴ M☉). Those signals are outside what any astrometric
+test can claim without other data, and the rule does not try. What remains claimable is abrupt change (steps,
+switching) at large amplitude and orbits that need impossible masses: the Kepler bound, which is where the arm's
+best DR4 prospects sit.
+
+### Linear first stage (`detect.quick`)
+
+On run 6's sources (replayed with the same seeds), `quick_S > 10` keeps 2.9% of single stars, 12% of binaries and
+29–37% of blends and triples, and recovers 83% of 5–10 σ_tr steps, all steps above 10 σ_tr and 79–100% of square
+waves; kicks and thrusts only at 20–50 σ_tr (56% and 48%). It is a ranking, not a filter.
 
 CALIBRATION_RESULTS
 
