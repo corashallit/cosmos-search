@@ -68,9 +68,11 @@ Per source, on per-transit abscissae, with the per-transit G flux (DR4 epoch pho
    5p; 7p and 9p (acceleration, jerk); K1, a photocentre orbit searched on the bare star and on top of an
    acceleration (circular periodogram 0.5 d – 40 yr, eccentricity × periastron grid, Nelder-Mead); K2, a second
    orbit on top of K1; **lens**, astrometric microlensing by a dark lens, chosen jointly with the magnification it
-   must also produce in the photometry; **nb**, a point neighbour (separation, angle, flux ratio, relative motion)
-   whose pull on the centroid is switched by the window as the scan angle turns. Odd scan-angle harmonics (3ψ, 5ψ)
-   are tried on top of the winner.
+   must also produce in the photometry; **nb**, a point neighbour (separation, angle, flux ratio, relative motion,
+   LSF width) whose pull on the centroid is switched by the window as the scan angle turns. Two nuisance blocks are
+   tried on top of the winner, alone and together: odd scan-angle harmonics (3ψ, 5ψ), and VIM whose lever arm
+   drifts linearly in time (a neighbour moving across the target's LSF changes both the flux it adds and the
+   direction it pulls).
 2. **Physical plausibility.** An orbit is removed from the natural family if, even with 100 M☉ in total, its
    periastron would be inside the luminous star (eccentric fits that park a periastron spike on one or two
    outlying transits), or if its mass function exceeds 100 M☉. A lens is removed if the photometry rejects its
@@ -98,15 +100,62 @@ outliers.
 
 Natural classes: single (45%), binary with a luminous companion (28%: Raghavan log-normal periods, q flat, light
 ratio q⁴), dark companion (3%: WD/NS/BH), hierarchical triple (6%), blend (8%: neighbour at 30–1500 mas, flux ratio
-0.01–1, half moving relative to the target at ~5 mas/yr; centroid from a two-Gaussian LSF fit, hard 1-arcsec window),
+0.01–1, half moving relative to the target at ~5 mas/yr; centroid and flux from a single-LSF fit to the two-Gaussian
+image, hard 1-arcsec window, so a neighbour close enough to pull the centroid also adds flux),
 VIM (4%: unresolved pair at 5–60 mas, periodic or red-noise variability), giant (5%: convective photocentre jitter,
 6% of the angular radius, correlation time 0.1–1 yr), microlensing (1%, with its magnification). The detector's
-neighbour model differs from the simulator's on purpose (small-pull approximation, 40 vs 45 mas LSF, logistic
-window edge, free amplitude) so that calibration does not reward a model that matches the simulator exactly.
+neighbour model differs from the simulator's on purpose (small-pull approximation, logistic window edge, free
+amplitude, LSF width fitted) so that calibration does not reward a model that matches the simulator exactly. Blends
+also set the per-transit multi-source flag when the neighbour is more than 120 mas along scan and brighter than
+b = 0.06.
 
 Non-gravitational families, amplitude in units of σ_tr: **step** (centroid jump), **kick** (proper-motion change),
 **thrust** (acceleration switched on for 20–60% of the span), **square** (periodic square-wave displacement, a
 shape no orbit makes). Instrument family: **fov_jump** (a jump in one field of view only).
+
+## Decision rule (`rule.py`, astrometry-v1)
+
+Labels, in order of precedence:
+
+- **instrument**: `fov_pair_z > FOV_Z`. The two fields of view disagree, so the signal is not on the sky.
+- **neighbour**: more than `FRAC_MULTI` of the transits carry Gaia's multi-source flag. The centroid belongs to a
+  known blend; no non-Keplerian claim is made for it. This label is a coverage cost: in DR3 (G < 16, ϖ/σ > 10, a
+  random 1% of the sky) the share of sources with `ipd_frac_multi_peak` > 10% is 0.5% at RUWE < 1, 2% at
+  RUWE 1–1.5, and 19–43% at RUWE 1.5–8, so roughly a third of the high-RUWE prefilter population goes to this
+  label. Those sources need a resolved-neighbour model built from Gaia's own detections of the neighbour, a
+  separate piece of work.
+- **unexplained**: `S = max(dbic_cp, dbic_implausible) > S_MIN` and `S > REL × max(χ²_5p − (n − 5), 1)`. The data
+  prefer a change point or a physically impossible model over every possible natural one, by a margin that is also
+  a non-negligible share of the source's whole signal.
+- **natural**: everything else.
+
+### Pre-registered threshold procedure (written before calibration run 5 was read)
+
+`FRAC_MULTI = 0.10`, from the DR3 numbers above (single-like stars exceed it at 0.5–2%). The other three are set
+mechanically on run 5 (2,400 naturals, seed 51; 1,600 non-gravitational injections, seed 52; 400 FoV jumps,
+seed 53; amplitudes log-uniform 1–50 σ_tr):
+
+1. `FOV_Z`: the smallest of {4, 5, 6, 8, 10} that at most 0.5% of naturals and non-gravitational injections exceed.
+2. `REL`: the largest of {0, 0.01, 0.02, 0.05, 0.1} that lowers recall of non-gravitational injections with
+   amplitude ≥ 20 σ_tr by at most 2 percentage points against `REL = 0`.
+3. `S_MIN`: the smallest of {20, 25, 30, 40, 50, 70, 100, 150, 200} at which at most 0.5% of naturals (all classes
+   pooled, labels applied in the order above) are labelled unexplained.
+
+### Blind test
+
+A sealed batch (`scripts/astrometry_blind.py`): 800 naturals in the calibration mix, 240 non-gravitational
+injections and 60 FoV jumps, amplitudes log-uniform 3–50 σ_tr, shuffled under anonymous ids, seed from
+`os.urandom`, truth sealed with age to Cora's key and the reveal key. Flags are committed and pushed before the
+reveal step will decrypt. Pass criteria, fixed with the thresholds:
+
+- **P1** natural false-alarm rate: Clopper–Pearson 95% upper bound ≤ 1.5%.
+- **P2** recall of non-gravitational injections with amplitude ≥ 20 σ_tr: at least run 5's recall minus 10 points.
+- **P3** instrument: ≥ 80% of FoV jumps with amplitude ≥ 10 σ_tr labelled instrument, and ≤ 10% of all FoV jumps
+  labelled unexplained.
+
+The blind batch is drawn from the same simulator as the calibration, so it tests that the frozen thresholds and the
+pipeline generalise to fresh draws and that nothing leaks; it cannot test whether the simulator's natural mix
+resembles the sky. That test is DR4 itself (see "DR4 day one").
 
 ## Calibration
 
