@@ -179,13 +179,48 @@ becomes a follow-up target list.
 
 ## 9. DR4
 
-Same code. Changes for DR4:
+Same code and the same rules as §2–§8, with the changes below. They were chosen on DR3 after both DR3 halves
+were open (§13), so they are pre-registered for DR4 only; nothing in DR3 tests them.
 
-- DR4 epoch photometry covers all sources, so rates become physical and the H0 covariates can include
-  non-variable stars.
-- The split uses DR4's days, by the same rule and salt.
-- Per-CCD G (DR4) adds a time-mask and attribution check.
-- DR3 universes give the expected sensitivity, scaled by DR4's star counts and its doubled baseline.
+- **Population.** DR4 epoch photometry covers all sources, so rates become physical and the null covariates
+  include non-variable stars.
+- **Split.** The split uses DR4's days, by the same rule and salt.
+- **Null terms, fixed.** The null is `glm.DR4`: the §3 covariates, |ecliptic latitude| always (no LRT: with
+  ~10⁹ stars every term would pass), and three more that never read a light curve:
+  - `dens`: log₁₀ of all-Gaia sources per deg² in the star's nside-64 pixel (11 bins, edges 3.75 to 6.0). It
+    stands for crowding: contaminated windows, background errors and on-board losses.
+  - `vt`: tangential velocity 4.74 μ d (km/s, `r_med_photogeo`; edges 20, 40, 80, 150, 250, 400, plus unknown).
+    It stands for population (thin disc, thick disc, halo), and so for age, activity and binary fraction.
+  - `gal`: Galactocentric radius × height cells (R edges 3, 6, 10 kpc; |z| edges 0.3, 1, 3 kpc; R₀ 8.2 kpc;
+    plus unknown). It stands for the bulge, bar, inner disc and outer disc. Its cells are kiloparsecs across, so
+    at 2–8 kpc each spans 10–30° of sky, larger than the largest window. A broad excess over the whole bulge is
+    therefore absorbed and is not a candidate; that is deliberate. A bulge-wide rate difference is a population
+    effect before it is anything else. §13 measures what the terms absorb.
+- **Overdispersion as a function of E, with the SOV-1 monitor (review R21).** On DR3, φ rises with a window's
+  expected count within a scale, so a single φ per scale is too small for dense-sky windows and too large for
+  sparse ones. Each scale's windows (E ≥ 5) are split into four quantile bins of E; each bin gets the robust φ of
+  §10 item 6, made non-decreasing in E. The same curve is fitted for SOV-1 under the same null terms. A window's φ
+  is the larger of the two curves, both interpolated in log E at the window's own E. The comparison happens at
+  matched counts because SOV-1 has about five times SOV's count per window, and φ grows with the count. Taking
+  SOV-1's per-scale φ at its own counts would have charged SOV for SOV-1's larger windows. Replication uses half B's
+  own curves in the same way.
+- **Window 1 of DR3 (l 348°, b −12°)** sits on SOV-1's strongest hotspot and was explained post hoc. It is
+  not cited as a result anywhere. If DR4 finds a window there, it is reported with the SOV-1 count beside it.
+- **Cadence before release.** GOST (`gaia/gost.py`) predicts each star's DR4 transits. On 4,950 DR3 stars spread
+  over the sky (§13), GOST thinned to the measured retention reproduces the summed E_gen of the real DR3 epochs
+  to 7%. On DR4's span it gives 82 epochs and 36 visits per star at the median (DR3: 44 and 19), and 2.07 times
+  DR3's E_gen per star, evenly across ecliptic latitude and G. GOST stands in for DR4's epochs only before
+  release: for DR4-cadence calibration universes and the power forecast. The DR4 analysis uses the real epochs.
+- **Scan coincidence** (attribution, `analysis.scan_coincidence`). For each replicated window, count events whose
+  deepest epochs fall within 0.1 d and 2° of another event in the window. Gaia crosses a 2° patch in seconds, so
+  such a group is one scan, and independent dips almost never share one. The window is reported with its
+  declustered count (each group counted once). It is attributed to the scanning when the declustered count is
+  not significant.
+- **Per-CCD G** (DR4) adds a time-mask and attribution check.
+- **Sensitivity.** A window needs LLR/φ above the max-null's 95th percentile (11.9 on DR3), so an excess of x
+  events over E is found when x ≳ 4.9 √(φ(E) E). On DR3-like stars alone, DR4's doubled exposure lowers the
+  detectable fractional excess by up to √2, less where φ grows with E. All-source counts will set the real
+  figure. DR4 half A will set the non-variable stars' rate, which DR3 cannot.
 
 ## 10. Changes after pre-registration
 
@@ -230,7 +265,11 @@ masked events had been seen at that point; nothing about where on the sky or at 
   and `vari_classifier_result`. 11,754,237 rows, on the share at
   `data/gaia-dr3-epoch/aux/aux_astrometry.parquet`.
 - Code: `cosmos_search/population/` (`run.py` drives the steps, `calibrate.py` the universes);
-  `scripts/population_attribution.py` for §12's attribution refits.
+  `scripts/population_attribution.py` for §12's attribution refits. §13: `scripts/population_dr4_null.py`
+  (LRTs, φ, frozen windows, rescan), `scripts/population_absorption.py` (count injections) and
+  `scripts/population_gost_exposure.py` (GOST validation and forecast). The density map
+  (`density_hpx6.parquet`, all-Gaia sources per nside-64 pixel), the GOST sample, its transits and the per-star
+  exposures are on the share under `population/`.
 
 ## 12. DR3 results (2026-10-21)
 
@@ -302,3 +341,67 @@ pass took about 5 min and the exposure pass about 70 min. Before DR4:
 - DR4's quiet stars change everything measured here. The covariate effects and φ must be re-estimated on DR4's
   half A.
 - Use GOST's predicted transits (the coverage thread's `gaia/gost.py`) for exposure and scan-angle attribution.
+
+## 13. DR3 check of the DR4 null (exploratory, 2026-10-22)
+
+Both DR3 halves were open when this ran, so nothing here is a test. It shows what §9's changes do to the DR3
+result and how much they cost in sensitivity. Outputs: `population/dr4_null_check.json`,
+`population/dr4_absorption.json`, `population/gost_exposure.json`.
+
+**New terms.** Added one at a time to the frozen null on half A, all three are kept by a wide margin: density
+LRT 2,470 (10 df), v_tan 212 (7 df), Galactocentric cells 1,205 (16 df). Coefficients are natural-log rate
+ratios in the full DR4 null. Pixels above 10⁴·⁵ sources per deg² run 0.3–0.5 above the sparsest, with a dip of
+−0.8 in the 10⁴–10⁴·²⁵ bin. The rate rises with height at every radius, by 0.7–0.9 from |z| < 0.3 kpc to
+|z| > 3 kpc. The 3–6 kpc ring runs 0.1–0.55 above the solar cylinder at the same height. Within R < 3 kpc the
+rate matches the solar cylinder except in the plane, where it is 0.2 lower. Tangential velocity matters only at
+the extremes: −0.46 above 400 km/s, and +0.59 for stars with no distance or proper motion.
+
+**Overdispersion.** The new terms barely change it. At the 8°, all-distance scale, φ in half A is 6.1 under the
+frozen null and 5.7 under the DR4 null (median over scales 2.2 and 2.2). The excess variance is not crowding or
+Galactic structure as binned here. φ rises with a window's E: 2.7 at E ≈ 10 and 5.8 at E ≈ 275 (half A, 8°,
+all distances). SOV-1 at the same scale runs 6.0 → 28 over E 10–1,300, and has about five times SOV's count per
+window. The per-scale rule of §10 item 6 therefore understates φ for dense windows and overstates it for sparse
+ones, and SOV-1's per-scale φ is not comparable to SOV's. §9's curves fix both.
+
+**The five frozen windows under the DR4 null** (O/E, φ at the window's E, one-sided negative-binomial p; single
+windows, no look-elsewhere):
+
+| Window (ra, dec, radius, distance) | Half A, frozen null | Half A, DR4 null | Half B, DR4 null |
+|---|---|---|---|
+| 1. 273.0, −45.0, 8°, all | 517/216, p 7 × 10⁻⁶ | 517/339, φ 13, p 0.010 | 490/394, φ 20, p 0.14 |
+| 2. 286.9, 7.2, 8°, all | 559/316, p 9 × 10⁻⁴ | 559/401, φ 15, p 0.031 | 606/445, φ 21, p 0.06 |
+| 3. 208.9, −48.1, 8°, all | 256/127, p 8 × 10⁻⁴ | 256/161, φ 8, p 0.011 | 223/151, φ 14, p 0.07 |
+| 4. 284.1, −9.6, 8°, 0.5–4 kpc | 289/160, p 0.001 | 289/181, φ 12, p 0.019 | 155/124, φ 11, p 0.19 |
+| 5. 256.5, −60.4, 8°, all | 514/328, p 0.007 | 514/476, φ 17, p 0.32 | 583/606, φ 25, p 0.55 |
+
+The density and Galactic terms raise E by 15–45%. The SOV-1 curve raises φ by 1.5–2×. None of the five would
+replicate at p < 0.01 under the DR4 rules. Window 1, the one §12 left "not attributed", is about 1.5× the
+DR4 null in both halves. That is in line with the other four and with a bulge-direction population that the
+kiloparsec cells only partly capture.
+
+**Half-A rescan under the DR4 rules.** The maximum LLR/φ over all windows is 12.6, against a null 95th
+percentile of 11.9. One window passes (family-wise p 0.025): 146.3°, −27.3°, 4°, 250–500 pc, 12 events on
+E 1.5. It has 1 event on E 1.3 in half B, so it does not replicate. All 12 hosts are DPAC `SOLAR_LIKE`, the dips
+are shallow (1–6%, two in-dip epochs), and three share one scan (§9's scan coincidence: 10 declustered). It is a
+low-count fluctuation among spotted stars, the class the single-dip arm already found to be its main false
+positive.
+
+**Absorption** (37 universes; 40 were planned, and a container restart stopped the run). Each universe adds
+Poisson(f λ) events to the stars of one random region (radius 4°, 8° or 15°, a random shell window, away from
+the real windows), with 7–600 added events. With and without the new terms, about 1–3% of an injected excess
+moves into the refitted null: the kiloparsec cells fill with stars from far outside any one region. Recovery is
+12/37 for the frozen null with per-scale φ and 11/37 for the DR4 null with the SOV-1 curves. By injected count
+over √E: 1/13 and 1/13 below 3 (chance overlaps with nearby fluctuations); 0/9 and 0/9 from 3 to 12; 5/9 and 4/9 from 12 to 30; 6/6 and 6/6 above 30. The
+DR4 rules cost little sensitivity. Everything in DR3 below about 12 √E is lost under either null, which matches
+the §9 estimate x ≳ 4.9 √(φ E) for φ of 5–10.
+
+**GOST.** 4,950 DR3 stars from 100 random compact files (HEALPix-8 ranges), queried in 1,000-target jobs. Over
+DR3's span, GOST predicts every transit; Gaia kept a median 89% of them as good G epochs (91% at G < 17, 77% at
+G 19–21). Thinned at random to 89%, GOST's summed E_gen is 0.93 of the real epochs' (unthinned 1.13). The
+per-star scatter (16–84%: 0.52–1.60) is mostly Monte Carlo noise. Real losses cluster: stars that lost many
+transits are overestimated by random thinning (1.48 at retention < 70%) and full-retention stars underestimated
+(0.83). Cells sum many stars, so the 7% aggregate bias is what calibration on GOST cadence inherits. For
+per-star use, thin by each star's measured retention. On DR4's span, the median star has 82 epochs and 36
+visits (DR3 44 and 19). E_gen per star is 2.07× DR3's (median 2.06, 16–84% 1.17–3.74), within 2.0–2.25 in every
+G and ecliptic-latitude bin. Half A holds 49.4% of it.
+
