@@ -324,7 +324,6 @@ def leverage(src, base, cols):
 
     A high-eccentricity orbit can put its periastron on one or two outlying transits; such an 'orbit' is an outlier
     absorber, not evidence for a companion. Near 1: two transits carry the whole signal."""
-    _ = M.wls(base, src.y, src.s)
     x, _ = M.wls(cols, src.y, src.s)
     xb, _ = M.wls(base, src.y, src.s)
     r0 = (src.y - base @ xb) / src.s

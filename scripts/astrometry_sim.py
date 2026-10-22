@@ -29,7 +29,7 @@ def _init():
 
 
 def run_shard(job):
-    out, seed, k, kinds, amp_range = job
+    out, seed, k, kinds, amp_range, stage = job
     path = Path(out) / f"shard-{k:04d}.parquet"
     if path.exists():
         return k
@@ -44,7 +44,7 @@ def run_shard(job):
             amp = float(10 ** rng.uniform(*np.log10(amp_range)))
         data, truth = S.simulate(rng, _CAD, kind, amp=amp)
         try:
-            res = detect.cascade(data)
+            res = detect.cascade(data) if stage == "cascade" else detect.quick(data)
         except Exception as e:  # noqa: BLE001 -- keep the shard; record the failure
             res = {"error": repr(e)[:200]}
         rows.append({**{f"truth_{a}": b for a, b in truth.items()}, **res, "shard": k, "i": i})
@@ -62,9 +62,11 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--amp", type=float, nargs=2, default=(1.0, 50.0))
     ap.add_argument("--procs", type=int, default=4)
+    ap.add_argument("--stage", choices=["cascade", "quick"], default="cascade",
+                    help="quick replays the same sources (same seed) through the linear first stage only")
     a = ap.parse_args()
     Path(a.out).mkdir(parents=True, exist_ok=True)
-    jobs = [(a.out, a.seed, k, a.kinds, tuple(a.amp)) for k in range(int(np.ceil(a.n / SHARD)))]
+    jobs = [(a.out, a.seed, k, a.kinds, tuple(a.amp), a.stage) for k in range(int(np.ceil(a.n / SHARD)))]
     with Pool(a.procs, initializer=_init) as pool:
         for k in pool.imap_unordered(run_shard, jobs):
             print(f"shard {k} done", flush=True)

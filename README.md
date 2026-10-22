@@ -14,7 +14,7 @@ than a survey team, in exactly the kind of search where volunteers historically 
 |---|---|---|---|
 | **Aperiodic dimmers** (main) | Gaia DR4 epoch photometry; DR3 as rehearsal | Designing | [docs/arms/gaia-dimmers.md](docs/arms/gaia-dimmers.md) |
 | **Aperiodic dimmers in TESS FFIs** (side, cross-check) | TESS full-frame images | Thread working | [docs/arms/tess-dimmers.md](docs/arms/tess-dimmers.md) |
-| **Non-Keplerian astrometry** (narrow, secondary) | Gaia DR4 epoch astrometry; DR4 pre-release sample | Designing | [docs/arms/astrometry.md](docs/arms/astrometry.md) |
+| **Non-Keplerian astrometry** (narrow, secondary) | Gaia DR4 epoch astrometry and NSS; DR3 NSS and DR4 pre-release as rehearsal | Calibrated, blind test | [docs/arms/astrometry.md](docs/arms/astrometry.md) |
 
 Shared infrastructure: archive client and Gaia access ([docs/infra/](docs/infra/)), injection and blinding
 ([docs/blinding.md](docs/blinding.md)), statistics ([docs/statistics.md](docs/statistics.md)), vetting ([docs/vetting.md](docs/vetting.md)).

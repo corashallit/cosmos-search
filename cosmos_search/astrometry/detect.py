@@ -177,3 +177,19 @@ def _cascade(data, full=True):
         out[f"dbic_{kind}_alt"] = float(bf.bic(n) - alt.bic(n))
     out["dbic_cp"] = max(out["dbic_step"], out["dbic_kick"], out["dbic_step_alt"], out["dbic_kick_alt"])
     return out
+
+
+def quick(data):
+    """Linear-only first stage for DR4 volume: a step or kick change point on top of the 9-parameter star (with VIM
+    and the scan-angle harmonics), against that star. No periodogram, lens or neighbour search, so ~100x cheaper
+    than `cascade`; it ranks which sources get the cascade first. Returns the larger BIC gain of the two."""
+    src = Source(data["t"], data["psi"], data["f_al"], data["w"], data["sigma"], data.get("flux"),
+                 data.get("flux_err"))
+    base = np.concatenate([src.base(3)] + src.nuisance(), axis=1)
+    null = src.solve(base, "9p+N")
+    gains = []
+    for kind in ("step", "kick"):
+        cp = src.changepoint(kind, base=base)
+        cp.k = base.shape[1] + 3
+        gains.append(null.bic(src.n) - cp.bic(src.n))
+    return {"quick_S": float(max(gains)), "ruwe": float(np.sqrt(src.five().chi2 / (src.n - 5)))}
