@@ -165,3 +165,51 @@ def test_scan_coincidence_groups_one_scan():
     ra = [100.0, 100.5, 101.0, 100.0, 100.0, 110.0]       # last pair: same time, 10 degrees apart
     dec = [-20.0] * 6
     assert analysis.scan_coincidence(t, ra, dec) == (6, 3, 4)
+
+
+def test_dip_blind_features_ignore_the_deepest_visit():
+    from cosmos_search.population import features
+    rng = np.random.default_rng(10)
+    t, _ = _cadence(rng, 25)
+    quiet = _star(1, t, rng)
+    one_dip = _star(2, t, rng, dips=[(t[20] - 0.01, t[21] + 0.01, 0.3)])
+    # an eclipsing star: the deepest eclipse plus shallower ones on other visits
+    ecl = _star(3, t, rng, dips=[(t[20] - 0.01, t[21] + 0.01, 0.3)] +
+                [(t[k] - 0.01, t[k] + 0.01, 0.04) for k in (4, 10, 30, 40)])
+    rows, stars = events.prepare(_cat([quiet, one_dip, ecl]))
+    f = features.outside_deepest(rows, stars).set_index("source_id")
+    assert f.f_low[2] <= f.f_low[1] + 0.03          # the one dip is invisible to the features
+    assert f.f_low[3] > f.f_low[2] + 0.05           # the other eclipses are not
+
+
+def test_quarters_nest_in_halves():
+    days = np.arange(-200, 2000)
+    q = split.quarter_of_day(days)
+    assert np.all(q // 2 == split.half_of_day(days))
+    assert all(0.2 < np.mean(q == k) < 0.3 for k in range(4))
+
+
+def test_static_transient_separates_sky_fixed_from_scan_tied_scatter():
+    from cosmos_search.population import analysis, scan
+    rng = np.random.default_rng(11)
+    win = scan.Windows()
+    npix = 12 * 64 * 64
+    lam = np.zeros((npix, scan.N_SHELLS + 1)); lam[:, -1] = 1.0
+    sky = np.exp(0.4 * rng.standard_normal(npix // 16)).repeat(16)      # fixed field, both subsets
+    o1 = rng.poisson(lam * sky[:, None]).astype(float)
+    o2 = rng.poisson(lam * sky[:, None]).astype(float)
+    res = analysis.static_transient(win, o1, lam, o2, lam)
+    r = res[(3, len(win.shells) - 1)]
+    assert r["corr"] > 0.5 and r["static"] > 0.5 * (r["phi_1"] - 1)
+    # scan-tied: independent fields per subset
+    o2b = rng.poisson(lam * np.exp(0.4 * rng.standard_normal(npix // 16)).repeat(16)[:, None]).astype(float)
+    r2 = analysis.static_transient(win, o1, lam, o2b, lam)[(3, len(win.shells) - 1)]
+    assert abs(r2["corr"]) < 0.2 and r2["transient_1"] > r2["static"]
+
+
+def test_decluster_keeps_one_per_scan():
+    from cosmos_search.population import analysis
+    t = [10.0, 50.0, 10.02, 10.05, 90.0]
+    ra = [100.0, 100.0, 100.5, 101.0, 100.0]
+    keep, size = analysis.decluster(t, ra, [-20.0] * 5)
+    assert len(keep) == 3 and list(size) == [3, 1, 3, 3, 1]

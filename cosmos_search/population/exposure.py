@@ -109,14 +109,15 @@ def _arrays(rows, stars_df):
     return rows, stars, vt
 
 
-def generic(rows, stars_df, n_draws=N_GEN, rng=None):
-    """E_gen per star for halves A and B: shape (n_stars, 2)."""
+def generic(rows, stars_df, n_draws=N_GEN, rng=None, n_groups=2):
+    """E_gen per star for halves A and B: shape (n_stars, 2). With n_groups=4 and rows["vhalf"] holding
+    `split.quarter_of_day` codes, per quarter."""
     rng = rng or np.random.default_rng(0)
     rows, stars, vt = _arrays(rows, stars_df)
     n = len(stars["n_visits"])
     t = rows["t"].astype(np.float64)
     gid = rows["gid"]
-    out = np.zeros((n, 2))
+    out = np.zeros((n, n_groups))
     for _ in range(n_draws):
         T = np.exp(rng.uniform(*np.log(GEN_T), n))
         depth = np.exp(rng.uniform(*np.log(GEN_DEPTH), n))
@@ -127,21 +128,21 @@ def generic(rows, stars_df, n_draws=N_GEN, rng=None):
         mid = t0 + T / 2
         d = se._trapezoid(t - mid[gid], T[gid], tau[gid], depth[gid])
         sov, half = _sov_half(rows, stars, d)
-        for h in (0, 1):
+        for h in range(n_groups):
             out[:, h] += np.where(sov & (half == h), w, 0.0)
     return out / n_draws
 
 
-def eclipse(rows, stars_df, radius, mass, n_draws=N_EB, rng=None):
+def eclipse(rows, stars_df, radius, mass, n_draws=N_EB, rng=None, n_groups=2):
     """E_EB per star for halves A and B: shape (n_stars, 2). radius, mass: per star (solar units), NaN for the
-    broad prior."""
+    broad prior. n_groups as in `generic`."""
     rng = rng or np.random.default_rng(1)
     rows, stars, vt = _arrays(rows, stars_df)
     n = len(stars["n_visits"])
     t = rows["t"].astype(np.float64)
     gid = rows["gid"]
     known = np.isfinite(radius) & np.isfinite(mass)
-    out = np.zeros((n, 2))
+    out = np.zeros((n, n_groups))
     span_logp = EB_LOGP[1] - EB_LOGP[0]
     for _ in range(n_draws):
         r1 = np.where(known, radius * 10 ** (se.R_SCATTER_DEX * rng.standard_normal(n)),
@@ -174,6 +175,6 @@ def eclipse(rows, stars_df, radius, mass, n_draws=N_EB, rng=None):
         dph = dt - np.round(dt / P[gid]) * P[gid]
         d = se._trapezoid(dph, T[gid], tau[gid], depth[gid])
         sov, half = _sov_half(rows, stars, d)
-        for h in (0, 1):
+        for h in range(n_groups):
             out[:, h] += np.where(sov & (half == h) & np.isfinite(w), w, 0.0)
     return out / n_draws
