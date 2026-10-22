@@ -232,3 +232,25 @@ Half A (97 real flagged stars, 84 flagged injections, 386 injections with a scor
 | 0.60 | 0.45 | 0.14 (0.13) | 0.31 (0.19–0.44) | 3.4% | 26% |
 
 Chosen: 0.35 (s_up ≥ 2.2 × the pair noise). Nearly all of the cost is hosts that were already active.
+
+**Half B (held out): not adopted.** 82 real flagged stars, 88 flagged injections, 380 injections with a score. At
+0.35: capture 0.57 (criterion ≥ 0.5, met), flips 3.2% (≤ 5%, met), cost 0.43 (host alone 0.44), J = 0.14 with 95%
+interval −0.01 to 0.29 (lower bound > 0, **not met**). So the score does not gate the flag. It is computed for every
+queued star (`activity` in the ranked table, from `dayone.rank.lc_physics`) and reported, with no effect on ranking.
+
+| DPAC class (half B, testable) | n | labelled active at 0.35 | median score |
+|---|---|---|---|
+| RS | 20 | 90% | 0.69 |
+| S | 17 | 88% | 0.95 |
+| SOLAR_LIKE | 30 | 63% | 0.42 |
+| unclassified | 28 | 18% | 0.18 |
+| ECL | 175 | 26% | 0.16 |
+
+What moved between the halves is the cost, and nearly all of it is the hosts: 44% of the flagged injections on B sit
+on hosts that were active before the injection, against 29% on A. The flag fires more readily on an injection into
+an active host, because the host adds dips of its own, so this cost measure counts trains whose flag the host's
+activity helped raise. A cost measured only on hosts whose own light curve does not flag would separate the two; it
+was not pre-registered and was not run. (Hosts are drawn with replacement, 60 per family, so the same star can carry
+several injections and the Wald interval is somewhat narrow.) Since rule v5 (PR #53) takes the flag out of the
+shortlist, the stakes are now one priority flag in ranking. DR4's epoch count (about twice DR3's, so about twice the
+close pairs) will tighten the score; a re-test on DR4's own stars, with the conditioned cost, is the natural next try.

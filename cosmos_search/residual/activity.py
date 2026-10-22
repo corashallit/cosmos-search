@@ -81,7 +81,7 @@ def _job(job):
     if kind == "real_class":
         return {"kind": kind, "family": family, "source_id": sid, "activity": a0, "g_mag": src.get("phot_g_mean_mag")}
     rng = np.random.default_rng(seed)
-    sig, tt = EC._draw(rng, "family", family, src, df, float(df.t.min()), float(df.t.max()))
+    sig, _ = EC._draw(rng, "family", family, src, df, float(df.t.min()), float(df.t.max()))
     if sig is None:
         return None
     inj = EC._apply(df, sig)
