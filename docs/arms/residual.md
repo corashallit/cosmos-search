@@ -188,3 +188,47 @@ Active stars (review R1): RS, SOLAR_LIKE, S and AGN are tier 2 in v1 (v0 left th
 (default 8) active-class stars as controls labelled `rotation_or_spots` (AGN: `extragalactic`), so the false-flag rate
 is measured on the class that will crowd the shortlist. On DR4 day one DPAC classes may lag the photometry; an
 activity model of our own (rotation period from ZTF/TESS, flares, eROSITA, `activityindex_espcs`) is the next step.
+
+## Activity score (review R17)
+
+`residual.activity`: a score from the Gaia G light curve alone, so ranking can use it before any external fetch.
+An occulter dims a star that is otherwise flat, so outside its dips the star sits on a ceiling set by the noise. A
+spotted star has no ceiling: it is as often above its median as below, by more than the noise. The score compares
+the two: `activity = log10(s_up / s_pair)`, where s_up is the spread of the bright half of the light curve and s_pair
+is the noise measured on the star's own close epoch pairs (consecutive G epochs under 0.1 d apart; Gaia's two fields
+of view see a star 106.5 min apart, and spots do not change in two hours). The noise comes from the star itself, so
+the score needs no error model. Epochs more than 3 s_up below the median are left out of the pairs.
+
+Tried on half A and not used: the BP–RP correlation of out-of-dip variability (spots are chromatic and correlated
+across bands, noise is not; AUC 0.73 against 0.87 for the score, active classes vs unclassified, with DR3's ~10 pairs
+per star) and the ZTF version of the score (AUC 0.62–0.66: ZTF's night-to-night calibration adds spread to every
+star). Note that DPAC assigned the active classes from Gaia photometry, so class AUCs flatter any Gaia-based score;
+the test below does not use the classes.
+
+**What it is for.** Gating the recurrence flag: on a star whose light curve is active, an aperiodic dip pattern is
+weak evidence, because the star makes those itself. The test is therefore on the flag, not on the classes:
+
+- *capture*: of the testable real stars of the half whose raw v3b flag fires without any injection (review table;
+  essentially all false), the share the score labels active;
+- *cost*: of the target-family injections (the residual search's draws, same seed) whose flag fires, the share
+  labelled active. Hosts are real queued stars, so part of the cost is hosts that were active before the injection
+  (`cost_host`); a train on an active star is a case where the flag cannot be trusted anyway;
+- *flips*: of all injections, the share the injection itself pushes over the threshold.
+
+**Pre-registered (2026-10-22, before half B was run).** On half A, the threshold in 0.20, 0.25, …, 0.60 with the
+largest J = capture − cost, ties to the higher threshold. On half B, at that threshold, the aperiodic flag is gated
+by activity (ranking v1's `aperiodic` priority flag needs activity below the threshold, and active-by-score stars
+join the active-control pool) if all hold: J's 95% lower bound > 0, capture ≥ 0.5, flips ≤ 5%. Otherwise the score is
+reported in packets only.
+
+Half A (97 real flagged stars, 84 flagged injections, 386 injections with a score):
+
+| threshold | capture | cost (host alone) | J (95%) | flips | real stars labelled |
+|---|---|---|---|---|---|
+| 0.20 | 0.80 | 0.57 (0.48) | 0.23 (0.10–0.37) | 7.0% | 62% |
+| 0.30 | 0.71 | 0.38 (0.39) | 0.33 (0.19–0.47) | 3.6% | 50% |
+| **0.35** | **0.69** | **0.31 (0.29)** | **0.38 (0.25–0.52)** | **3.4%** | **45%** |
+| 0.45 | 0.58 | 0.21 (0.20) | 0.36 (0.23–0.50) | 2.6% | 35% |
+| 0.60 | 0.45 | 0.14 (0.13) | 0.31 (0.19–0.44) | 3.4% | 26% |
+
+Chosen: 0.35 (s_up ≥ 2.2 × the pair noise). Nearly all of the cost is hosts that were already active.
