@@ -20,8 +20,10 @@ with a photosphere plus a blackbody (or a lambda^-1 modified blackbody) carrying
 largest f the photometry allows (f_ul) and how strongly it rejects the f each geometry needs. Upper limits (WISE
 'U' quality) enter as a measurement of zero with sigma = limit / 2; contaminated or blended detections enter as
 upper bounds only (one-sided), because a blend can add flux but cannot remove it. The excess is computed relative
-to WISE W1, which AllWISE measured at the same epochs as W2-W4, so the star's own variability between 2MASS (1998-2001)
-and WISE (2010) only enters through K, whose error carries it.
+to WISE W1, which AllWISE measured at the same epochs as W2-W4. Gaia G (2014-2017) and 2MASS K (1998-2001) pin the
+photosphere's scale, which matters for hot dust: an emitter at ~1000 K brightens K, W1 and W2 by similar factors and
+would otherwise pass for a slightly brighter star. Neither was taken with WISE, so their errors carry the star's own
+variability.
 
 Band shapes are trapezoids that roughly follow the relative response curves; the star's spectrum is a blackbody at
 T* from BP-RP. Both are crude, but the zero points cancel (an excess is a ratio in the same band), and the geometric
@@ -30,9 +32,9 @@ factor between the shell and thin cases is already orders of magnitude.
 
 import numpy as np
 
-BANDS = ("K", "W1", "W2", "W3", "W4")
-# Trapezoid (rise from a to b, flat to c, fall to d), microns: 2MASS Ks and WISE W1-W4, approximately.
-BAND_SHAPES = {"K": (1.95, 2.00, 2.30, 2.36), "W1": (2.75, 3.00, 3.70, 3.90), "W2": (4.00, 4.20, 5.10, 5.35),
+BANDS = ("G", "K", "W1", "W2", "W3", "W4")
+# Trapezoid (rise from a to b, flat to c, fall to d), microns: Gaia G, 2MASS Ks and WISE W1-W4, approximately.
+BAND_SHAPES = {"G": (0.33, 0.40, 0.90, 1.05), "K": (1.95, 2.00, 2.30, 2.36), "W1": (2.75, 3.00, 3.70, 3.90), "W2": (4.00, 4.20, 5.10, 5.35),
                "W3": (7.5, 9.0, 13.5, 16.5), "W4": (19.5, 21.0, 24.0, 27.5)}
 HC_K_UM = 14387.77          # hc / k in micron kelvin
 T_GRID = np.geomspace(50.0, 1800.0, 37)

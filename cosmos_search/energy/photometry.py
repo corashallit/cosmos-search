@@ -22,8 +22,8 @@ Rules (why in brackets):
   (diffraction spike, persistence, halo, ghost) in that band, an extended source, another Gaia star sharing the
   WISE or 2MASS source, or Gaia neighbours contributing more than BLEND_MAX of the star's flux in the beam. [A
   blend can fake an excess but not hide one; the deficit test needs only upper bounds.]
-- The star's own variability enters only through K, which 2MASS measured ten years before WISE: its error gets
-  sigma_var_mag added in quadrature. W1-W4 are simultaneous in AllWISE.
+- Gaia G (mean over 2014-2017) and 2MASS K (1998-2001) anchor the photosphere's scale. Neither was taken with WISE,
+  so their errors get sigma_var_mag added in quadrature. W1-W4 are simultaneous in AllWISE.
 """
 
 import numpy as np
@@ -88,15 +88,22 @@ def design(raw, locus):
     phi_k = _flux(km)
     out["d_K"] = np.where(kdet, phi_k, np.nan)
     out["use_K"] = kdet
+    gm = _col(raw, "phot_g_mean_mag", np.nan)
+    foe = _col(raw, "phot_g_mean_flux_over_error", np.nan)
+    gdet = np.isfinite(gm) & (foe > 0)
+    phi_g = _flux(gm)
+    out["d_G"] = np.where(gdet, phi_g, np.nan)
+    out["use_G"] = gdet
+    out["bound_G"] = np.zeros(n, bool)
     t_mates = _col(raw, "t_mates", 0) > 0
     out["bound_K"] = kdet & (t_mates | (ke > 2.5 / np.log(10) / SNR_MEASURE))
 
     # Photosphere template relative to W1, from the locus colours: K = W1 + c_K1, Wj = W1 - c_1j, W4 = W3 - c_34.
-    c = {k: locus[f"c_{k}"].to_numpy(float) for k in ("K1", "12", "13", "34")}
-    sm = {k: locus[f"s_{k}"].to_numpy(float) for k in ("K1", "12", "13", "34")}
-    P = {"W1": np.ones(n), "K": 10 ** (-0.4 * c["K1"]), "W2": 10 ** (0.4 * c["12"]), "W3": 10 ** (0.4 * c["13"]),
+    c = {k: locus[f"c_{k}"].to_numpy(float) for k in ("G1", "K1", "12", "13", "34")}
+    sm = {k: locus[f"s_{k}"].to_numpy(float) for k in ("G1", "K1", "12", "13", "34")}
+    P = {"W1": np.ones(n), "G": 10 ** (-0.4 * c["G1"]), "K": 10 ** (-0.4 * c["K1"]), "W2": 10 ** (0.4 * c["12"]), "W3": 10 ** (0.4 * c["13"]),
          "W4": 10 ** (0.4 * (c["13"] + c["34"]))}
-    s_mod = {"W1": np.zeros(n), "K": sm["K1"], "W2": sm["12"], "W3": sm["13"], "W4": np.hypot(sm["13"], sm["34"])}
+    s_mod = {"W1": np.zeros(n), "G": np.hypot(sm["G1"], _col(raw, "sigma_var_mag", 0.0)), "K": sm["K1"], "W2": sm["12"], "W3": sm["13"], "W4": np.hypot(sm["13"], sm["34"])}
     var = _col(raw, "sigma_var_mag", 0.0)
     s_mod["K"] = np.hypot(s_mod["K"], var)
     # Photosphere scale for the model errors: W1 if it is a clean measurement, else K.
@@ -106,9 +113,9 @@ def design(raw, locus):
     for b in BANDS:
         out[f"P_{b}"] = P[b]
         model = a0 * P[b] * s_mod[b] * LN10_25
-        meas = s_k_meas if b == "K" else out[f"s_{b}"].to_numpy()
+        meas = {"K": s_k_meas, "G": phi_g / foe}.get(b, out[f"s_{b}"].to_numpy() if f"s_{b}" in out else None)
         # Upper limits already carry their own width; the template error matters only for detections.
-        is_ul = (out[f"d_{b}"].to_numpy() == 0) if b != "K" else np.zeros(n, bool)
+        is_ul = (out[f"d_{b}"].to_numpy() == 0) if b not in ("K", "G") else np.zeros(n, bool)
         out[f"s_{b}"] = np.where(is_ul, meas, np.hypot(meas, np.nan_to_num(model)))
         out[f"use_{b}"] = out[f"use_{b}"].to_numpy() & np.isfinite(P[b]) & np.isfinite(out[f"s_{b}"].to_numpy())
     out["teff"] = teff_from_bp_rp(raw["bp_rp"].to_numpy(float))

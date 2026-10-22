@@ -140,8 +140,39 @@ now:
 
 ## 7. Results
 
-(After the runs.)
+### Half A (thresholds)
+
+Seed 11359754380648880456 (os.urandom), photosphere fitted on half B's reference stars. The rule of §4 gives
+**Z_EXCESS = 5.0** and **Z_DEFICIT = 2.0** (the lowest grid value already met the 0.5% false-deficit target).
+
+| measure | half A |
+|---|---|
+| false excess, null hosts | 36 / 4,500 = 0.8% (general 17/3,000, G 9.5–12 19/1,500) |
+| excess recall: yso_disk, rcb_shell | 82%, 89% |
+| excess recall: warm_structure, debris, cold | 54%, 3.0%, 2.7% |
+| false deficit, shell / thin | 5 / 1,698, 0 / 3,425 |
+| "excluded above T" cutting an injected emitter, shell / thin | 2 / 1,986, 0 / 4,005 |
+| deficit_shell recall on "none", by ⟨δ⟩ 10⁻³–10⁻², 10⁻²–0.03, 0.03–0.1, 0.1–0.3 | 3%, 26%, 67%, 87% |
+| deficit_thin recall on "none" | 0 / 1,995 (as §1 predicts) |
+| real DPAC YSO / ECL stars with an excess | 10.1% / 1.3% |
+
+Reading:
+
+- The excess recall on injected disks is flat in f and in T: the ~11% misses at G < 16 are hosts whose WISE bands
+  are all flagged as contaminated (diffraction spikes, persistence, halos) or blended, which by design count only as
+  upper bounds. At G > 18 recall falls to ~40%, where W2 drops below SNR 5 and 2MASS K runs out.
+- Only one DPAC "YSO" star in ten shows an excess, and raw WISE colours agree (W1−W2 > 0.3 in 11%). DPAC's DR3
+  YSO class is selected from Gaia light curves alone and is mostly not disk-bearing, so it is not a clean positive
+  control. Its excess rate is still 8× the EB rate.
+- The deficit test does what §1 says: an envelope or swarm big enough to dim a star by ≳ 3% on average is
+  excluded (or found) for most stars; an orbit-confined occulter never is.
 
 ## 8. Changes after pre-registration
 
-(None yet.)
+- 2026-10-22, during half A (before half B or the candidates were run): the first half-A pass (seed not kept)
+  missed 20% of injected hot disks. Hot dust brightens K, W1 and W2 by similar factors, which the fit absorbed into
+  the photosphere's scale because only 2MASS K, with the star's variability in its error, pinned that scale.
+  Gaia G now anchors it too (G−W1 locus from the general sample, held-out scatter 0.065 mag, the same as K−W1;
+  its error also carries the variability term). Half A was rerun with a fresh seed; the numbers above are that run.
+  The change raised yso_disk recall only from 80% to 82%, because most remaining misses are contaminated photometry,
+  found when checking the misses one by one.

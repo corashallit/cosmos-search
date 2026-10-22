@@ -1,7 +1,7 @@
 """The star's expected infrared colours, learnt from stars like it.
 
-For each colour (K-W1, W1-W2, W1-W3, W3-W4) the prediction is the median colour of the K_NEIGHBOURS reference
-stars nearest in (BP-RP, absolute G, and for K-W1 and W1-W2 apparent W1), and its error the neighbours' robust
+For each colour (G-W1, K-W1, W1-W2, W1-W3, W3-W4) the prediction is the median colour of the K_NEIGHBOURS reference
+stars nearest in (BP-RP, absolute G, and for G-W1, K-W1 and W1-W2 apparent W1), and its error the neighbours' robust
 scatter less their own measurement error. No spectral model enters, so giants, dwarfs and the saturation regime of
 each band are handled by whatever the reference stars do there. Targets without a usable parallax get the same
 from a model without absolute G, which mixes dwarfs and giants and is correspondingly wider.
@@ -13,7 +13,7 @@ Gaia star sharing the WISE or 2MASS source, not flagged variable by WISE, RUWE <
 to be detected whatever its excess, so the reference is cut on the bluer band's magnitude, never the redder one
 (cutting on W3 or W4 detections would select stars with an excess):
 
-- K-W1 and W1-W2 from the general sample with W1 fainter than W1_SAT (W1 saturates brighter than ~8.1). W1-W2
+- G-W1, K-W1 and W1-W2 from the general sample with W1 fainter than W1_SAT (W1 saturates brighter than ~8.1). W1-W2
   drifts with W1 by ~0.01-0.02 mag over the range (measured on held-out stars), so apparent W1 is a feature;
 - W1-W3 from the mid sample (G 9.5-12) with W1 in [W1_SAT, W13_W1_MAX], where W1 is unsaturated and a photosphere
   is >~ 20 sigma in W3. (The bright sample's W1-W3 drifts by 0.04 mag across W1 6-8 from saturation, and K-W3
@@ -36,12 +36,13 @@ W34_W3_MAX = 5.5
 SCALE = {"bp_rp": 0.05, "m_g": 0.3, "w1mpro": 1.0}
 COLOURS = {
     # name: (bluer column, redder column, sample, features, bluer-band magnitude window)
+    "G1": ("phot_g_mean_mag", "w1mpro", "general", ("bp_rp", "m_g", "w1mpro"), ("w1mpro", W1_SAT, 16.0)),
     "K1": ("ks_m", "w1mpro", "general", ("bp_rp", "m_g", "w1mpro"), ("w1mpro", W1_SAT, 16.0)),
     "12": ("w1mpro", "w2mpro", "general", ("bp_rp", "m_g", "w1mpro"), ("w1mpro", W1_SAT, 16.0)),
     "13": ("w1mpro", "w3mpro", "mid", ("bp_rp", "m_g"), ("w1mpro", W1_SAT, W13_W1_MAX)),
     "34": ("w3mpro", "w4mpro", "bright", ("bp_rp", "m_g"), ("w3mpro", W3_SAT, W34_W3_MAX)),
 }
-ERR = {"ks_m": "ks_msigcom", "w1mpro": "w1mpro_error", "w2mpro": "w2mpro_error", "w3mpro": "w3mpro_error",
+ERR = {"phot_g_mean_mag": "phot_g_mean_mag_error", "ks_m": "ks_msigcom", "w1mpro": "w1mpro_error", "w2mpro": "w2mpro_error", "w3mpro": "w3mpro_error",
        "w4mpro": "w4mpro_error"}
 W_INDEX = {"w1mpro": 0, "w2mpro": 1, "w3mpro": 2, "w4mpro": 3}
 PLX_SNR_MIN = 5.0
@@ -71,6 +72,8 @@ def clean(df, cols):
         ok &= np.isfinite(pd.to_numeric(df[c], errors="coerce").to_numpy(float))
         e = pd.to_numeric(df[ERR[c]], errors="coerce").to_numpy(float)
         ok &= np.isfinite(e) & (e <= MAX_ERR)
+        if c == "phot_g_mean_mag":
+            continue
         if c in W_INDEX:
             i = W_INDEX[c]
             ok &= wq.str[i].isin(list("ABC")).to_numpy() & (cc.str[i] == "0").to_numpy()
@@ -89,7 +92,7 @@ class Locus:
     def fit(self, samples):
         """samples: {"general", "mid", "bright": DataFrame} of canonical reference photometry."""
         for name, (blue, red, sample, feats, (wcol, lo, hi)) in COLOURS.items():
-            df = samples[sample]
+            df = with_g_error(samples[sample])
             mg = absolute_g(df)
             ok = clean(df, (blue, red))
             w = pd.to_numeric(df[wcol], errors="coerce").to_numpy(float)
@@ -133,6 +136,15 @@ class Locus:
                 dist[todo] = d_med
             out[f"c_{name}"], out[f"s_{name}"], out[f"d_{name}"] = c, s, dist
         return pd.DataFrame(out)
+
+
+def with_g_error(df):
+    """G's magnitude error from gaia_source's flux_over_error, as the colour code expects every band to have one."""
+    if "phot_g_mean_mag_error" in df or "phot_g_mean_flux_over_error" not in df:
+        return df
+    foe = pd.to_numeric(df["phot_g_mean_flux_over_error"], errors="coerce").to_numpy(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return df.assign(phot_g_mean_mag_error=2.5 / np.log(10) / foe)
 
 
 def _features(df, fs, mg):

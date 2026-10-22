@@ -69,6 +69,9 @@ def apply(raw, design_rows, components):
     wq = raw["w_ph_qual"].astype(str).map(lambda s: list(s.ljust(4, "X")))
     for j, b in enumerate(BANDS):
         a = add[:, j]
+        if b == "G":
+            raw["phot_g_mean_mag"] = -2.5 * np.log10(10 ** (-0.4 * raw["phot_g_mean_mag"].to_numpy(float)) + a)
+            continue
         if b == "K":
             m = raw["ks_m"].to_numpy(float)
             phi = 10 ** (-0.4 * m)
@@ -93,7 +96,7 @@ def apply(raw, design_rows, components):
         snr = a / sig
         becomes = ul & (snr >= 3)
         m_new[becomes] = -2.5 * np.log10(a[becomes])
-        e_new[becomes] = (sig / a)[becomes] / (np.log(10) / 2.5)
+        e_new[becomes] = sig[becomes] / a[becomes] / (np.log(10) / 2.5)
         q_new[becomes] = np.where(snr[becomes] >= 10, "A", "B")
         stays = ul & ~becomes
         m_new[stays] = -2.5 * np.log10(np.maximum(phi, a + 2 * sig)[stays])

@@ -31,8 +31,8 @@ from . import budget
 from .photometry import design, sigma_var_from_gaia
 from .photosphere import Locus
 
-Z_EXCESS = 5.0        # pre-registered (docs/arms/energy-budget.md §5)
-Z_DEFICIT = 3.0
+Z_EXCESS = 5.0        # chosen on half A by the pre-registered rule (docs/arms/energy-budget.md §4, §7)
+Z_DEFICIT = 2.0       # chosen on half A by the pre-registered rule (docs §4, §7)
 T_DEFICIT_MIN = 150.0
 T_REPORT = (150.0, 300.0, 1000.0)
 CHUNK = 400
@@ -76,3 +76,15 @@ def summarise(res, delta=None):
             out[f"g5_deficit_{geo}"] = (out[f"g5_{geo}_z_min"] >= Z_DEFICIT) & ~out["g5_excess"]
         out["g5_delta_lo"] = delta
     return pd.DataFrame(out)
+
+
+# Columns of evaluate()'s output -> the names a vetting packet's context uses (vetting/stage_a.md explains them).
+# Measurements of this star only: no calibration figure ever goes into a packet.
+PACKET_CONTEXT = {
+    "g5_z_excess": "ir_excess_sigma",
+    "g5_f_ul_150K": "waste_heat_max_fraction_150K",
+    "g5_f_ul_300K": "waste_heat_max_fraction_300K",
+    "g5_f_ul_1000K": "waste_heat_max_fraction_1000K",
+    "g5_delta_lo": "dimming_time_avg_lower",
+    "g5_shell_excluded_above_K": "warm_shell_excluded_above_K",
+}
