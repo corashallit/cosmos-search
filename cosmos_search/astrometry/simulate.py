@@ -144,6 +144,34 @@ def _ou(rng, t, sigma, tau):
     return out
 
 
+def nongrav_offset(rng, kind, t, a):
+    """Sky offsets (dRA*, dDec in mas) of a non-gravitational signal of amplitude a (mas) starting at a random time in
+    the middle 80% of the span, along a random direction. Returns (dx, dy, truth extras)."""
+    phi = rng.uniform(0, 2 * np.pi)
+    ex, ey = np.sin(phi), np.cos(phi)
+    lo, hi = np.quantile(t, [0.1, 0.9])
+    tk = rng.uniform(lo, hi)
+    span = t.max() - t.min()
+    extra = {"t_k": tk}
+    if kind == "step":
+        s = (t >= tk) * a
+    elif kind == "kick":
+        s = np.clip(t - tk, 0, None) / max(t.max() - tk, 1e-3) * a
+    elif kind == "thrust":
+        dur = rng.uniform(0.2, 0.6) * span
+        t2 = min(tk + dur, t.max())
+        tt = np.clip(t, tk, t2) - tk
+        s = 0.5 * tt ** 2 + (t2 - tk) * np.clip(t - t2, 0, None)
+        s = s / max(s.max(), 1e-9) * a
+    elif kind == "square":
+        ps = 10 ** rng.uniform(np.log10(30), np.log10(1000)) / M.DAYS_PER_YEAR
+        s = a * np.sign(np.sin(2 * np.pi * (t - tk) / ps))
+        extra["p_sq"] = ps
+    else:
+        raise ValueError(kind)
+    return s * ex, s * ey, extra
+
+
 def simulate(rng, cadence, kind, amp=None, sid=None):
     """One source. Returns (data dict for fit.Source, truth dict). amp: non-grav amplitude in per-transit sigmas."""
     sid, st, t, psi, f = cadence.draw(rng, sid)
@@ -242,27 +270,9 @@ def simulate(rng, cadence, kind, amp=None, sid=None):
         truth.update(te=te, t0=t0, u0=u0, theta_e=th_e)
     elif kind in NONGRAV:
         a = amp * float(np.median(sig))
-        phi = rng.uniform(0, 2 * np.pi)
-        ex, ey = np.sin(phi), np.cos(phi)
-        lo, hi = np.quantile(t, [0.1, 0.9])
-        tk = rng.uniform(lo, hi)
-        span = t.max() - t.min()
-        if kind == "step":
-            s = (t >= tk) * a
-        elif kind == "kick":
-            s = np.clip(t - tk, 0, None) / max(t.max() - tk, 1e-3) * a
-        elif kind == "thrust":
-            dur = rng.uniform(0.2, 0.6) * span
-            t2 = min(tk + dur, t.max())
-            tt = np.clip(t, tk, t2) - tk
-            s = 0.5 * tt ** 2 + (t2 - tk) * np.clip(t - t2, 0, None)
-            s = s / max(s.max(), 1e-9) * a
-        else:  # square
-            ps = 10 ** rng.uniform(np.log10(30), np.log10(1000)) / M.DAYS_PER_YEAR
-            s = a * np.sign(np.sin(2 * np.pi * (t - tk) / ps))
-            truth.update(p_sq=ps)
-        w += al(s * ex, s * ey, psi)
-        truth.update(amp=amp, amp_mas=a, t_k=tk)
+        dx, dy, extra = nongrav_offset(rng, kind, t, a)
+        w += al(dx, dy, psi)
+        truth.update(amp=amp, amp_mas=a, **extra)
     elif kind == "fov_jump":
         a = amp * float(np.median(sig))
         tk = rng.uniform(*np.quantile(t, [0.1, 0.9]))
