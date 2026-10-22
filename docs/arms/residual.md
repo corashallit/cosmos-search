@@ -125,6 +125,57 @@ outliers and ingress mispredictions).
    residual, with the same criteria (a)–(c). Half B adds a population `real_class`: every real star of the half the
    raw test can test (the review's list), so both versions' flag rates are reported by DPAC class.
 
+## Results on held-out half B
+
+Seed 17678711268131745800 (urandom, drawn after commit 11ecace), 5,212 jobs: 187 queued real DPAC EBs, 54 queued
+non-EB hosts, 260 synthetic EBs, 353 target-family and 50 strict-period injections, 194 eb_host injections, and 323
+real stars the raw recurrence test can test, by DPAC class. TOL 0.05, MIN_EVENT_EPOCHS 2. Paired against the EB filter
+(PR #45) on the same stars and injections; 95% Wilson intervals. Outputs: `/mnt/project-files/residual/res_B.parquet`
+(and `res_A.parquet`, `res_A2.parquet` for half A).
+
+| population | EB filter explains | residual search demotes | `eb_residual` |
+|---|---|---|---|
+| dips and trains injected into real EBs (eb_host) | 32/194 (16.5%) | **10/194 (5.2%; 2.8–9.2%)** | 64/194 (33%) |
+| queued real DPAC EBs | 119/187 (63.6%) | **95/187 (50.8%; 43.7–57.9%)** | 28/187 (15.0%) |
+| synthetic EBs | 144/260 (55.4%) | 113/260 (43.5%) | 41/260 (15.8%) |
+| target-family injections, non-EB hosts | 1/353 (0.3%) | **0/353 (0–1.1%)** | 5/353 (1.4%) |
+| strict-period trains | 25/50 | 22/50 | 4/50 |
+| queued non-EB hosts | 10/54 | 6/54 | 5/54 |
+
+By family, eb_host demoted: grey dips 5/60, Poisson trains 1/41, prime trains 3/50, geometric trains 1/43.
+
+- **D1, adopted.** eb_host loss 5.2% ≤ half of the filter's 16.5%; real-EB demotion 0.80 × the filter's (≥ 0.7); no
+  target-family loss. Ranking v1 demotes with the residual rule (`requeue --rule residual`, the default).
+- **D2, not adopted.** `eb_residual` marks 15.0% of real EBs (at the limit) and only 33% of eb_host injections
+  (criterion ≥ 50%): two thirds of the binaries with an injected dip have no eclipse baseline at all (the injected
+  dips spoil the period's purity), so they stay in the queue without the flag. In a DR4 queue, where real EBs
+  outnumber EBs with extra dips, the flag would mostly promote binaries with ZTF systematics. It is reported, not
+  used for priority.
+- **D3, adopted.** On trains injected into EBs the residual flag gains 7 and loses 2 against raw epochs; on trains in
+  non-EB hosts it flags 36.2% against 36.8% (−0.7 points, within 2); on testable real EBs 11 against 13. Ranking
+  v1's `aperiodic` priority flag reads the residual epochs.
+
+**The flag on active stars (review R1, R16), real stars of both halves, testable ones:**
+
+| DPAC class | testable | raw flag | residual flag |
+|---|---|---|---|
+| RS, SOLAR_LIKE, S | 111 | 82 (74%; 65–81%) | 74 (67%) |
+| other non-EB variables (DSCT, LPV, CEP, …) | 33 | 23 (70%) | 18 (55%) |
+| unclassified | 38 | 14 (37%; 23–53%) | 14 (37%) |
+| AGN | 11 | 5 (45%) | 5 (45%) |
+| ECL | 361 | 37 (10%) | 29 (8%) |
+| injected trains, non-EB hosts (half B) | 152 | 56 (37%) | 55 (36%) |
+
+The residual search does not touch this: active stars have a constant baseline, so their residuals are their raw
+epochs. **Dip timing alone does not separate activity from occulters**: the flag fires more often on spotted stars
+than on the injected trains it was built for. A prototype rotation baseline (per-season sinusoid and harmonic at the
+Lomb–Scargle period, `/home/user/rs/rot/proto.py`, half A) did not help either: it found "rotation" in 60–70% of
+injected trains and left SOLAR_LIKE flags unchanged (16 of 24). So under rule v3b, which lets the flag shortlist on
+its own, every testable active star in the queue has about a two-in-three chance of reaching the shortlist whatever
+the vetter says. Tier 2 lowers how many get vetted; it does not change that rate. The discriminant has to come
+from something other than timing (dip colour, flares, the shape of the out-of-dip variability, X-rays), which is
+the light-curve activity score the review asks for (R17), in a follow-up.
+
 ## Ranking v1 (for the D2 freeze)
 
 `python -m cosmos_search.dayone.rank requeue` (after `dayone.external fetch` on a prefetch list of the top tier-1–2

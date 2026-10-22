@@ -149,6 +149,35 @@ def choose(df):
     return (best[:2] if best else None), pd.DataFrame(out)
 
 
+def decisions(df, tol, m):
+    """The pre-registered held-out decisions D1-D3 (docs/arms/residual.md) at one setting."""
+    d = df[df.drawn & (df.tol == tol) & (df.min_event_epochs == m)]
+    b = lambda x: x.fillna(False).astype(bool)                         # noqa: E731
+    host, real = d[d.kind == "eb_host"], d[d.kind == "real_eb"]
+    tgt = d[(d.kind == "anomaly") & d.family.isin(EC.TARGET_FAMILIES)]
+    out = {"D1": {"eb_host_loss": b(host.demote).mean(), "filter_eb_host_loss": b(host.eb_explained).mean(),
+                  "real_eb_demoted": b(real.demote).mean(), "filter_real_eb": b(real.eb_explained).mean(),
+                  "target_loss": b(tgt.demote).mean(), "filter_target_loss": b(tgt.eb_explained).mean()}}
+    x = out["D1"]
+    x["adopt"] = bool(x["eb_host_loss"] <= 0.5 * x["filter_eb_host_loss"]
+                      and x["real_eb_demoted"] >= 0.7 * x["filter_real_eb"] and x["target_loss"] <= x["filter_target_loss"])
+    out["D2"] = {"real_eb": b(real.eb_residual).mean(), "eb_host": b(host.eb_residual).mean()}
+    out["D2"]["adopt"] = bool(out["D2"]["real_eb"] <= 0.15 and out["D2"]["eb_host"] >= 0.5)
+    th = host[host.family.isin(TRAIN_FAMILIES)]
+    tn = d[(d.kind == "anomaly") & d.family.isin(TRAIN_FAMILIES)]
+    rt = real[b(real.raw_testable)]
+    gains = int((b(th.residual_aperiodic) & ~b(th.raw_aperiodic)).sum())
+    losses = int((~b(th.residual_aperiodic) & b(th.raw_aperiodic)).sum())
+    out["D3"] = {"eb_host_trains_gains": gains, "eb_host_trains_losses": losses,
+                 "trains_raw": b(tn.raw_aperiodic).mean(), "trains_resid": b(tn.residual_aperiodic).mean(),
+                 "real_eb_testable_raw_flags": int(b(rt.raw_aperiodic).sum()),
+                 "real_eb_testable_resid_flags": int(b(rt.residual_aperiodic).sum()), "n_real_eb_testable": len(rt)}
+    y = out["D3"]
+    y["adopt"] = bool(gains > losses and y["trains_resid"] >= y["trains_raw"] - 0.02
+                      and y["real_eb_testable_resid_flags"] <= y["real_eb_testable_raw_flags"])
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m cosmos_search.residual.cal")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -178,7 +207,10 @@ def main(argv=None):
         print(f"\nchosen: {best}")
         return 0
     if a.cmd == "report":
-        print(table(pd.read_parquet(a.file), a.tol, a.min_event_epochs).to_markdown(index=False))
+        df = pd.read_parquet(a.file)
+        print(table(df, a.tol, a.min_event_epochs).to_markdown(index=False))
+        for k, v in decisions(df, a.tol, a.min_event_epochs).items():
+            print(k, {kk: (round(vv, 4) if isinstance(vv, float) else vv) for kk, vv in v.items()})
         return 0
     seed = a.seed if a.seed is not None else int.from_bytes(os.urandom(8), "little")
     rng = np.random.default_rng(seed)
