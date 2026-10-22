@@ -342,14 +342,20 @@ def oneoff_rate(ep, event, n_draws=N_DRAWS, rng=None):
     win = np.clip(T - (event["t_b"] - event["t_a"]), 0, None)
     tc = event["t_b"] - T / 2 + rng.random(n_draws) * win
     near = np.flatnonzero((t >= event["t_before"]) & (t <= event["t_after"]))
-    pred = _trapezoid(t[near][None, :] - tc[:, None], T[:, None], tau[:, None], depth[:, None]) * (1 - ep["dil"][near][None, :])
     pos = {int(i): n for n, i in enumerate(near)}
     cols = np.array([pos[int(i)] for i in idx])
     d_obs = depth_obs[idx][None, :]
     tol = FIT_REL * d_obs + FIT_SIGMA * sig[idx][None, :]
-    good = np.all(np.abs(pred[:, cols] - d_obs) <= tol, axis=1)
     flat = (ep["z"][near] < recurrence.FLAT_SIGMA)[None, :]
-    bad = np.any(flat & (pred > FLAT_TOL_SIGMA * sig[near][None, :]), axis=1)
+    good, bad = np.zeros(n_draws, bool), np.zeros(n_draws, bool)
+    # In chunks of draws: dense photometry between the bracketing epochs (TESS in its continuous viewing zone,
+    # ~2e4 bins) would otherwise need n_draws x len(near) floats at once.
+    for s in range(0, n_draws, CHUNK):
+        j = slice(s, s + CHUNK)
+        pred = _trapezoid(t[near][None, :] - tc[j, None], T[j, None], tau[j, None], depth[j, None]) \
+            * (1 - ep["dil"][near][None, :])
+        good[j] = np.all(np.abs(pred[:, cols] - d_obs) <= tol, axis=1)
+        bad[j] = np.any(flat & (pred > FLAT_TOL_SIGMA * sig[near][None, :]), axis=1)
     prior = np.log(hi / lo) / np.log(ONEOFF_T[1] / ONEOFF_T[0])
     return float(ONEOFF_RATE * np.mean(win * (good & ~bad)) * prior)
 
