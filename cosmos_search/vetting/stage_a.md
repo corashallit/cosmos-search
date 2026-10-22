@@ -36,6 +36,19 @@ or two phase windows that hold only dip epochs. An eclipsing binary gives aligne
 aligned_fraction with testable true means no single period explains the dips, which eclipses alone do not
 produce (other variability of the star can still add dips that do not recur).
 
+The test "single_event" appears when all surveys together show exactly one dip event, so there is nothing to
+recur. It asks whether an eclipse could still be the cause. It simulates ordinary eclipsing companions (stars,
+brown dwarfs, planets; any impact parameter; eccentricity up to 0.7) that fit the event's depth and the duration the
+surrounding epochs allow, and checks every other epoch for the repeat each of them would have produced. p_eb is the
+share of fitting eclipses the other epochs do not refute, and expected_repeat_epochs is how many repeats they predict.
+single_dip_flag is the pipeline's summary: the event is seen beyond one transit with normal epochs on both sides, the
+star is otherwise quiet, and either eclipses fit it poorly or its colour rules out occultation. It does not say which
+other cause is right: an artefact confined to one event looks like any one-off occulter, and the star's own
+variability is not modelled (quiet_ratio_g says how quiet the star is otherwise), so check fields of view, BP and RP,
+and the speed bound (v_required_km_s against v_escape_km_s) as usual. colour_excludes_occultation is true when one of
+BP and RP dimmed and the other brightened, which no occulting body does; a temperature change of the star or a colour
+error of the instrument can.
+
 Detector scores and false-positive tests in the packet are computed by the pipeline. A test's p-value is for the
 null "this false-positive class does not explain the signal": a small p supports that class.
 

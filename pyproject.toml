@@ -3,7 +3,7 @@ name = "cosmos-search"
 version = "0.0.1"
 description = "First look at Gaia DR4 for technosignature-style anomalies"
 requires-python = ">=3.11"
-dependencies = ["numpy", "pyyaml", "pyrage", "requests", "pyvo", "astroquery", "astropy", "pyarrow", "pandas", "scipy", "scikit-learn", "lsdb", "numba"]
+dependencies = ["numpy", "pyyaml", "pyrage", "requests", "pyvo", "astroquery", "astropy", "pyarrow", "pandas", "scipy", "scikit-learn", "lsdb", "numba", "healpy"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
@@ -21,3 +21,4 @@ markers = ["network: needs live archive access; skipped in CI"]
 
 [tool.setuptools.package-data]
 "cosmos_search.vetting" = ["*.md"]
+"cosmos_search.tess" = ["*.csv"]

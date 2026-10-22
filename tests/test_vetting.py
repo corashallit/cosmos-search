@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,7 @@ from cosmos_search.vetting import coincidence, design, quantify, scoring, taxono
 from cosmos_search.vetting.anonymise import ecliptic_latitude, galactic_latitude, leak_scan, scrub_source
 from cosmos_search.vetting.batch import build_batch, harmonise, simple_dips
 from cosmos_search.vetting.candidate import Candidate
-from cosmos_search.vetting.commit import CommitError, commit, load_verdicts, reveal
+from cosmos_search.vetting.commit import CommitError, commit, load_verdicts, reveal, verify_published
 from cosmos_search.vetting.packet import LeakError, build
 from cosmos_search.vetting.report import score
 from cosmos_search.vetting.verdict import parse
@@ -93,7 +94,10 @@ def test_holdouts_withhold_data_and_record_truth():
     assert packet["bands"] == ["G"]
     assert {t["id"] for t in packet["targets"]} == {"tail_dip", "tail_min_flux", "dip_colour_ratio", "ir_excess"}
     assert "ir_excess_sigma" not in packet["context"]
-    assert packet["scores"] == {} and packet["tests"] == {}
+    # Only tests computed on the visible epochs survive; the single-event test is one, and with BP and RP
+    # withheld it carries no colour.
+    assert packet["scores"] == {} and set(packet["tests"]) <= {"single_event"}
+    assert "colour_ratio_rp_bp" not in packet["tests"].get("single_event", {})
     assert key["truths"]["ir_excess"] is False
     assert key["truths"]["dip_colour_ratio"] == pytest.approx(1, abs=0.2)  # injected grey dip
     assert packet["summaries"]["G"]["span_days"] < 0.85 * 1000
@@ -169,16 +173,51 @@ def test_commit_then_reveal_sealed(tmp_path, monkeypatch):
     batch = tmp_path / "batch"
     v = parse(reply(packet["packet_id"], {"eclipsing_binary": 1.0}), packet)
     with pytest.raises(CommitError):
-        reveal(batch, sealed)
-    commit([v], batch)
+        reveal(batch, sealed, remote=None)
+    commit([v], batch, allow_dirty=True)
     with pytest.raises(CommitError):
-        commit([v], batch)
+        commit([v], batch, allow_dirty=True)
     monkeypatch.setenv("COSMOS_REVEAL_KEY", str(ident))
-    keys = reveal(batch, sealed)
+    with pytest.raises(CommitError):  # not archived, so not provably fixed before the reveal
+        reveal(batch, sealed)
+    keys = reveal(batch, sealed, remote=None)
     assert keys[packet["packet_id"]]["label"] == "eclipsing_binary"
     (batch / "verdicts.jsonl").write_text((batch / "verdicts.jsonl").read_text().replace("1.0", "0.9"))
     with pytest.raises(CommitError):
         load_verdicts(batch)
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def test_reveal_needs_archived_verdicts_on_the_remote(tmp_path):
+    remote, work = tmp_path / "remote.git", tmp_path / "work"
+    _git(tmp_path, "init", "--quiet", "--bare", str(remote))
+    _git(tmp_path, "clone", "--quiet", str(remote), str(work))
+    for k, val in (("user.email", "t@example.org"), ("user.name", "t"), ("commit.gpgsign", "false")):
+        _git(work, "config", k, val)
+    (work / "README").write_text("x\n")
+    _git(work, "add", "README")
+    _git(work, "commit", "--quiet", "-m", "init")
+    _git(work, "push", "--quiet", "origin", "HEAD:main")
+    packet, key = build(gaia_like())
+    key.update(kind="control", label="eclipsing_binary")
+    plain = tmp_path / "key.json"
+    plain.write_text(json.dumps([key]))
+    v = parse(reply(packet["packet_id"], {"eclipsing_binary": 1.0}), packet)
+    (work / "README").write_text("changed\n")
+    with pytest.raises(CommitError, match="uncommitted"):
+        commit([v], tmp_path / "b0", archive=work / "prereg" / "b0")
+    _git(work, "checkout", "--", "README")
+    batch = tmp_path / "batch"
+    rec = commit([v], batch, archive=work / "prereg" / "batch")
+    assert rec["published"]["path"] == "prereg/batch/verdicts.jsonl"
+    with pytest.raises(CommitError, match="not on origin"):
+        reveal(batch, plain)
+    _git(work, "push", "--quiet", "origin", "HEAD:main")
+    assert verify_published(batch) == ["origin/main"]
+    assert packet["packet_id"] in reveal(batch, plain)
 
 
 def test_report_measures_confabulation_and_recognition():
@@ -297,8 +336,9 @@ def test_cli_prompts_commit_score(tmp_path):
     (tmp_path / "replies").mkdir()
     (tmp_path / "replies" / f"{packet['packet_id']}.txt").write_text(reply(packet["packet_id"], {"eclipsing_binary": 1}))
     cli(["commit", "--packets", str(tmp_path / "products.json"), "--replies", str(tmp_path / "replies"),
-         "--vetter", "test", "--batch", str(tmp_path / "batch")])
-    cli(["score", "--batch", str(tmp_path / "batch"), "--key", str(tmp_path / "key.json"), "--out", str(tmp_path / "r.json")])
+         "--vetter", "test", "--batch", str(tmp_path / "batch"), "--allow-dirty"])
+    cli(["score", "--batch", str(tmp_path / "batch"), "--key", str(tmp_path / "key.json"), "--out", str(tmp_path / "r.json"),
+         "--unpublished"])
     assert json.loads((tmp_path / "r.json").read_text())["labelled"]["accuracy"] == 1.0
 
 
@@ -775,8 +815,11 @@ def test_external_apply_dilutes_tess_and_skips_g_only():
     ext = pd.DataFrame({"source_id": [1, 1, 2], "band": ["TESS", "ztf_r", "TESS"], "t": [10.5, 10.5, 10.5],
                         "flux": 1.0, "err": 0.01})
     plan = {1: {"signal": dip, "bands": None}, 2: {"signal": dip, "bands": ["G"]}}
+    # The contamination is neighbour flux over target flux: at 0.5 the target gives 2/3 of the aperture's light.
     out = apply(ext, plan, {1: 0.5})
-    assert out.flux.tolist() == pytest.approx([0.9, 0.8, 1.0])
+    assert out.flux.tolist() == pytest.approx([1 - 0.2 * 2 / 3, 0.8, 1.0])
+    crowded = apply(ext, plan, {1: 74.7})          # a ratio above 1 still only dims, by a small share
+    assert 0.99 < crowded.flux.iloc[0] < 1.0
 
 
 def test_dip_trains_continue_past_the_span():

@@ -239,6 +239,24 @@ def test_context_joins_surveys_into_one_row_per_target():
     assert got.mean() == pytest.approx(0.7, abs=0.06)
 
 
+def test_context_keeps_two_matches_with_large_gaia_ids():
+    """pandas 3 builds a RangeIndex from exactly two int64 keys, and for Gaia-sized ids the range overflows."""
+    from cosmos_search.xmatch.context import context
+
+    sv = sim_survey()
+    gaia, rows, _ = sim_field(2, survey=sv, seed=9, p_counterpart=1.0)
+    ids = {int(a): b for a, b in zip(gaia.source_id, (5_000_000_000_000_000_000, 9_000_000_000_000_000_000))}
+    gaia["source_id"] = gaia.source_id.map(ids).astype("int64")
+    import cosmos_search.xmatch.surveys as S
+    S.SURVEYS["sim"] = sv
+    try:
+        src = MemorySource({"sim": rows, "gaia_dr3": gaia})
+        wide, _ = context(gaia, ["sim"], source=src, beams=None, n_shifts=1)
+    finally:
+        del S.SURVEYS["sim"]
+    assert len(wide) == 2 and wide.sim_id.notna().all()
+
+
 def test_competition_from_gaia_neighbours_halves_false_matches_and_stays_calibrated():
     sv = sim_survey(floor_mas=150.0, search_radius_mas=4000.0, shift_annulus_arcsec=(30.0, 60.0))
     gaia, rows, truth = sim_field(20000, survey=sv, seed=11, radius_deg=0.25, bg_per_arcmin2=5.0,
