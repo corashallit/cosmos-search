@@ -64,7 +64,9 @@ Per-transit noise for simulation, fitted to these 12 after the intra-transit inf
 
 Per source, on per-transit abscissae, with the per-transit G flux (DR4 epoch photometry):
 
-1. **Natural family**, each nested on the 5-parameter star, VIM (offset ∝ 1/F, two columns) in every model:
+1. **Natural family**, each nested on the 5-parameter star, VIM (offset ∝ 1/F, two columns) in every model when
+   the flux varies beyond its errors at 5σ (flux measurement noise moves no light; on a constant star the VIM
+   columns are random regressors that absorb whatever the model misses):
    5p; 7p and 9p (acceleration, jerk); K1, a photocentre orbit searched on the bare star and on top of an
    acceleration (circular periodogram 0.5 d – 40 yr, eccentricity × periastron grid, Nelder-Mead); K2, a second
    orbit on top of K1; **lens**, astrometric microlensing by a dark lens, chosen jointly with the magnification it
@@ -97,7 +99,10 @@ Per source, on per-transit abscissae, with the per-transit G flux (DR4 epoch pho
    - `gof_z`: Wilson–Hilferty z of the best natural model's χ².
    - `fov_pair_z`: do the residuals of transit pairs 106.5 min apart (preceding then following field of view) agree?
      Both fields see the same sky through different optics and calibrations; an astrophysical signal agrees, a
-     per-FoV calibration jump does not. This is the arm's instrument veto (plan principle 4).
+     per-FoV calibration jump does not. The statistic is the largest |median| of the paired difference over the
+     pairs after (or before) any pair, scaled to ~N(0, 1): a calibration jump shifts every later pair, while a real
+     abrupt change on the sky can land between the two transits of one pair and must not count. This is the arm's
+     instrument veto (plan principle 4).
    - Also `ruwe` (what the catalogue would show), `k1_fA`, `k1_verdict`, `acc_min_mass`.
 
 ## Simulation (`simulate`)
@@ -142,7 +147,7 @@ Labels, in order of precedence:
 ### Pre-registered threshold procedure (written before any calibration run on the frozen code was read)
 
 `FRAC_MULTI = 0.10`, from the DR3 numbers above (single-like stars exceed it at 0.5–2%). The other three are set
-mechanically on run 6 (2,400 naturals, seed 51; 1,600 non-gravitational injections, seed 52; 400 FoV jumps,
+mechanically on the calibration run of the exact code the blind test uses (run 7: 2,400 naturals, seed 51; 1,600 non-gravitational injections, seed 52; 400 FoV jumps,
 seed 53; amplitudes log-uniform 1–50 σ_tr):
 
 1. `FOV_Z`: the smallest of {4, 5, 6, 8, 10} that at most 0.5% of naturals and non-gravitational injections exceed.
@@ -163,7 +168,7 @@ injections and 60 FoV jumps, amplitudes log-uniform 3–50 σ_tr, shuffled under
 reveal step will decrypt. Pass criteria, fixed with the thresholds:
 
 - **P1** natural false-alarm rate: Clopper–Pearson 95% upper bound ≤ 1.5%.
-- **P2** recall of non-gravitational injections with amplitude ≥ 20 σ_tr: at least run 6's recall minus 10 points.
+- **P2** recall of non-gravitational injections with amplitude ≥ 20 σ_tr: at least the calibration run's recall minus 10 points.
 - **P3** instrument: ≥ 80% of FoV jumps with amplitude ≥ 10 σ_tr labelled instrument, and ≤ 10% of all FoV jumps
   labelled unexplained.
 
@@ -182,14 +187,15 @@ star's flux with DR4-like noise so the lens check works as it will on DR4. Share
 
 | kind | 5 σ_tr | 10 σ_tr | 20 σ_tr | 50 σ_tr |
 |---|---|---|---|---|
-| step | 0.19 (0.00) | 0.38 (0.02) | 0.62 (0.08) | 0.88 (0.42) |
-| square | 0.33 (0.08) | 0.42 (0.29) | 0.60 (0.44) | 0.75 (0.69) |
-| kick | 0.02 (0) | 0.06 (0) | 0.12 (0) | 0.17 (0.04) |
-| thrust | 0 (0) | 0.06 (0) | 0.12 (0.02) | 0.23 (0.04) |
+| step | 0.21 (0.00) | 0.46 (0.02) | 0.60 (0.10) | 0.88 (0.46) |
+| square | 0.31 (0.19) | 0.52 (0.44) | 0.77 (0.71) | 0.90 (0.85) |
+| kick | 0.02 (0) | 0.08 (0) | 0.12 (0) | 0.17 (0.04) |
+| thrust | 0 (0) | 0.06 (0) | 0.12 (0.04) | 0.17 (0.04) |
 
-All 12 nulls have S ≤ 2.1, so the cascade explains the real data with natural models (5p, or K1 for the three known
-binaries). Before the lens prior, step recall was 0.46 at 20 σ_tr and 0.81 at 50 σ_tr: microlensing and orbits
-absorbed steps.
+All 12 nulls have S ≤ 3.0 and FoV-pair z ≤ 3.3, so the cascade explains the real data with natural models (5p, or
+K1 for the three known binaries). The history matters here: before the dark-lens prior, step recall at S > 20 was
+0.46 at 20 σ_tr and 0.81 at 50 σ_tr (microlensing and orbits absorbed steps), and before the VIM gate square-wave
+recall at 20 σ_tr was 0.60.
 
 What this says about the arm. A proper-motion kick or a smooth thrust over 5.5 years is, on 50–100 transits,
 indistinguishable from an acceleration or a long-period orbit by a companion that physics allows (a 20 σ_tr kick on
@@ -200,11 +206,47 @@ best DR4 prospects sit.
 
 ### Linear first stage (`detect.quick`)
 
-On run 6's sources (replayed with the same seeds), `quick_S > 10` keeps 2.9% of single stars, 12% of binaries and
-29–37% of blends and triples, and recovers 83% of 5–10 σ_tr steps, all steps above 10 σ_tr and 79–100% of square
-waves; kicks and thrusts only at 20–50 σ_tr (56% and 48%). It is a ranking, not a filter.
+On run 7's sources (replayed with the same seeds), `quick_S > 10` keeps 3% of single stars, 13% of binaries and
+29–36% of blends and triples, and recovers 85% of 5–10 σ_tr steps, all steps above 10 σ_tr and 80–100% of square
+waves; kicks and thrusts only at 20–50 σ_tr (57% and 50%). It is a ranking, not a filter.
 
-CALIBRATION_RESULTS
+### Calibration run 7 and the adopted thresholds
+
+`scripts/astrometry_thresholds.py` on run 7 (code 91fe616) gives **FOV_Z = 4, REL = 0, S_MIN = 50,
+FRAC_MULTI = 0.10**. At these thresholds:
+
+Naturals, 2,400 (labels):
+
+| class | n | unexplained | neighbour | instrument |
+|---|---|---|---|---|
+| single | 1,058 | 0 | 0 | 1 |
+| binary | 704 | 5 | 0 | 1 |
+| blend | 178 | 6 | 54 | 1 |
+| triple | 133 | 1 | 0 | 0 |
+| giant | 127 | 0 | 0 | 0 |
+| VIM pair | 104 | 0 | 0 | 0 |
+| dark companion | 78 | 0 | 0 | 0 |
+| microlensing | 18 | 0 | 0 | 1 |
+| **all** | **2,400** | **12 (0.50%, 95% upper 0.81%)** | 54 | 4 |
+
+Blends that Gaia's image parameters would not flag (closer than ~120 mas along scan, or fainter than b = 0.06) are
+half the remaining false alarms. In the real sky their share depends on how common such pairs are among high-RUWE
+stars, which the simulation's 8% blend weight does not pin down.
+
+Recall of non-gravitational injections (share labelled unexplained, by amplitude in σ_tr):
+
+| kind | ≤ 5 | 5–10 | 10–20 | 20–50 |
+|---|---|---|---|---|
+| square | 0.14 | 0.39 | 0.57 | 0.74 |
+| step | 0 | 0.05 | 0.11 | 0.39 |
+| kick | 0 | 0 | 0 | 0.02 |
+| thrust | 0 | 0 | 0.03 | 0.01 |
+
+At amplitude ≥ 20 σ_tr, all kinds pooled: 100 / 367 = 0.27 (95% lower bound 0.23). Instrument: 145 / 162 FoV jumps
+of ≥ 10 σ_tr labelled instrument (0.90), 18 / 400 (4.5%) labelled unexplained; already 81 / 100 at 2–5 σ_tr.
+
+So the blind-test pass lines are: P1 at most 6 of 800 naturals flagged (Clopper–Pearson upper 1.47%); P2 recall at
+≥ 20 σ_tr of at least 0.17; P3 as stated.
 
 ## DR3 rehearsal: the Kepler bound on Gaia's own solutions (`kepler_bound`)
 
@@ -239,7 +281,10 @@ follow-up in 2022–23, from the catalogue alone and with no tuning on them.
 - **Gaia DR3 4041697094653956736** (G = 11.9, F star, R ≈ 2.2 R☉, ϖ = 1.81 mas, bulge direction l = 356.6°,
   b = −3.5°). Acceleration9 with g = 43 mas/yr² and jerk 67 mas/yr³: M_min = 230 M☉, circular-orbit mass ≈ 60 M☉ at
   P ≈ 4 yr. Goodness of fit 8.2 and a crowded field make a spurious solution likeliest. No paper mentions it (ADS
-  full text, 2026-10-22). DR4 will show either an orbit with f_A of tens of M☉ or nothing.
+  full text, 2026-10-22). DR4 will show either an orbit with f_A of tens of M☉ or nothing. Two more reasons for
+  doubt from `gaia_source`: only 16 visibility periods (thin time sampling, where a short-period orbit aliases into
+  acceleration terms), and an RV amplitude of 11 km/s over 34 months, where a ~60 M☉ companion at 4 yr would
+  swing a 1.5 M☉ star by tens of km/s unless the orbit is nearly face-on. RUWE 1.52, no multi-peak transits.
 - **Gaia DR3 4467000291193143808** (G = 15.5): Orbital, P = 1648 d (longer than DR3's 1038-d span), e = 0.88,
   f_A = 112 M☉. Discussed and set aside in El-Badry et al. 2023 (the BH1 paper). DR4 covers the full period.
 
@@ -301,3 +346,9 @@ In dependency order, from the release (2026-12-02):
   that eccentric orbits and microlensing absorb jumps; added the neighbour model, always-on VIM, flux-error
   propagation, the lens magnification check, periastron and mass-cap plausibility, 5σ transit clipping and the FoV
   pair test.
+- 2026-10-22, calibration iterations before the blind test (all on simulations and the 12 real pre-release
+  sources; no blind data existed): run 5 stopped when injections into the real abscissae showed microlensing
+  absorbing steps (added the dark-lens prior and red-noise jitter). Run 6 showed VIM fitting flux noise on constant
+  stars (coefficients of hundreds of mas) and the χ² FoV test tripping when a square wave flipped between the two
+  transits of one pair, which had pushed FOV_Z to 8 and let 11% of FoV jumps through as unexplained. Both fixed;
+  run 7 is the calibration of record.

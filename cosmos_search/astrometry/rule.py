@@ -9,7 +9,7 @@ Labels, in order of precedence:
                  also a non-negligible share of the source's whole signal (a 0.1% misfit of a huge orbit is not an
                  anomaly)
     natural      everything else
-Thresholds were set on calibration run 4 (docs/arms/astrometry.md) before the blind batch was drawn.
+Thresholds were set on calibration run 7 (docs/arms/astrometry.md) before the blind batch was drawn.
 """
 
 import numpy as np
@@ -17,10 +17,11 @@ import pandas as pd
 from scipy.stats import beta
 
 ADOPTED_NAME = "astrometry-v1"
-S_MIN = None
-REL = None
-FOV_Z = None
-FRAC_MULTI = None
+# set by scripts/astrometry_thresholds.py on calibration run 7 (docs/arms/astrometry.md), before the blind batch
+S_MIN = 50.0
+REL = 0.0
+FOV_Z = 4.0
+FRAC_MULTI = 0.10
 
 
 def statistic(res):
