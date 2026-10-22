@@ -55,3 +55,18 @@ def test_aperiodic_flag():
     p = 2.37
     k = 1 - 0.15 * (np.abs(((t - 0.2) / p + 0.5) % 1 - 0.5) * p < 0.15)
     assert not recurrence.test([_lc(t, k, rng)])["aperiodic"]
+
+
+def test_band_too_noisy_to_see_the_eclipse_does_not_break_its_period():
+    # Review R18: TESS on a faint or blended star scatters by more than the eclipse depth. Its bins inside the
+    # eclipse window read as normal brightness and used to fail the purity check, so a clean EB came out aperiodic.
+    rng = np.random.default_rng(6)
+    t = _nightly(rng)
+    p = 2.37
+    ecl = lambda x: 1 - 0.15 * (np.abs(((x - 0.2) / p + 0.5) % 1 - 0.5) * p < 0.15)
+    tess = np.arange(300.0, 327.0, 1 / 48)
+    lcs = [_lc(t, ecl(t), rng), _lc(tess, ecl(tess), rng, "TESS", s=0.2)]
+    r = recurrence.test(lcs)
+    assert r["testable"] and not r["aperiodic"] and r["aligned_fraction"] == 1.0
+    t_, d, z, _ = recurrence.epochs(lcs, with_sigma=True)
+    assert recurrence.search(t_, d, z)["aligned_fraction"] < 1.0      # the old behaviour, without sigma

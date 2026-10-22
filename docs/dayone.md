@@ -454,6 +454,63 @@ Recall on the old families (Poisson, prime, geometric trains) is no longer a pas
 was calibrated on them. If the confirmatory batch fails, a new rule needs a new held-out set and a new control
 pool, since these will have been seen.
 
+### Rule v5 and the confirmatory build (pre-registered 2026-10-22, before the held-out plan was drawn)
+
+**R16: the recurrence flag stops shortlisting on its own.** The residual-search thread measured it on real DR3
+stars with ZTF (docs/arms/residual.md, halves A and B pooled, testable stars). It fires on 74% of active stars
+(RS, SOLAR_LIKE, S; 82 of 111, 95% CI 65–81%), 67% on their residual light curves, 70% of other non-EB variables,
+45% of AGN and 10% of EBs, against 37% of injected dip trains. Under v3b it would shortlist about two thirds of the
+active stars that reach the vetter, at twice the rate it catches the signals it is for. So it ranks (ranking v1
+counts it as a priority flag) and the vetter sees it in the packet, but it no longer bypasses the vetter.
+
+**R18: TESS in the recurrence test.** On a G-matched sample of the review's Gaia + ZTF stars (not the reserved
+pool), adding TGLC light curves with #51's red-noise errors raised the flag from 10 to 44 of the
+302 stars that have TESS (testable 37 → 71). Two causes. (a) A bug: a band too noisy to show an eclipse (TESS on a faint or blended
+star, sigma ~0.2) put "normal brightness" epochs inside the eclipse window, the purity check failed and a clean
+EB read as aperiodic. `recurrence.search` now counts an epoch as normal brightness only if its band could have
+shown the dips (median in-dip depth >= DIP_SIGMA x the band's sigma); a test reproduces the old failure. With the
+fix the flag fires on 38: EBs go from 3 of 32 back to 0, while SOLAR_LIKE stays at 14 of 87 (0 without TESS),
+DSCT|GDOR|SXPHE 9 of 83 (3) and LPV 5 of 39 (1). (b) Real short low excursions in TESS (0.1–0.5 d) on spotted, S-type and
+long-period variables, which are the star's own variability or TGLC systematics and which no period explains. That
+part is not a bug: it is the activity problem of R16, and it is why the flag no longer shortlists. The flag's
+inputs did not change with #51, since the dip threshold uses each band's robust scatter, not its errors; what #51
+changes is the error column the vetter reads.
+
+**Rule v5.** Shortlist a packet when the blind vetter's S = P(disk occultation + debris transit + other
+astrophysical + unexplained) >= 0.35. No pipeline flag shortlists. `dayone.confirm.evaluate` scores it against the
+four criteria above. If all four pass, `ADOPTED_RULE` becomes v5; otherwise it stays v3b with the review's
+caveats, and the next attempt needs a new held-out set and control pool.
+
+**What is built (code: `main` at the merge of this section).**
+
+- *Packets.* `dayone.vet build` as for batch 4: Gaia epochs with the tail holdout, ZTF and TESS (TGLC, every
+  sector, #51 errors) on the Gaia clock, the coincidence test, the solar-system check if SkyBoT answers (a
+  failure is recorded in the packet, as before), and the recurrence (band-aware) and single-event tests.
+- *Held-out decoys, 48.* `decoys plan --counts confirm` (12 per held-out family) on the 90 hosts drawn on
+  2026-10-21 by urandom: unranked stars with no DPAC dip class, matched in G to batch 2's real candidates, none used
+  before or reserved. Only hosts with >= 100 epochs in some external band (68 of 90) are eligible. Each signal must
+  move some visible G epoch by >= 5 robust sigma, as in every batch; nothing is conditioned on the external epochs.
+  Sealed to Cora's key and the reveal key; its SHA-256 goes into `commit.json`.
+- *Reserved controls, 135.* All of `dayone-controls-v1`, with or without external data (118 have >= 100 external
+  epochs). Labels by stratum (`dayone.controls.STRATA`). Per-class rates are also reported among covered stars.
+- *Queue sample, 100.* 150 stars were drawn by urandom on 2026-10-22 at 00:19 UTC (ids only; nothing about them has
+  been looked at) from the 1,362 tier-1 stars of the rehearsal ranking that ranking v1 keeps in tier 1 by class
+  (not RS, SOLAR_LIKE, S or AGN) and that no batch, calibration, review or decoy draw has used. Their external
+  light curves go through `python -m cosmos_search.residual`; demoted stars are dropped, and the first 100 of the
+  rest in drawn order are the arm. That is a uniform draw from ranking v1's tier 1. If fewer than 100 survive, all
+  are used and n is reported.
+- *Flag-hidden arm, 93.* The 48 decoys and 45 controls (5 per class, chosen by urandom) rebuilt with
+  `--hide-pipeline-flags` as a second batch with its own packet ids.
+- *Stage A.* One blind subagent per packet (283 + 93), two tool calls: read the prompt, write the reply. Every
+  transcript is audited. A packet whose transcript is not clean is re-run once with a fresh agent; if it is still not
+  clean, or the reply does not parse, it counts against the rule: a decoy not shortlisted, a control or queue star
+  shortlisted.
+- *Commit and reveal.* `vetting commit --archive prereg/verdicts/confirm-main` (and `confirm-hidden`) with
+  `--plan`, pushed to the PR before `dayone.vet score`; then `python -m cosmos_search.dayone.confirm`.
+
+Reported whatever the outcome: the four criteria, recall per held-out family, per-class control rates (all and
+covered), the queue sample's rate as the headline DR4 false-positive figure, and shown vs hidden flags.
+
 ## Keep rule v2 (after the rehearsal)
 
 The stream keeps a light curve when the source's G3 `single` or `fov` |W| reaches 0.6 × the |W| at which G3
