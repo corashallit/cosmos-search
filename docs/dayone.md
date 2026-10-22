@@ -125,7 +125,8 @@ two highest scores of the 44 are injections.
 
 ## Gaps
 
-- G5 (energy budget against WISE) is not built; the packets carry WISE photometry without a test.
+- G5 (energy budget) is built (`cosmos_search/energy`, docs/arms/energy-budget.md). Packets get its measurements
+  with `vet build --g5`; batches built before it carry WISE magnitudes without a test.
 - V3's calibration run (~400 packets) has not happened, so the FP figure has no real precision yet.
 - SkyBoT returned 502 and then tripped the client's breaker, so the packets went out without the
   solar-system test. It is a single external dependency on day one.

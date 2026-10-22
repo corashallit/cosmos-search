@@ -42,6 +42,7 @@ def main(argv=None):
     k.add_argument("--ref", required=True)
     k.add_argument("--ranked", required=True)
     k.add_argument("--phot", help="photometry from reference.fetch_ids (fetched if missing)")
+    k.add_argument("--plan", help="sealed decoy plan: give dust-story decoys a dust excess (inject.DECOY_IR)")
     k.add_argument("--out", required=True)
     a = ap.parse_args(argv)
 
@@ -72,7 +73,17 @@ def main(argv=None):
         phot = pd.read_parquet(a.phot) if a.phot else fetch_ids(ranked["source_id"])
         phot = phot.drop_duplicates("source_id").set_index("source_id").loc[ranked["source_id"]].reset_index()
         delta = delta_from_ranked(ranked, phot).to_numpy()
-        res, _ = run.evaluate(phot, run.load_locus(a.ref), delta=delta)
+        locus = run.load_locus(a.ref)
+        if a.plan:
+            from cosmos_search.inject.classes.gaia_stream import load_plan
+
+            from . import inject
+            from .photometry import design
+            plan = load_plan(a.plan)
+            fams = [plan.get(int(s), {}).get("family") for s in phot["source_id"]]
+            comps = inject.decoy_components(fams, np.random.default_rng(int.from_bytes(os.urandom(8), "little")))
+            phot = inject.apply(phot, design(phot, locus.predict(phot)), comps)
+        res, _ = run.evaluate(phot, locus, delta=delta)
         keep = [c for c in ("tier", "best_class_name", "depth_frac", "n_episodes", "grey") if c in ranked]
         res = res.merge(ranked[["source_id", *keep]], on="source_id", how="left")
         res.to_parquet(a.out)

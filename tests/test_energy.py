@@ -149,3 +149,8 @@ def test_ir_holdout_hides_the_energy_budget():
     packet, key = build(cand, holdout=("ir",))
     assert set(packet["context"]) == {"tess_contamination"}
     assert key["truths"]["ir_excess"] is True
+
+
+def test_decoy_components_give_dust_stories_dust():
+    comps = inject.decoy_components(["dust_dip", "grey_dip", None], np.random.default_rng(0))
+    assert len(comps[0]) == 2 and comps[1] == [] and comps[2] == []

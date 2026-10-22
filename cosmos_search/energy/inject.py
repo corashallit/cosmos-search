@@ -121,3 +121,14 @@ def dimmer_plan(design_rows, rng, n=None, delta_range=(1e-3, 0.3), t_range=(100.
     plan = pd.DataFrame({"delta": delta, "arrangement": arr, "T": T, "f": f})
     comps = [[(float(T[i]), float(f[i]), 0.0)] if f[i] > 0 else [] for i in range(n)]
     return plan, comps
+
+
+# Sealed vetting decoys (dayone.decoys, inject.classes.gaia_stream) dim a host's Gaia epochs but leave its infrared
+# alone, so every decoy would read as a dimmer without waste heat. A decoy whose story is dust gets a dust excess
+# here; the other families are occulters that need not show any (compact bodies, structures on one orbit).
+DECOY_IR = {"dust_dip": "yso_disk"}
+
+
+def decoy_components(families, rng):
+    """Component lists for hosts carrying the given injected families (None for an uninjected host)."""
+    return [draw(DECOY_IR[f], 1, rng)[0] if f in DECOY_IR else [] for f in families]

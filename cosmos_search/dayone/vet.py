@@ -363,6 +363,7 @@ def main(argv=None):
     b.add_argument("--ranked", required=True)
     b.add_argument("--lightcurves", required=True)
     b.add_argument("--context")
+    b.add_argument("--g5", help="python -m cosmos_search.energy candidates output: energy-budget context for the packets")
     b.add_argument("--out", required=True)
     b.add_argument("--no-sso", action="store_true")
     b.add_argument("--external", help="dayone.external fetch output: ZTF and TESS bands for the packets")
@@ -378,6 +379,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd == "build":
         wide = pd.read_parquet(a.context) if a.context else None
+        if a.g5:
+            g5 = pd.read_parquet(a.g5)[["source_id", *energy_run.PACKET_CONTEXT]]
+            wide = g5 if wide is None else wide.merge(g5, on="source_id", how="left")
         from cosmos_search.inject.classes.gaia_stream import load_plan
         packets, _ = build(pd.read_parquet(a.queue), pd.read_parquet(a.ranked), a.lightcurves, a.out, wide,
                            sso_check=not a.no_sso, plan_map=load_plan(a.plan) if a.plan else None,
