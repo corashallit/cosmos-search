@@ -481,7 +481,7 @@ astrophysical + unexplained) >= 0.35. No pipeline flag shortlists. `dayone.confi
 four criteria above. If all four pass, `ADOPTED_RULE` becomes v5; otherwise it stays v3b with the review's
 caveats, and the next attempt needs a new held-out set and control pool.
 
-**What is built (code: `main` at the merge of this section).**
+**What is built (code: this PR's head when the packets are built, recorded in `commit.json` as `code_commit`).**
 
 - *Packets.* `dayone.vet build` as for batch 4: Gaia epochs with the tail holdout, ZTF and TESS (TGLC, every
   sector, #51 errors) on the Gaia clock, the coincidence test, the solar-system check if SkyBoT answers (a
