@@ -84,7 +84,7 @@ def test_aperiodic_train_on_an_eb_survives_in_the_residuals():
         tt = np.linspace(0, 1200, 20001)
         if np.sum(np.diff((sig.factor(tt, "ztf_r") < 0.9).astype(int)) == 1) >= 8:
             break
-    eb, lcs = _star(rng, extra=lambda t: sig.factor(t, "ztf_r"))
+    _, lcs = _star(rng, extra=lambda t: sig.factor(t, "ztf_r"))
     raw = S.labels(lcs)
     assert (raw[1] == 1).sum() > 0
     v = M.run(lcs, SUN_AT_100PC, None)
@@ -174,3 +174,41 @@ def test_active_stars_go_to_tier_2_and_into_the_controls():
     c = q[q.role == "control"].set_index("source_id")
     assert {0, 1, 2} <= set(c.index)
     assert c.loc[2, "control_label"] == "extragalactic" and c.loc[0, "control_label"] == "rotation_or_spots"
+
+
+def _gaia_cadence(rng, n_transits=40, span=1000.0):
+    """Gaia-like G epochs: transits at random times, each seen by both fields of view 106.5 min apart."""
+    t0 = np.sort(rng.uniform(0, span, n_transits))
+    return np.sort(np.r_[t0, t0 + 106.5 / 1440])
+
+
+def test_activity_score_separates_spots_from_a_flat_star_with_dips():
+    from cosmos_search.residual import activity as A
+
+    rng = np.random.default_rng(21)
+    t = _gaia_cadence(rng)
+    noise = 0.003 * rng.standard_normal(len(t))
+    spots = 1 + 0.02 * np.sin(2 * np.pi * t / 3.7) + noise
+    flat = 1 + noise
+    dips = flat.copy()
+    dips[rng.choice(len(t), 6, replace=False)] *= 0.9                      # 10% dips on six epochs
+    a_spots, a_flat, a_dips = (A.score(t, f)[0] for f in (spots, flat, dips))
+    assert a_spots > A.THRESHOLD > a_flat
+    assert a_dips < A.THRESHOLD and abs(a_dips - a_flat) < 0.15             # dips leave the ceiling alone
+    assert np.isnan(A.score(np.arange(30.0), flat[:30])[0])                # no close pairs: no score
+
+
+def test_activity_cal_rates_and_choice():
+    import pandas as pd
+
+    from cosmos_search.residual import activity as A
+
+    real = pd.DataFrame({"kind": "real_class", "family": "RS", "activity": [0.9, 0.8, 0.1, 0.05],
+                         "aperiodic": [True, True, True, False]})
+    inj = pd.DataFrame({"kind": "anomaly", "family": "grey_dip", "activity": [0.1, 0.2, 0.5, 0.1],
+                        "activity_host": [0.1, 0.2, 0.1, 0.1], "aperiodic": [True, True, False, True]})
+    df = pd.concat([real, inj], ignore_index=True)
+    r = A.rates(df, 0.35)
+    assert r["capture"] == 2 / 3 and r["cost"] == 0 and r["flips"] == 0.25
+    th, _ = A.choose(df)
+    assert th == 0.6                                                       # J ties up to 0.60: the higher one

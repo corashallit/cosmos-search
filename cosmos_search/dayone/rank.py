@@ -62,6 +62,7 @@ import pyarrow.dataset as ds
 from astropy.table import Table
 
 from cosmos_search.gaia.epoch import gaia_time_to_btjd
+from cosmos_search.residual import activity
 from cosmos_search.stats import audit
 from cosmos_search.vetting import physics, stage0
 
@@ -169,7 +170,8 @@ def episodes(t, z, fov):
 
 
 def lc_physics(lc, ctx):
-    """Per source: episodes, duration bound, orbital period floor, recurrence tension, dip colour, grey."""
+    """Per source: episodes, duration bound, orbital period floor, recurrence tension, dip colour, grey, and the G
+    light curve's activity score (`residual.activity`, reported only)."""
     cleaned, _ = stage0.clean_long(lc, blend=_blend_map(ctx))
     df = cleaned.to_pandas()
     df["band"] = df["band"].astype(str)
@@ -204,7 +206,8 @@ def lc_physics(lc, ctx):
         r = colour["RP"][0] / colour["BP"][0] if {"BP", "RP"} <= set(colour) and colour["BP"][0] != 0 else np.nan
         grey = bool({"BP", "RP"} <= set(colour) and colour["BP"][1] <= -3 and colour["RP"][1] <= -3
                     and 0.75 <= r <= 1.33)
-        rows.append({"source_id": sid, "n_episodes": len(eps), "duration_lo_d": dur, "period_floor_d": floor,
+        rows.append({"source_id": sid, "activity": activity.score(G.t.to_numpy(), G.flux.to_numpy())[0],
+                     "n_episodes": len(eps), "duration_lo_d": dur, "period_floor_d": floor,
                      "min_spacing_d": spacing, "tension": bool(np.isfinite(floor) and np.isfinite(spacing)
                                                                and spacing < floor / TENSION_FACTOR),
                      "dip_colour_R": r, "grey": grey, "t_deepest": float(G.t.iloc[k]) if k is not None else np.nan,

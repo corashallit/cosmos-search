@@ -224,7 +224,7 @@ def residual_lightcurves(lcs, idx, t, drop, excess):
 
 def _events_with(rec_epochs, min_epochs):
     """Events (recurrence.events) on the residual epochs, and how many have at least min_epochs in-dip epochs."""
-    t, d, z = rec_epochs
+    t, d, z = rec_epochs[:3]
     ev = recurrence.events(t, d, z)
     if not len(ev):
         return ev, 0
@@ -299,7 +299,7 @@ def evaluate(ctx, tol=TOL, cross=CROSS_FACTOR, min_event_epochs=MIN_EVENT_EPOCHS
         out.update({"target_in_window": None, "target_residual": None, "target_residual_sigma": np.nan,
                     "target_prediction": None})
     rlcs = residual_lightcurves(lcs, idx, t, drop, excess) if base else lcs
-    rec_ep = recurrence.epochs(rlcs)
+    rec_ep = recurrence.epochs(rlcs, with_sigma=True)
     ev, n_ev = _events_with(rec_ep, min_event_epochs)
     # The selected dip's own event does not count here: target_residual covers it.
     if t_target is not None and len(ev):
@@ -311,7 +311,7 @@ def evaluate(ctx, tol=TOL, cross=CROSS_FACTOR, min_event_epochs=MIN_EVENT_EPOCHS
     out["n_residual_events"] = int(len(ev))
     out["n_residual_events_elsewhere"] = int(n_ev)
     if recurrence_test:
-        t_r, d_r, z_r = rec_ep
+        t_r, d_r, z_r, s_r = rec_ep
         if base and min_event_epochs > 1 and len(ev):
             # Under an eclipse baseline, residual events need min_event_epochs in-dip epochs here too: lone
             # epochs left by an eclipse are prediction misses at ingress or one-night outliers, and on raw data
@@ -321,7 +321,7 @@ def evaluate(ctx, tol=TOL, cross=CROSS_FACTOR, min_event_epochs=MIN_EVENT_EPOCHS
                 inside = d_r & (t_r >= a) & (t_r <= b)
                 if inside.sum() < min_event_epochs:
                     d_r[inside] = False
-        r = recurrence.search(t_r, d_r, z_r)
+        r = recurrence.search(t_r, d_r, z_r, sigma=s_r)    # noise-aware purity (review R18)
         out.update({"residual_testable": bool(r["testable"]), "residual_aperiodic": bool(r.get("aperiodic", False)),
                     "residual_aligned_fraction": r.get("aligned_fraction", np.nan)})
     out["demote"] = bool(eb["explained"] and base and n_ev == 0 and out["target_residual"] is False)

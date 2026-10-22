@@ -47,9 +47,10 @@ def _robust_sigma(x):
     return 1.4826 * np.median(np.abs(x - np.median(x)))
 
 
-def epochs(lcs):
-    """(t, in_dip, depth_sigma) over all usable bands, sorted by time. lcs: objects with band, time, flux."""
-    ts, dips, zs = [], [], []
+def epochs(lcs, with_sigma=False):
+    """(t, in_dip, depth_sigma) over all usable bands, sorted by time. lcs: objects with band, time, flux.
+    with_sigma: also each epoch's band robust sigma (relative flux), for `search`'s sigma."""
+    ts, dips, zs, ss = [], [], [], []
     for lc in lcs:
         if lc.band in SKIP_BANDS:
             continue
@@ -68,11 +69,13 @@ def epochs(lcs):
         ts.append(t)
         dips.append(z > k)
         zs.append(z)
+        ss.append(np.full(len(t), s))
     if not ts:
-        return np.array([]), np.array([], bool), np.array([])
-    t, d, z = np.concatenate(ts), np.concatenate(dips), np.concatenate(zs)
+        empty = (np.array([]), np.array([], bool), np.array([]))
+        return empty + (np.array([]),) if with_sigma else empty
+    t, d, z, sg = np.concatenate(ts), np.concatenate(dips), np.concatenate(zs), np.concatenate(ss)
     o = np.argsort(t)
-    return t[o], d[o], z[o]
+    return (t[o], d[o], z[o], sg[o]) if with_sigma else (t[o], d[o], z[o])
 
 
 def events(t, in_dip, z):
@@ -130,8 +133,13 @@ def _secondary(te, t, in_dip, flat, f, q, taken):
     return c, s2
 
 
-def search(t, in_dip, z, widths=WIDTHS, p_min=P_MIN, top_k=TOP_K):
-    """Recurrence statistics (dict) for epochs from `epochs`."""
+def search(t, in_dip, z, widths=WIDTHS, p_min=P_MIN, top_k=TOP_K, sigma=None):
+    """Recurrence statistics (dict) for epochs from `epochs`.
+
+    sigma (each epoch's band robust sigma, `epochs(..., with_sigma=True)`): an epoch then counts as normal
+    brightness in a purity window only if its band could have shown the dips, i.e. the median in-dip depth is at
+    least DIP_SIGMA of that band's sigma. Without it, a band too noisy to see an eclipse (TESS on a faint or
+    blended star) reads as normal brightness inside the eclipse window and breaks a real period (review R18)."""
     ev = events(t, in_dip, z)
     n_ev = len(ev)
     out = {"n_epochs": int(len(t)), "n_in_dip": int(in_dip.sum()), "n_events": int(n_ev),
@@ -142,6 +150,8 @@ def search(t, in_dip, z, widths=WIDTHS, p_min=P_MIN, top_k=TOP_K):
     f_min, f_max = 2.0 / span, 1.0 / p_min
     te = ev[:, 0]
     flat = z < FLAT_SIGMA
+    if sigma is not None:
+        flat &= DIP_SIGMA * sigma <= np.median(z[in_dip] * sigma[in_dip])
     best = {"n_aligned": 1, "n_primary": 1, "n_secondary": 0, "period": np.nan, "purity": np.nan,
             "width": np.nan, "n_cycles": 0}
     for w in widths:
@@ -193,13 +203,14 @@ def search(t, in_dip, z, widths=WIDTHS, p_min=P_MIN, top_k=TOP_K):
 
 def test(lcs):
     """Packet test dict for a list of visible light curves (vetting.candidate.LightCurve)."""
-    r = search(*epochs(lcs))
+    t, d, z, s = epochs(lcs, with_sigma=True)
+    r = search(t, d, z, sigma=s)
     # What the test computes and what else produces the same result, but no calibration figures: those would
     # make the vetter's score repeat the flag rather than weigh the light curve (docs/dayone.md, review fixes).
     r["description"] = (
         "Recurrence across all surveys: n_events distinct dips (epochs >= 4 robust sigma low and deeper than the largest brightening in their band, merged within 1 d); "
         "n_aligned of them fall in one or two pure phase windows (n_primary, n_secondary: two eclipses) at one "
-        "strict period (period, d); purity = share of epochs in the primary window that are in dip; "
+        "strict period (period, d); purity = share of epochs in the primary window that are in dip (counting normal-brightness epochs only from bands precise enough to have shown the dips); "
         "aligned_fraction = n_aligned / n_events. Eclipses give aligned_fraction near 1, dips that do not recur "
         "at one period give a small one. aperiodic is true when at least 2 events are left unexplained and "
         "aligned_fraction <= 0.6. It says only that no single strict period explains the dips: spot evolution, "
