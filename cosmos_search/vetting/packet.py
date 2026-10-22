@@ -168,7 +168,8 @@ def _colour_targets(cand):
 
 # Everything that would give the infrared answer away: the excess itself, the photometry it comes from, and the G5
 # energy-budget measurements derived from it (energy.run.PACKET_CONTEXT).
-IR_CONTEXT = ("ir_excess_sigma", "W1", "W2", "W3", "W4", "Ks", "waste_heat_max_fraction_150K",
+IR_CONTEXT = ("ir_excess_sigma", "W1", "W2", "W3", "W4", "W1_upper_limit", "W2_upper_limit", "W3_upper_limit",
+              "W4_upper_limit", "Ks", "waste_heat_max_fraction_150K",
               "waste_heat_max_fraction_300K", "waste_heat_max_fraction_1000K", "warm_shell_excluded_above_K")
 
 

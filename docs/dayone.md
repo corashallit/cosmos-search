@@ -558,6 +558,40 @@ coverage (68 of 90 eligible), so the recall applies to signals that leave events
 are batch 5's problem (v4 not adopted). The control classes have 15 stars each, so a per-class rate below about
 18% cannot be told from zero.
 
+## The v5 lead is WY Cen, a known eclipsing binary
+
+The one real star rule v5 shortlisted, Gaia DR3 5862265011945308544, is **WY Cen** (HV 1264, provisional
+designation AN 150.1906), in GCVS and VSX as an eclipsing binary (type E, 14.0-14.7 pg) with no published period.
+Gaia DR3 also carries an SB1 orbit for it (P = 76.53 ± 0.15 d, K = 37.8 km/s, f(M) = 0.43 M☉). Follow-up
+(2026-10-22) found a detached binary of a giant and a hotter, smaller companion:
+
+- **Ephemeris.** The two Gaia fades, three ASAS-SN V points (2016-2018) and TESS sectors 38 and 64 fit one linear
+  ephemeris for the deep eclipse: BTJD 3049.012 + 76.5246(36) E. It falls at the conjunction the SB1 orbit
+  predicts for the RV star in front (295.4 +1.2/−1.0 vs 294.0). The time for sector 101 was written down before
+  that sector was downloaded: predicted 4120.36 ± 0.05, measured 4120.38.
+- **Shape.** The deep eclipse is total: 2.09 d first to last contact, 1.14 d flat. The shallow one (4% in TESS,
+  4-6% in NEOWISE W1) sits half a period later (e cos ω ≈ 0). In TESS difference images the flux loss is on target
+  (0.15-0.33 px).
+- **Why it looked reddened.** In totality the hotter star is hidden, so BP drops 33%, G 24% and RP 19%. This depth
+  spectrum is the companion's light fraction in each band. The BP/RP ratio comes close to the interstellar one
+  by coincidence; nothing about it needs dust.
+- **No dust.** WISE W3 and W4 are AllWISE upper limits (ph_qual `UU`, W4 limit about 10x the photosphere), and
+  GLIMPSE 3.6-8 µm is flat at Ks. The packet showed W4 = 7.46 as a magnitude and the vetter read it as an excess.
+  `dayone.vet.wise_limits` now passes limits as `W<n>_upper_limit`, and the `ir` holdout hides those keys as well.
+  VPHAS+ r−Hα and Gaia ESP-ELS show no Hα emission.
+- **G5.** The standard run found no bands: Gaia's `allwise_best_neighbour` has no row for this star, so
+  `reference.fetch_ids` returned no WISE photometry and G5 reported `g5_n_bands = 0` without a warning. With
+  IRSA's AllWISE values supplied (`--phot`) there is no excess (z 4.86 < 5.0, best fit 1,475 K). That near-threshold
+  offset is about what a single-star photosphere fit gives for a composite with a hot companion.
+
+What let it through: (1) packets hold back VSX because VSX ingests Gaia DR3's variables, but WY Cen's entry is a
+century older than Gaia; (2) packets do not carry Gaia NSS orbits, and here the orbit alone predicts when the
+eclipses happen; (3) the WISE upper limit read as an excess; (4) a total eclipse of a hotter star reddens the
+system like dust does. Items 1 and 2 are cheap checks to add before the expert queue (a known-variable
+cross-match restricted to non-Gaia discoveries, and a conjunction-phase test for any star with an NSS
+orbit or, in DR4, epoch RVs). The confirmatory result is unchanged. Its queue criterion counts shortlisted stars
+as false positives, and this one was a false positive.
+
 ## Keep rule v2 (after the rehearsal)
 
 The stream keeps a light curve when the source's G3 `single` or `fov` |W| reaches 0.6 × the |W| at which G3

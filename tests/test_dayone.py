@@ -111,3 +111,15 @@ def test_keep_table_keeps_g3_selections_and_matches_dr3_g3_statistics(tmp_path):
     kept = features.keep_light_curve(f, controls=0, table=path)
     assert kept[keep.selected(q, 0.5)].all()
     assert kept.mean() < 1
+
+
+def test_wise_upper_limits_are_named_as_limits():
+    # WY Cen (Gaia DR3 5862265011945308544): W3 and W4 are AllWISE upper limits, W1/W2 are detections.
+    row = pd.Series({"allwise_w1sigmpro": 0.024, "allwise_w2sigmpro": 0.021, "allwise_w3sigmpro": np.nan,
+                     "allwise_w4sigmpro": np.nan})
+    ctx = {"W1": 9.857, "W2": 9.944, "W3": 10.029, "W4": 7.462, "Ks": 10.038}
+    out = vet.wise_limits(ctx, row)
+    assert out == {"W1": 9.857, "W2": 9.944, "W3_upper_limit": 10.029, "W4_upper_limit": 7.462, "Ks": 10.038}
+    # no sigma columns (older context tables) or no WISE match: unchanged
+    assert vet.wise_limits(ctx, pd.Series({"x": 1.0})) == ctx
+    assert list(vet.wise_limits({"W4": float("nan")}, row)) == ["W4"]
