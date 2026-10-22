@@ -18,7 +18,8 @@ def test_draw_seal_reserve_and_load(tmp_path, monkeypatch):
     assert not exclude & {r["source_id"] for r in rows}
     assert {r["selected"] for r in rows if r["stratum"] == "AGN"} == {False}
     g = ranked.set_index("source_id").phot_g_mean_mag
-    assert all(controls.G_RANGE[0] <= g[r["source_id"]] <= controls.G_RANGE[1] for r in rows if r["selected"])
+    rng_of = lambda r: controls.G_RANGE_BY_STRATUM.get(r["stratum"], controls.G_RANGE)
+    assert all(rng_of(r)[0] <= g[r["source_id"]] <= rng_of(r)[1] for r in rows if r["selected"])
     ident = x25519.Identity.generate()
     pub = tmp_path / "k.pub"
     pub.write_text(str(ident.to_public()) + "\n")

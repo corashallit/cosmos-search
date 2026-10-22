@@ -74,7 +74,7 @@ def test_held_out_families_refused_unless_confirmatory_and_out_of_calibration():
 
     rng = np.random.default_rng(11)
     t = np.linspace(0.0, 1000.0, 4000)
-    for fam in lc.HELD_OUT_FAMILIES:
+    for fam in lc.HELD_OUT_FAMILIES + lc.HELD_OUT_FAMILIES_V2:
         with pytest.raises(lc.HeldOutError):
             lc.sample(rng, fam, 0.0, 1000.0)
         for _ in range(20):
@@ -95,4 +95,4 @@ def test_held_out_families_refused_unless_confirmatory_and_out_of_calibration():
             continue
         for n in names:
             used |= set(getattr(m, n, ()))
-    assert not used & set(lc.HELD_OUT_FAMILIES)
+    assert not used & set(lc.HELD_OUT_FAMILIES + lc.HELD_OUT_FAMILIES_V2)
