@@ -132,6 +132,50 @@ def dispersion(win, obs_cells, lam_cells, min_e=DISPERSION_MIN_E):
     return per_scale[radius_idx], per_scale
 
 
+def dispersion_curve(win, obs_cells, lam_cells, n_bins=4, min_e=DISPERSION_MIN_E, min_windows=40):
+    """Overdispersion as a function of expected count, per window scale (the DR4 rule, docs/population.md §9).
+
+    On DR3, phi rises with a window's E within a scale (relative scatter that does not average away: 2.7 at E ~ 10
+    to 5.1 at E ~ 275 for 8-degree, all-distance SOV windows), so one phi per scale is too small for dense-sky
+    windows and too large for sparse ones. Windows of each scale with E >= min_e are split into n_bins quantile
+    bins of E; each bin gets the robust phi of `dispersion`. Returns {(radius index, shell window): (median E per
+    bin, phi per bin)}; scales with too few windows are left out (phi 1)."""
+    O, E = win.totals(obs_cells), win.totals(lam_cells)
+    radius_idx = win.disc[:, 1]
+    out = {}
+    for ri in range(len(RADII_DEG)):
+        rows = radius_idx == ri
+        for j in range(len(win.shells)):
+            e, o = E[rows, j], O[rows, j]
+            ok = e >= min_e
+            if ok.sum() < min_windows:
+                continue
+            e, o = e[ok], o[ok]
+            edges = np.quantile(e, np.linspace(0, 1, n_bins + 1))
+            em, ph = [], []
+            for a, b in zip(edges[:-1], edges[1:]):
+                m = (e >= a) & (e <= b)
+                z = (o[m] - e[m]) / np.sqrt(e[m])
+                em.append(float(np.median(e[m])))
+                ph.append(max(1.0, float((1.4826 * np.median(np.abs(z - np.median(z)))) ** 2)))
+            out[(ri, j)] = (np.array(em), np.maximum.accumulate(np.array(ph)))   # non-decreasing in E
+    return out
+
+
+def phi_from_curves(win, lam_cells, *curves):
+    """Per-window phi: each curve interpolated in log E at the window's own E (clamped at the ends), the largest
+    across curves. Passing the SOV-1 monitor's curve with the class's own applies review R21 at matched counts."""
+    E = win.totals(lam_cells)
+    radius_idx = win.disc[:, 1]
+    phi = np.ones_like(E)
+    for curve in curves:
+        for (ri, j), (em, ph) in curve.items():
+            rows = radius_idx == ri
+            x = np.log(np.maximum(E[rows, j], 1e-9))
+            phi[rows, j] = np.maximum(phi[rows, j], np.interp(x, np.log(em), ph))
+    return phi
+
+
 def candidates(win, obs_cells, lam_cells, null, k_max=5, alpha=0.05, phi=None):
     """Greedy non-overlapping windows with family-wise p < alpha (p from the max-null).
 

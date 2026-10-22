@@ -23,14 +23,22 @@ BINS = {
     "blend": ("blend_frac", [0.05, 0.3]),
     "nv": ("n_visits", [12, 16, 22, 30]),
     "ecl": ("abs_ecl_lat", [15, 45]),
+    # DR4 additions (docs/population.md §9): crowding and Galactic population, neither reads the light curve.
+    "dens": ("log_dens", [3.75, 4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0]),
+    "vt": ("v_tan", [20, 40, 80, 150, 250, 400]),
+    "R": ("r_gal", [3, 6, 10]),
+    "Z": ("abs_z", [0.3, 1, 3]),
 }
 MAIN = ("g", "c", "mg", "x", "eb", "ipd", "ruwe", "blend", "nv")
+DR4 = MAIN + ("ecl", "dens", "vt", "gal")     # fixed for DR4: with ~10^9 stars an LRT would keep every term
 
 
 def covariate_codes(stars, eb_edges=None):
     """Integer bin per star per covariate (NaN gets its own top code), plus the eb edges used."""
     out = {}
     for key, (col, edges) in BINS.items():
+        if col not in stars:
+            continue
         v = stars[col].to_numpy(dtype=float)
         if key == "eb":
             if eb_edges is None:
@@ -41,6 +49,8 @@ def covariate_codes(stars, eb_edges=None):
         code = np.where(np.isfinite(v), code, len(edges) + 1)
         out[key] = code.astype(np.int16)
     out["cmd"] = (out["c"] * 16 + out["mg"]).astype(np.int16)
+    if "R" in out and "Z" in out:
+        out["gal"] = (out["R"] * 8 + out["Z"]).astype(np.int16)    # Galactocentric radius x height cells
     return pd.DataFrame(out, index=stars.index), np.asarray(eb_edges)
 
 
