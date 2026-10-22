@@ -21,14 +21,16 @@ import numpy as np
 import pandas as pd
 
 from . import inject
-from .budget import T_SUB
+from .budget import BANDS, T_SUB
 from .photometry import design, sigma_var_from_gaia
 from .photosphere import Locus
 from .run import T_DEFICIT_MIN, evaluate
 
 HOST_G_MIN = 10.0
+FRESH = 2   # "half C": hosts from reference.SAMPLES' *_c slices, scored with a photosphere fitted on all of A and B
 N_GENERAL, N_MID = 3000, 1500
 N_DIMMER = 6000
+INVISIBLE = 0.3
 
 
 def half_of(df):
@@ -49,8 +51,12 @@ def hosts(ref_dir, h, rng, n_general=N_GENERAL, n_mid=N_MID):
     ref_dir = Path(ref_dir)
     parts = []
     for s, n in (("general", n_general), ("mid", n_mid)):
-        df = pd.read_parquet(ref_dir / f"{s}.parquet")
-        df = df[(half_of(df) == h) & (df.phot_g_mean_mag >= HOST_G_MIN)]
+        if h == FRESH:
+            df = pd.read_parquet(ref_dir / f"{s}_c.parquet")
+            df = df[df.phot_g_mean_mag >= HOST_G_MIN]
+        else:
+            df = pd.read_parquet(ref_dir / f"{s}.parquet")
+            df = df[(half_of(df) == h) & (df.phot_g_mean_mag >= HOST_G_MIN)]
         parts.append(df.sample(min(n, len(df)), random_state=int(rng.integers(2**31))).assign(sample=s))
     out = pd.concat(parts, ignore_index=True)
     out["sigma_var_mag"] = sigma_var_from_gaia(out)
@@ -71,7 +77,8 @@ def run_half(ref_dir, h, seed, log=print):
         comps = inject.draw(fam, len(host), rng)
         res, _ = evaluate(inject.apply(host, des, comps), locus)
         res = res.assign(kind="family", family=fam, sample=host["sample"].to_numpy(), g=host.phot_g_mean_mag.to_numpy(),
-                         inj_T=[c[0][0] for c in comps], inj_f=[c[0][1] for c in comps])
+                         inj_T=[c[0][0] for c in comps], inj_f=[c[0][1] for c in comps],
+                         inj_max_excess=injected_max_excess(des, comps))
         rows.append(res)
         log(f"half {h}: {fam} excess {res.g5_excess.mean():.3f}")
     fam_tab = pd.concat(rows, ignore_index=True)
@@ -87,11 +94,19 @@ def run_half(ref_dir, h, seed, log=print):
     nat = []
     for s in ("yso", "ecl"):
         df = pd.read_parquet(Path(ref_dir) / f"{s}.parquet")
-        df = df[half_of(df) == h]
+        df = df[half_of(df) == h] if h != FRESH else df.iloc[:0]
         res, _ = evaluate(df, locus)
         nat.append(res.assign(kind="natural", family=s, g=df.phot_g_mean_mag.to_numpy()))
-    nat = pd.concat(nat, ignore_index=True)
+    nat = pd.concat([n for n in nat if len(n)] or [pd.DataFrame(columns=["family", "g5_z_excess"])], ignore_index=True)
     return fam_tab, dim, nat
+
+
+def injected_max_excess(des, comps):
+    """Largest injected excess over the photosphere in any band (photospheres): below ~0.3 the injection is
+    invisible to 2MASS and WISE whatever the family says."""
+    phot = np.stack([des["a0"].to_numpy(float) * des[f"P_{b}"].to_numpy(float) for b in BANDS], -1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.nanmax(inject.added_flux(des, comps) / phot, axis=1)
 
 
 def false_deficit(dim, geo, z_col=None):
@@ -117,6 +132,12 @@ def summary(fam_tab, dim, nat, z_excess, z_deficit):
     out["false_excess_null_by_sample"] = {s: rate(ex(g)) for s, g in null.groupby("sample")}
     out["excess_recall"] = {f: rate(ex(g)) for f, g in fam_tab[fam_tab.kind == "family"].groupby("family")}
     out["natural_excess"] = {f: rate(ex(g)) for f, g in nat.groupby("family")}
+    fams = fam_tab[fam_tab.kind == "family"]
+    if "inj_max_excess" in fams:
+        # B5' (docs §8): injections no band can see (< 0.3 photospheres anywhere), whatever their family.
+        inv = fams[fams.inj_max_excess < INVISIBLE]
+        out["invisible_flagged"] = rate(ex(inv))
+        out["invisible_flagged_cold"] = rate(ex(inv[inv.family == "cold"]))
     for geo in ("shell", "thin"):
         zmin = dim[f"g5_{geo}_z_min"].fillna(0)
         flag = (zmin >= z_deficit) & ~ex(dim)

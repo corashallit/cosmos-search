@@ -42,6 +42,11 @@ SAMPLES = {
     "general": f"SELECT {COLUMNS} {JOINS} WHERE g.random_index < 1500000 AND g.parallax_over_error > 5",
     "mid": f"SELECT {COLUMNS} {JOINS} WHERE g.random_index < 60000000 AND g.phot_g_mean_mag BETWEEN 9.5 AND 12 "
            "AND g.parallax_over_error > 5",
+    # Fresh stars for the half-C check (docs/arms/energy-budget.md §8): disjoint random_index slices.
+    "general_c": f"SELECT {COLUMNS} {JOINS} WHERE g.random_index >= 1500000 AND g.random_index < 2500000 "
+                 "AND g.parallax_over_error > 5",
+    "mid_c": f"SELECT {COLUMNS} {JOINS} WHERE g.random_index >= 60000000 AND g.random_index < 80000000 "
+             "AND g.phot_g_mean_mag BETWEEN 9.5 AND 12 AND g.parallax_over_error > 5",
     "bright": f"SELECT {COLUMNS} {JOINS} WHERE g.random_index < 600000000 AND g.phot_g_mean_mag < 9.5 "
               "AND g.parallax_over_error > 5",
     "yso": f"SELECT {COLUMNS} {JOINS} JOIN gaiadr3.vari_classifier_result AS v ON v.source_id = g.source_id "

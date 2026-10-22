@@ -167,6 +167,54 @@ Reading:
 - The deficit test does what §1 says: an envelope or swarm big enough to dim a star by ≳ 3% on average is
   excluded (or found) for most stars; an orbit-confined occulter never is.
 
+### Half B (confirmation)
+
+Seed 18161026498280999523, photosphere fitted on half A's reference stars, thresholds from half A.
+
+| criterion | half B | |
+|---|---|---|
+| B1 false excess, null | 47 / 4,500 = 1.04% (Wilson 0.79–1.39%) | pass |
+| B2 false deficit, pooled | 6 / 5,007 = 0.12% (shell 6/1,670, thin 0/3,337) | pass |
+| B3 "excluded above T" cutting a shell emitter | 10 / 1,983 = 0.50% | pass |
+| B4 excess recall yso_disk, rcb_shell | 82.8%, 89.5% | pass |
+| B5 cold family flagged ≤ B1 + 1 point (2.04%) | 2.8% | **fail** |
+
+Reported without criteria: warm_structure 54.9%, debris 3.8%; deficit_shell recall on "none" 3.8%, 31%, 67%, 93%
+for ⟨δ⟩ 10⁻³–10⁻², 10⁻²–0.03, 0.03–0.1, 0.1–0.3; deficit_thin 1/2,064; DPAC YSO 9.6%, ECL 1.2% with an excess.
+
+**Why B5 failed.** The criterion assumed the cold family (20–50 K, f up to 0.3) is invisible to WISE "by
+construction". It is not at its top end: 0.3 of L* at 48 K is several photospheres in W4 around a G ≈ 11 star.
+The 80 cold injections newly flagged (beyond the host's own null flag) have median T 47 K, f 0.15, an injected W4
+excess of 4.8 photospheres, G 10.9. Binned by the injected W4 excess, the flag rate is 1.2% below 0.1 photospheres,
+1.2% at 0.1–0.3, 1.1% at 0.3–1 (the null rate) and 8%, 17%, 25% above 1, 3 and 10. The test found real excesses;
+the criterion was wrong about the physics. Under the rule of §5 this is still a failure, so the fix is
+pre-registered in §8 and tested on fresh stars before G5 is adopted.
+
+### Blind run on the rehearsal candidates (§6)
+
+Scored with the photosphere model fitted on all reference stars and the half-A thresholds. 3,256 of the 4,002 have
+an AllWISE best neighbour in DPAC's table (the rest are scored NaN).
+
+1. **Excess rate**: 130 / 3,078 candidates in G × BP−RP cells the null hosts cover (95% of the candidates' weight)
+   have an excess, 4.2%, against 0.66% for the reweighted null hosts: one-sided binomial p = 7 × 10⁻⁶⁰. Dimmers carry
+   infrared excesses six times as often as stars like them.
+2. **By DPAC class**: LPV 66 / 211 (31%; dusty mass loss), the one RCB and one symbiotic both, ECL 44 / 1,709 (2.6%),
+   SOLAR_LIKE/RS 1 / 345, YSO 0 / 13, unclassified 24 / 1,604 (1.5%), other classes 3 / 120.
+3. **Deficits**: deficit_shell 510, deficit_thin 0. deficit_shell falls mostly on eclipsing binaries (304 ECL,
+   171 unclassified, 28 other, 4 YSO, 3 SOLAR_LIKE/RS).
+4. **Leads (§6.4)**: the 171 unclassified deficit_shell stars are listed in
+   `/mnt/project-files/energy/candidates_g5.parquet`. Read as §6 says: none of them is dimmed by warm dust spread around
+   it. Their tier-1 light curves (4–12 episodes, depths 10–99%) look like eclipses, and an eclipsing companion is the
+   textbook dimmer without waste heat, so they are not anomalies on G5's evidence.
+
+What the blind run says about G5 itself, one step back: **the informative direction is the excess, not the
+deficit.** A deficit_shell flag is what any compact occulter produces, and compact occulters (stars, mostly)
+dominate dimmers, so it cannot promote anything on its own. An excess identifies the dust explanations: LPVs, R CrB,
+symbiotics, and 24 unclassified dimmers and 44 eclipsers with warm (100–1000 K) excesses, which are the natural
+candidates for the rare "disk_occultation" and "debris_transit" classes (ε Aur-like disks, collisional debris). The
+useful pairing for technosignature ranking is deficit_shell with the EB filter and residual search saying "not an
+eclipse": an aperiodic dimmer that is neither eclipse-like nor dust-like.
+
 ## 8. Changes after pre-registration
 
 - 2026-10-22, during half A (before half B or the candidates were run): the first half-A pass (seed not kept)
@@ -176,3 +224,10 @@ Reading:
   its error also carries the variability term). Half A was rerun with a fresh seed; the numbers above are that run.
   The change raised yso_disk recall only from 80% to 82%, because most remaining misses are contaminated photometry,
   found when checking the misses one by one.
+- 2026-10-22, after half B (before any half-C star was scored): **B5 is replaced by B5'**, for the reason given
+  in §7. B5': among family injections whose largest injected excess in any band is below 0.3 photospheres
+  (`cal.INVISIBLE`; computed from the injected components and the host's photosphere), the excess flag rate is at
+  most the null rate + 1 point, both measured on the same stars. It is tested on **half C**: fresh stars from
+  disjoint random_index slices (`reference.SAMPLES` general_c, mid_c), scored with the photosphere fitted on all of
+  A and B, a fresh os.urandom seed and the half-A thresholds. B1–B4 are re-reported on C for completeness but were
+  already decided on B. G5 is adopted as a ranking column and packet context if B5' passes on C.

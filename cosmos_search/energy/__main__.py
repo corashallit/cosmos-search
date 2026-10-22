@@ -34,7 +34,7 @@ def main(argv=None):
     r.add_argument("--out", required=True)
     c = sub.add_parser("cal")
     c.add_argument("--ref", required=True)
-    c.add_argument("--half", choices=("A", "B"), required=True)
+    c.add_argument("--half", choices=("A", "B", "C"), required=True)
     c.add_argument("--out", required=True)
     c.add_argument("--z-excess", type=float, help="half B: the thresholds chosen on half A")
     c.add_argument("--z-deficit", type=float)
@@ -52,7 +52,7 @@ def main(argv=None):
         from . import cal
         out = Path(a.out)
         out.mkdir(parents=True, exist_ok=True)
-        h = 0 if a.half == "A" else 1
+        h = {"A": 0, "B": 1, "C": cal.FRESH}[a.half]
         seed = int.from_bytes(os.urandom(8), "little")
         fam, dim, nat = cal.run_half(a.ref, h, seed)
         for name, df in (("fam", fam), ("dim", dim), ("nat", nat)):
