@@ -811,6 +811,11 @@ held-out decoys also carry other decoys' signals on top of their own, so recall 
 packets as well. The batch-7 result therefore says nothing for or against v6: its failing arms are mostly the
 leak. The context-off batch (78 packets) has the same defect (16 of 28 controls).
 
+**Decision (Cora, 2026-10-22).** The batch-7 v6 verdict is void: v6 is neither adopted nor rejected, and
+`ADOPTED_RULE` stays v5. Batch 7 is not re-run. Testing v6 again needs a fresh, clean blind batch with new held-out
+decoy families and a new control pool, drawn after the fix in this section. Effort moves to single dips and the
+population test first.
+
 **The four queue leads (Stage B verdicts on the raw data).** None is in GCVS, the ASAS-SN variable catalogue or
 VSX other than as Gaia DR3's own `VAR` entry, SIMBAD has nothing beyond Gaia, and none has a DR3 two-body orbit.
 
