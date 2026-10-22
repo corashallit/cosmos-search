@@ -38,6 +38,11 @@ COINCIDENCE_WINDOW = 5.0    # days
 CONTEXT_KEYS = {"allwise_w1mpro": "W1", "allwise_w2mpro": "W2", "allwise_w3mpro": "W3", "allwise_w4mpro": "W4",
                 "allwise_p_cal": "wise_match_p", "2mass_k_m": "Ks", "2mass_p_cal": "twomass_match_p"}
 EXTERNAL_CONTEXT_KEYS = {"blend_tess_contamination": "tess_contamination"}
+# AllWISE gives wNmpro as a 95% upper limit when the band is not detected (ph_qual U, wNsigmpro null). Shown as a
+# plain magnitude, the vetter read WY Cen's W4 limit (10x its photosphere) as a W4 excess (docs/dayone.md,
+# "The v5 lead"), so a limit goes into the packet under its own name.
+WISE_SIGMA_COLS = {"W1": "allwise_w1sigmpro", "W2": "allwise_w2sigmpro", "W3": "allwise_w3sigmpro",
+                   "W4": "allwise_w4sigmpro"}
 G5_CONTEXT_KEYS = energy_run.PACKET_CONTEXT
 EXTERNAL_BANDS = ("ztf_g", "ztf_r", "ztf_i", "TESS")
 P_U_SHORTLIST = 0.25        # pilots 2-3: probes 4/8 and controls 0/26 at P(unexplained) >= 0.25
@@ -110,10 +115,23 @@ def candidate_dicts(queue, ranked, lc_dir, wide=None, plan_map=None, external=No
             for col, name in {**CONTEXT_KEYS, **(EXTERNAL_CONTEXT_KEYS if external is not None else {}), **g5_keys}.items():
                 v = ctx.at[sid, col] if col in ctx.columns else np.nan
                 context[name] = float(v) if pd.notna(v) else float("nan")
+            context = wise_limits(context, ctx.loc[sid])
         out.append({"candidate_id": f"gaia_dr3:{sid}", "arm": "gaia", "source": source, "lightcurves": lcs,
                     "context": context, "role": row["role"],
                     "control_label": row["control_label"] if "control_label" in row and pd.notna(row.get("control_label"))
                     else "eclipsing_binary"})
+    return out
+
+
+def wise_limits(context, row):
+    """Rename each WISE magnitude that is an upper limit (sigma null in AllWISE) to `<band>_upper_limit`. Context
+    tables without the sigma columns are left as they are."""
+    out = dict(context)
+    for band, col in WISE_SIGMA_COLS.items():
+        if col not in row.index or band not in out or not np.isfinite(out[band]):
+            continue
+        if not pd.notna(row[col]):
+            out[f"{band}_upper_limit"] = out.pop(band)
     return out
 
 
