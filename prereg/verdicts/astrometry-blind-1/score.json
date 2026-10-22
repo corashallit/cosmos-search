@@ -1,0 +1,100 @@
+{
+ "natural": {
+  "n": 800,
+  "flagged": 2,
+  "rate": 0.0025,
+  "cp95_upper": 0.00784863941982205,
+  "by_kind": {
+   "binary": {
+    "sum": 0,
+    "size": 222
+   },
+   "blend": {
+    "sum": 2,
+    "size": 55
+   },
+   "dark": {
+    "sum": 0,
+    "size": 24
+   },
+   "giant": {
+    "sum": 0,
+    "size": 45
+   },
+   "lens": {
+    "sum": 0,
+    "size": 9
+   },
+   "single": {
+    "sum": 0,
+    "size": 377
+   },
+   "triple": {
+    "sum": 0,
+    "size": 35
+   },
+   "vim": {
+    "sum": 0,
+    "size": 33
+   }
+  },
+  "labels": {
+   "natural": 777,
+   "neighbour": 19,
+   "unexplained": 2,
+   "instrument": 2
+  }
+ },
+ "nongrav": {
+  "n": 240,
+  "flagged": 44,
+  "by_amp": {
+   "(0.0, 5.0]": {
+    "sum": 2,
+    "size": 58
+   },
+   "(10.0, 20.0]": {
+    "sum": 12,
+    "size": 58
+   },
+   "(20.0, 50.0]": {
+    "sum": 27,
+    "size": 79
+   },
+   "(5.0, 10.0]": {
+    "sum": 3,
+    "size": 45
+   }
+  },
+  "by_kind": {
+   "kick": {
+    "sum": 0,
+    "size": 54
+   },
+   "square": {
+    "sum": 32,
+    "size": 61
+   },
+   "step": {
+    "sum": 12,
+    "size": 60
+   },
+   "thrust": {
+    "sum": 0,
+    "size": 65
+   }
+  },
+  "amp_ge_20": {
+   "n": 79,
+   "flagged": 27,
+   "cp95_lower": 0.2533918565637981
+  }
+ },
+ "instrument": {
+  "n": 60,
+  "labelled_instrument": 53,
+  "flagged_unexplained": 4,
+  "amp_ge_10": 26,
+  "n_amp_ge_10": 29
+ }
+}

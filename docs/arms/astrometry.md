@@ -1,45 +1,364 @@
 # Non-Keplerian astrometry
 
-Narrow secondary arm. Question: does any star move in a way that gravity from unseen companions cannot
-explain?
+Narrow secondary arm. Code: `cosmos_search/astrometry/`. Owner: "Astrometric non-Keplerian filter" thread.
 
-## Premise
+Question: does any source move on the sky in a way that no gravitational or ordinary optical explanation fits, and
+does any orbit or acceleration need a mass that nothing natural supplies?
 
-An isolated system bound by gravity produces sky motion that is a sum of a 5-parameter single-star term
-and Keplerian orbits (plus tiny relativistic and light-travel corrections). Anything else needs another
-cause: a resolved or unresolved blend, a variable component shifting the photocentre, an instrument effect,
-astrometric microlensing, or a force that is not gravity (thrust, radiation pressure on a sail, mass loss).
-The search is model comparison across a nested family, with every natural non-Keplerian effect modelled
-explicitly so that what remains is genuinely unexplained.
+## First principles: what can move, and what it costs
+
+**A star's mass cannot be pushed measurably.** Gaia DR4 measures an acceleration to about 0.2 σ_tr mas/yr² (σ_tr
+the per-transit along-scan error, ~90 transits over 5.5 yr on GOST cadence). A 5σ detection on a G = 12 star at
+10 pc is 0.04 mas/yr² = 6 × 10⁻⁸ m/s². A photon rocket of power L gives thrust L/c, so moving one solar mass that
+hard takes L = M a c ≈ 10⁵ L☉ of collimated light; at 100 pc or G = 17 it is 10⁶ L☉ or more
+(`physics.luminosity_for_acceleration`). A Shkadov thruster on a Sun-like star manages ~10⁻¹² m/s². Brown dwarfs
+gain a factor 20. So a non-Keplerian **mass** motion of a stellar source is excluded by five orders of magnitude,
+whatever builds it.
+
+**The light centroid is cheap to move.** What Gaia measures is the photocentre of the light in its window. That moves
+without any force when light is added, removed or redistributed: an unresolved neighbour pulling the centroid as
+the scan angle turns, one component of an unresolved pair varying (variability-induced motion, VIM), a dark lens
+passing in front (astrometric microlensing), convection cells on a giant, an occulter large enough to unbalance a
+resolved stellar disk, or the instrument. So the arm asks two questions:
+
+1. **Light-centroid motion no natural model explains.** Every natural centroid mover is modelled explicitly, each
+   model must also be physically possible, and only then is the residual examined.
+2. **Gravity that needs too much mass.** Kepler's third law gives the least total mass any gravitational
+   explanation needs. An orbit or acceleration that needs more than the luminous star (and adds no light) has a dark
+   companion; one that needs more than ~100 M☉ is beyond every known stellar remnant. Both are individually
+   valuable and cheap to verify with radial velocities.
+
+A third use falls out of the same fits: **where a dip happens.** For the dimmer arms, the centroid shift during a
+dip says whether the dimming source is the catalogued star or something beside it (below).
 
 ## Data
 
-DR4 epoch astrometry: 1-D along-scan positions per CCD (129.6 × 10⁹ rows, 62 TB), with uncertainties and
-scan angles. The June 2026 pre-release gives 12 sources (single stars of various magnitudes and parallaxes,
-QSOs, and three non-single stars with published Keplerian orbits) and the "Gaia source update" tool that
-fits the default single-star model. The `exogaia` package fits pre-release epoch astrometry too.
+DR4 epoch astrometry: per FoV transit, nine AF CCD along-scan (AL) centroids with errors, scan angle, AL parallax
+factor, flags. The June 2026 pre-release gives 12 sources (single stars, QSOs, HD 114762, Gaia-4, Gaia BH3) in the
+final format, with ESA's `gaia-supdate` fitter. The AL model for a single star is linear (`epoch`, `models`):
 
-## Models, nested
+    w = Δα* sin ψ + Δδ cos ψ + ϖ f_AL + μα* t sin ψ + μδ t cos ψ,   t from J2017.5
 
-1. Single star (5 parameters).
-2. + constant acceleration (7) and jerk (9), as Gaia's own acceleration solutions do.
-3. + one Keplerian, + two Keplerians.
-4. Nuisance terms added to every model:
-   - **Variability-induced motion**: the photocentre of an unresolved pair moves along the pair's axis
-     when one component varies. With simultaneous epoch photometry, VIM predicts residual ∝ ΔF projected on
-     the scan direction. Regress residuals on flux.
-   - **Scan-angle-dependent blending**: residual as a low-order Fourier series in scan angle.
-   - Perspective acceleration for nearby high-radial-velocity stars.
+`epoch.per_transit` combines the CCDs of a transit (40 s, so no source motion within it) and keeps the
+intra-transit χ², which measures whether the per-CCD errors are right for that source independently of any motion
+model.
 
-## Statistics
+**Checked on the real pre-release** (`tests/test_astrometry.py`):
 
-For each source, compare the best model in the family by evidence or an information criterion, then test
-the best model's residuals for whiteness (runs, autocorrelation against time and scan angle). A candidate
-has (a) a significant preference for structure beyond the best Keplerian model and (b) residuals that
-survive the nuisance terms. Calibrate on the pre-release single stars and on residual streams with
-injected non-gravitational accelerations (milestone A3), and apply the same multiple-testing treatment as
-the dimmer arm.
+| check | result |
+|---|---|
+| Our AL parallax factor (Earth-Moon barycentre × 1.01, `geometry`) vs DR4's | max difference 2.5 × 10⁻³ |
+| GOST's predicted scan angle vs DR4's `scan_pos_angle` (matched transits, 12 sources) | 0.002–0.003° |
+| 5p parallaxes | HD 183633 1.001, LSPM J1324+6124 10.105, … (the published values) |
+| BH3 orbit from scratch | P = 4188 d (published 4253 ± 98), e = 0.73, a₀ = 27.1 mas, f_A = 33 M☉ (M_BH³/M² ≈ 31) |
+| HD 114762, Gaia-4 | P = 83.8 d, 579 d (published 83.9, 571) |
+| Intra-transit χ²/dof | 0.95–1.10 for G ≥ 13; 1.2–3.1 for G < 12 (bright stars' per-CCD errors are underestimated) |
+| Single-star residuals | Gaussian: kurtosis 3.1, none beyond 4σ in 631 |
+| Full cascade on all 12 | singles and QSOs → 5p, the three binaries → K1, no non-Keplerian flag, FoV pairs consistent |
+
+Per-transit noise for simulation, fitted to these 12 after the intra-transit inflation:
+σ_tr² = 0.037² + 0.056² 10^{0.4(G−15)} + 0.012² 10^{0.8(G−15)} mas (0.040 at G 12, 0.051 at 14, 0.58 at 19,
+1.3 at 20). G 15–18 is interpolated: no pre-release source sits there.
+
+## The cascade (`detect.cascade`)
+
+Per source, on per-transit abscissae, with the per-transit G flux (DR4 epoch photometry):
+
+1. **Natural family**, each nested on the 5-parameter star, VIM (offset ∝ 1/F, two columns) in every model when
+   the flux varies beyond its errors at 5σ (flux measurement noise moves no light; on a constant star the VIM
+   columns are random regressors that absorb whatever the model misses):
+   5p; 7p and 9p (acceleration, jerk); K1, a photocentre orbit searched on the bare star and on top of an
+   acceleration (circular periodogram 0.5 d – 40 yr, eccentricity × periastron grid, Nelder-Mead); K2, a second
+   orbit on top of K1; **lens**, astrometric microlensing by a dark lens, chosen jointly with the magnification it
+   must also produce in the photometry; **nb**, a point neighbour (separation, angle, flux ratio, relative motion,
+   LSF width) whose pull on the centroid is switched by the window as the scan angle turns. Two nuisance blocks are
+   tried on top of the winner, alone and together: odd scan-angle harmonics (3ψ, 5ψ), and VIM whose lever arm
+   drifts linearly in time (a neighbour moving across the target's LSF changes both the flux it adds and the
+   direction it pulls).
+2. **Physical plausibility.** An orbit is removed from the natural family if, even with 100 M☉ in total, its
+   periastron would be inside the luminous star (eccentric fits that park a periastron spike on one or two
+   outlying transits), or if its mass function exceeds 100 M☉. A lens is removed if the photometry rejects its
+   magnification (Δχ² > 25). The best remaining model by BIC, plus its prior penalty, is the natural explanation.
+   BIC approximates a Bayes factor and ignores how rare a model is; a flexible rare model then absorbs anything.
+   So a lens whose magnification the photometry does not show carries −2 ln(10⁻⁵) = 23: Gaia-era predictions are
+   ~10³ astrometric events among ~10⁹ sources, nearly all by luminous catalogued lenses that vetting checks
+   directly.
+   **Red noise** (`red`): photocentre jitter from convection is noise, with a physical ceiling. Modelled as an
+   isotropic 2-D Matérn-3/2 process seen along each scan (time scale 0.03–3 yr) with rms at most 10% of the
+   angular radius (radius from the luminous star, parallax from the fit), compared by its full Gaussian likelihood.
+   It only exists for stars big enough on the sky for that ceiling to matter, in practice giants; change points
+   on a red-noise winner are tested under the same covariance.
+3. **Noise.** If the fitted VIM is large, flux errors themselves move the centroid; that variance is added and the
+   cascade runs again. Single transits more than 5σ from the best natural model (at most 2% of transits) are
+   dropped and the cascade runs again: a jump or any sustained signal is never one transit.
+4. **Statistics.**
+   - `dbic_cp`: a change point (position jump or proper-motion kick) on top of, or instead of, the best natural
+     model. Positive when the data prefer the change point.
+   - `dbic_implausible`: how much better a physically impossible orbit or lens fits than every possible natural
+     model. Positive when the data demand what gravity or lensing cannot provide.
+   - `gof_z`: Wilson–Hilferty z of the best natural model's χ².
+   - `fov_pair_z`: do the residuals of transit pairs 106.5 min apart (preceding then following field of view) agree?
+     Both fields see the same sky through different optics and calibrations; an astrophysical signal agrees, a
+     per-FoV calibration jump does not. The statistic is the largest |median| of the paired difference over the
+     pairs after (or before) any pair, scaled to ~N(0, 1): a calibration jump shifts every later pair, while a real
+     abrupt change on the sky can land between the two transits of one pair and must not count. This is the arm's
+     instrument veto (plan principle 4).
+   - Also `ruwe` (what the catalogue would show), `k1_fA`, `k1_verdict`, `acc_min_mass`.
+
+## Simulation (`simulate`)
+
+Cadence and geometry from GOST predictions for 1,000 real stars spread over G 10–20.5 (thinned to 85%, the DR4
+used/predicted ratio on the pre-release), each simulated source borrowing one star's position, G and parallax.
+Noise from σ_tr(G), with a per-source error in the assumed σ (log-normal, 8%) and 0.3% of transits as 6σ
+outliers.
+
+Natural classes: single (45%), binary with a luminous companion (28%: Raghavan log-normal periods, q flat, light
+ratio q⁴), dark companion (3%: WD/NS/BH), hierarchical triple (6%), blend (8%: neighbour at 30–1500 mas, flux ratio
+0.01–1, half moving relative to the target at ~5 mas/yr; centroid and flux from a single-LSF fit to the two-Gaussian
+image, hard 1-arcsec window, so a neighbour close enough to pull the centroid also adds flux),
+VIM (4%: unresolved pair at 5–60 mas, periodic or red-noise variability), giant (5%: convective photocentre jitter,
+6% of the angular radius, correlation time 0.1–1 yr), microlensing (1%, with its magnification). The detector's
+neighbour model differs from the simulator's on purpose (small-pull approximation, logistic window edge, free
+amplitude, LSF width fitted) so that calibration does not reward a model that matches the simulator exactly. Likewise
+giant jitter is simulated as an Ornstein–Uhlenbeck process and fitted with a Matérn-3/2 kernel. Blends
+also set the per-transit multi-source flag when the neighbour is more than 120 mas along scan and brighter than
+b = 0.06.
+
+Non-gravitational families, amplitude in units of σ_tr: **step** (centroid jump), **kick** (proper-motion change),
+**thrust** (acceleration switched on for 20–60% of the span), **square** (periodic square-wave displacement, a
+shape no orbit makes). Instrument family: **fov_jump** (a jump in one field of view only).
+
+## Decision rule (`rule.py`, astrometry-v1)
+
+Labels, in order of precedence:
+
+- **instrument**: `fov_pair_z > FOV_Z`. The two fields of view disagree, so the signal is not on the sky.
+- **neighbour**: more than `FRAC_MULTI` of the transits carry Gaia's multi-source flag. The centroid belongs to a
+  known blend; no non-Keplerian claim is made for it. This label is a coverage cost: in DR3 (G < 16, ϖ/σ > 10, a
+  random 1% of the sky) the share of sources with `ipd_frac_multi_peak` > 10% is 0.5% at RUWE < 1, 2% at
+  RUWE 1–1.5, and 19–43% at RUWE 1.5–8, so roughly a third of the high-RUWE prefilter population goes to this
+  label. Those sources need a resolved-neighbour model built from Gaia's own detections of the neighbour, a
+  separate piece of work.
+- **unexplained**: `S = max(dbic_cp, dbic_implausible) > S_MIN` and `S > REL × max(χ²_5p − (n − 5), 1)`. The data
+  prefer a change point or a physically impossible model over every possible natural one, by a margin that is also
+  a non-negligible share of the source's whole signal.
+- **natural**: everything else.
+
+### Pre-registered threshold procedure (written before any calibration run on the frozen code was read)
+
+`FRAC_MULTI = 0.10`, from the DR3 numbers above (single-like stars exceed it at 0.5–2%). The other three are set
+mechanically on the calibration run of the exact code the blind test uses (run 7: 2,400 naturals, seed 51; 1,600 non-gravitational injections, seed 52; 400 FoV jumps,
+seed 53; amplitudes log-uniform 1–50 σ_tr):
+
+1. `FOV_Z`: the smallest of {4, 5, 6, 8, 10} that at most 0.5% of naturals and non-gravitational injections exceed.
+2. `REL`: the largest of {0, 0.01, 0.02, 0.05, 0.1} that lowers recall of non-gravitational injections with
+   amplitude ≥ 20 σ_tr by at most 2 percentage points against `REL = 0` (both at the lowest `S_MIN` on the grid,
+   since `S_MIN` is chosen after `REL`).
+3. `S_MIN`: the smallest of {20, 25, 30, 40, 50, 70, 100, 150, 200} at which at most 0.5% of naturals (all classes
+   pooled, labels applied in the order above) are labelled unexplained.
+
+`scripts/astrometry_thresholds.py` applies this mechanically. If no `S_MIN` on the grid meets step 3, the rule is
+not adopted and the blind test does not run.
+
+### Blind test
+
+A sealed batch (`scripts/astrometry_blind.py`): 800 naturals in the calibration mix, 240 non-gravitational
+injections and 60 FoV jumps, amplitudes log-uniform 3–50 σ_tr, shuffled under anonymous ids, seed from
+`os.urandom`, truth sealed with age to Cora's key and the reveal key. Flags are committed and pushed before the
+reveal step will decrypt. Pass criteria, fixed with the thresholds:
+
+- **P1** natural false-alarm rate: Clopper–Pearson 95% upper bound ≤ 1.5%.
+- **P2** recall of non-gravitational injections with amplitude ≥ 20 σ_tr: at least the calibration run's recall minus 10 points.
+- **P3** instrument: ≥ 80% of FoV jumps with amplitude ≥ 10 σ_tr labelled instrument, and ≤ 10% of all FoV jumps
+  labelled unexplained.
+
+**Result, astrometry-blind-1 (2026-10-22): passed on all three criteria.** Flags archived and pushed in 5b1d072
+before the reveal (code a7f12a6; `prereg/verdicts/astrometry-blind-1/`).
+
+- P1: 2 of 800 naturals flagged (0.25%, 95% upper 0.78% ≤ 1.5%). Both were blends; 19 naturals went to
+  `neighbour`, 2 to `instrument`.
+- P2: 27 of 79 injections at ≥ 20 σ_tr flagged (0.34, 95% lower 0.25; line 0.17). By kind over all amplitudes:
+  square 32/61, step 12/60, kick 0/54, thrust 0/65.
+- P3: 26 of 29 FoV jumps at ≥ 10 σ_tr labelled instrument (0.90 ≥ 0.80); 4 of 60 (6.7% ≤ 10%) labelled
+  unexplained.
+
+The blind batch is drawn from the same simulator as the calibration, so it tests that the frozen thresholds and the
+pipeline generalise to fresh draws and that nothing leaks; it cannot test whether the simulator's natural mix
+resembles the sky. That test is DR4 itself (see "DR4 day one").
+
+## Calibration
+
+### Injections into real abscissae (`scripts/astrometry_real_inject.py`)
+
+The 12 pre-release sources are the only real per-transit data before DR4 (54–93 transits each, G 10–14 mostly).
+Each was run as published (the null) and with 4 injections per kind and amplitude added to its own abscissae, so
+the real noise, cadence and outliers stay in. The pre-release has no per-transit flux; each source gets a constant
+star's flux with DR4-like noise so the lens check works as it will on DR4. Share with S > 20 (S > 50), 48 per cell:
+
+| kind | 5 σ_tr | 10 σ_tr | 20 σ_tr | 50 σ_tr |
+|---|---|---|---|---|
+| step | 0.21 (0.00) | 0.46 (0.02) | 0.60 (0.10) | 0.88 (0.46) |
+| square | 0.31 (0.19) | 0.52 (0.44) | 0.77 (0.71) | 0.90 (0.85) |
+| kick | 0.02 (0) | 0.08 (0) | 0.12 (0) | 0.17 (0.04) |
+| thrust | 0 (0) | 0.06 (0) | 0.12 (0.04) | 0.17 (0.04) |
+
+All 12 nulls have S ≤ 3.0 and FoV-pair z ≤ 3.3, so the cascade explains the real data with natural models (5p, or
+K1 for the three known binaries). The history matters here: before the dark-lens prior, step recall at S > 20 was
+0.46 at 20 σ_tr and 0.81 at 50 σ_tr (microlensing and orbits absorbed steps), and before the VIM gate square-wave
+recall at 20 σ_tr was 0.60.
+
+What this says about the arm. A proper-motion kick or a smooth thrust over 5.5 years is, on 50–100 transits,
+indistinguishable from an acceleration or a long-period orbit by a companion that physics allows (a 20 σ_tr kick on
+a G 12 star at 1 kpc can be mimicked by a companion under 10⁻⁴ M☉). Those signals are outside what any astrometric
+test can claim without other data, and the rule does not try. What remains claimable is abrupt change (steps,
+switching) at large amplitude and orbits that need impossible masses: the Kepler bound, which is where the arm's
+best DR4 prospects sit.
+
+### Linear first stage (`detect.quick`)
+
+On run 7's sources (replayed with the same seeds), `quick_S > 10` keeps 3% of single stars, 13% of binaries and
+29–36% of blends and triples, and recovers 85% of 5–10 σ_tr steps, all steps above 10 σ_tr and 80–100% of square
+waves; kicks and thrusts only at 20–50 σ_tr (57% and 50%). It is a ranking, not a filter.
+
+### Calibration run 7 and the adopted thresholds
+
+`scripts/astrometry_thresholds.py` on run 7 (code 91fe616) gives **FOV_Z = 4, REL = 0, S_MIN = 50,
+FRAC_MULTI = 0.10**. At these thresholds:
+
+Naturals, 2,400 (labels):
+
+| class | n | unexplained | neighbour | instrument |
+|---|---|---|---|---|
+| single | 1,058 | 0 | 0 | 1 |
+| binary | 704 | 5 | 0 | 1 |
+| blend | 178 | 6 | 54 | 1 |
+| triple | 133 | 1 | 0 | 0 |
+| giant | 127 | 0 | 0 | 0 |
+| VIM pair | 104 | 0 | 0 | 0 |
+| dark companion | 78 | 0 | 0 | 0 |
+| microlensing | 18 | 0 | 0 | 1 |
+| **all** | **2,400** | **12 (0.50%, 95% upper 0.81%)** | 54 | 4 |
+
+Blends that Gaia's image parameters would not flag (closer than ~120 mas along scan, or fainter than b = 0.06) are
+half the remaining false alarms. In the real sky their share depends on how common such pairs are among high-RUWE
+stars, which the simulation's 8% blend weight does not pin down.
+
+Recall of non-gravitational injections (share labelled unexplained, by amplitude in σ_tr):
+
+| kind | ≤ 5 | 5–10 | 10–20 | 20–50 |
+|---|---|---|---|---|
+| square | 0.14 | 0.39 | 0.57 | 0.74 |
+| step | 0 | 0.05 | 0.11 | 0.39 |
+| kick | 0 | 0 | 0 | 0.02 |
+| thrust | 0 | 0 | 0.03 | 0.01 |
+
+At amplitude ≥ 20 σ_tr, all kinds pooled: 100 / 367 = 0.27 (95% lower bound 0.23). Instrument: 145 / 162 FoV jumps
+of ≥ 10 σ_tr labelled instrument (0.90), 18 / 400 (4.5%) labelled unexplained; already 81 / 100 at 2–5 σ_tr.
+
+So the blind-test pass lines are: P1 at most 6 of 800 naturals flagged (Clopper–Pearson upper 1.47%); P2 recall at
+≥ 20 σ_tr of at least 0.17; P3 as stated.
+
+## DR3 rehearsal: the Kepler bound on Gaia's own solutions (`kepler_bound`)
+
+DR3 has no epoch astrometry, but it has 169,227 astrometric orbits (`nss_two_body_orbit`) and 338,215 acceleration
+solutions (`nss_acceleration_astro`). `scripts/astrometry_dr3_nss.py` fetches them with the gaia_source and FLAME
+columns; data in `/mnt/project-files/astrometry/dr3/`.
+
+For orbits: a₀ from the Thiele–Innes constants and f_A = (a₀/ϖ)³/P². For accelerations: the least mass that gives
+the acceleration without visible curvature, M_min = (g/ϖ)³ (2T)⁴ / (2π)⁶, and for 9-parameter solutions the
+circular-orbit mass g⁷/(4π² j⁴).
+
+| | f_A or M_min > m₁ ("dark") | > 100 M☉ ("beyond") |
+|---|---|---|
+| orbits | 52 (36 without flags) | 23 (1 without flags) |
+| accelerations | 44 (5 without flags) | 1 (flagged: goodness of fit 8.2) |
+
+What fills the tail:
+
+- **Gaia's scanning law.** 13 of the dark/beyond orbits have periods within 2% of 63.12/k days (k = 1–10), the
+  precession period of the spin axis and its harmonics. 28 are `OrbitalAlternative` solutions with P < 100 d
+  (17 of the 19 orbits above 100 M☉ with ϖ/σ > 5).
+- **Low parallax** (14): f_A goes as ϖ⁻³.
+- **Bad fits** (goodness of fit > 5): 8 orbits, 40 accelerations.
+
+At the top of the unflagged list sit the known black holes: **Gaia BH1** (f_A = 11.1 M☉; it is flagged as a
+half-year alias, P = 185.6 d vs 182.6, which is why aliases are flags and not vetoes: at DR3's frequency resolution
+the two cannot be told apart) and **Gaia BH2** (6.7 M☉). The filter reproduces what took the field a year of
+follow-up in 2022–23, from the catalogue alone and with no tuning on them.
+
+**Leads to test on DR4 day one** (one DataLink pull each; DR4's 66 months cover both):
+
+- **Gaia DR3 4041697094653956736** (G = 11.9, F star, R ≈ 2.2 R☉, ϖ = 1.81 mas, bulge direction l = 356.6°,
+  b = −3.5°). Acceleration9 with g = 43 mas/yr² and jerk 67 mas/yr³: M_min = 230 M☉, circular-orbit mass ≈ 60 M☉ at
+  P ≈ 4 yr. Goodness of fit 8.2 and a crowded field make a spurious solution likeliest. No paper mentions it (ADS
+  full text, 2026-10-22). DR4 will show either an orbit with f_A of tens of M☉ or nothing. Two more reasons for
+  doubt from `gaia_source`: only 16 visibility periods (thin time sampling, where a short-period orbit aliases into
+  acceleration terms), and an RV amplitude of 11 km/s over 34 months, where a ~60 M☉ companion at 4 yr would
+  swing a 1.5 M☉ star by tens of km/s unless the orbit is nearly face-on. RUWE 1.52, no multi-peak transits.
+- **Gaia DR3 4467000291193143808** (G = 15.5): Orbital, P = 1648 d (longer than DR3's 1038-d span), e = 0.88,
+  f_A = 112 M☉. Discussed and set aside in El-Badry et al. 2023 (the BH1 paper). DR4 covers the full period.
+
+## Dip localisation for the dimmer arms (`dips.localise`)
+
+Two unresolved components, the varying one at offset ρ from the steady light: the centroid moves along ρ linearly in
+1/F, with coefficient c, and |c| = ρ × (flux share of the steady part) ≤ ρ. So a fitted c is a lower bound on how
+far the dimming source sits from the rest of the light. For one star dimmed by something in front of it, the
+centroid can move by at most about the star's angular radius θ*.
+
+Gaia measures along scan only, and a dip seen in one visit has one scan angle, so the bound is usually 1-D (along
+that scan). On 3,000 simulated dips on GOST cadence:
+
+| median 95% bound along scan, on-target dips | depth 3–10% | 10–20% | 20–50% |
+|---|---|---|---|
+| G 10–13 | 1.5 mas | 0.52 | 0.22 |
+| G 13–15 | 2.0 | 0.64 | 0.25 |
+| G 15–17 | 4.0 | 1.5 | 0.51 |
+| G 17–19 | 6.0 | 3.2 | 1.4 |
+
+On-target dips are called "neighbour" in 1 of 758. Dips on a neighbour are recognised at ≥ 72% for separations
+30–100 mas at G < 15 and ≥ 92% beyond 100 mas, falling to 3–18% at G > 19. A deep dip on a bright star is placed on
+the target to within ~0.25 mas, which excludes essentially every chance-aligned background star; a significant
+offset smaller than θ* would mean an occulter large enough to unbalance a resolved disk, measurable only for nearby
+giants (θ* of 0.1–10 mas).
+
+## DR4 day one
+
+In dependency order, from the release (2026-12-02):
+
+1. **Kepler bound on the DR4 NSS tables** (`kepler_bound.orbits`, `kepler_bound.accelerations`): catalogue-level,
+   minutes. Classes `dark` (needs a companion heavier than the luminous star and invisible) and `beyond` (needs more
+   than 100 M☉, or periastron inside the star). Flags, not vetoes, for precession and half-year aliases, short
+   `OrbitalAlternative` periods, low parallax, poor fit and crowding. Every unflagged `beyond` source and the top of
+   `dark` get their epoch astrometry pulled through DataLink and the full cascade: the catalogue solution is one
+   model; the cascade asks whether any possible model fits.
+2. **The two DR3 leads**, first in the queue: Gaia DR3 4041697094653956736 (Acceleration9 solution, bulge field
+   l = 356.6°, b = −3.5°, G = 11.9, minimum companion mass 230 M☉ with no visible curvature, goodness of fit 8.2, no
+   literature) and 4467000291193143808 (f_A = 112 M☉ at P = 1,648 d, longer than DR3's span; in the El-Badry et al.
+   2023 BH1 sample). DR4's 66-month span and per-transit data settle both: a real orbit closes, a crowding artefact
+   shows up in the FoV-pair test or the multi-source flag.
+3. **Epoch-level search.** Downloads, not CPU, set the scale: the full cascade costs ~3 s per source per core and
+   the linear first stage (`detect.quick`: change point on the 9-parameter star, VIM and scan-angle terms) 7 ms.
+   Prefilter on the catalogue's RUWE, which the injections show responds to the signals this arm can claim: RUWE >
+   1.4 keeps 80% of 5–10 σ_tr steps and all square waves above 5 σ_tr; RUWE > 2 keeps only 17% of 5–10 σ_tr steps.
+   In DR3 the G < 16, ϖ/σ > 10 sample has ~3.3 M sources at RUWE > 1.5 (55.6 M in all; a 1.1% random sample, 2026-10-22). Order: pull epoch data for
+   RUWE > 1.4, run `quick` on all of it, then the cascade in descending `quick_S`; the decision rule above labels
+   the output, and the top of `unexplained` goes to vetting within the expert budget.
+4. **Neighbour stream**: sources labelled `neighbour` with large S get a resolved-neighbour model seeded from Gaia's
+   own detection of the neighbour (position, G, proper motion). Not built yet.
+5. **Dip localisation for the dimmer arms** (`dips.localise`): every dimmer candidate with epoch astrometry gets an
+   on-target / neighbour / disk-scale verdict and a 95% bound on the light centre's offset during the dips.
 
 ## Log
 
-Record changes of approach here, with the evidence that prompted them.
+- 2026-10-22: arm built from scratch. Reframed from "non-Keplerian motion" to light-centroid motion plus Kepler-bound
+  tension after the energy bound above. First calibration (2,000 naturals) showed blends crossing the window edge
+  and variable unresolved pairs as the dominant false alarms (43% and 66% with Δ BIC > 10 for a change point), and
+  that eccentric orbits and microlensing absorb jumps; added the neighbour model, always-on VIM, flux-error
+  propagation, the lens magnification check, periastron and mass-cap plausibility, 5σ transit clipping and the FoV
+  pair test.
+- 2026-10-22, calibration iterations before the blind test (all on simulations and the 12 real pre-release
+  sources; no blind data existed): run 5 stopped when injections into the real abscissae showed microlensing
+  absorbing steps (added the dark-lens prior and red-noise jitter). Run 6 showed VIM fitting flux noise on constant
+  stars (coefficients of hundreds of mas) and the χ² FoV test tripping when a square wave flipped between the two
+  transits of one pair, which had pushed FOV_Z to 8 and let 11% of FoV jumps through as unexplained. Both fixed;
+  run 7 is the calibration of record.

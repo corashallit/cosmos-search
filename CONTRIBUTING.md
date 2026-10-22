@@ -25,7 +25,7 @@ Several Claude threads work in this repo at once. These rules keep them out of e
 | `cosmos_search/dayone/` | DR4 day-one dress rehearsal | Glue for the day-one chain: DataLink pull order, ranking v0, packet building and scoring (docs/dayone.md) |
 | `cosmos_search/ebfilter/`, `inject/classes/eclipsing_binary.py` | Eclipsing-binary filter for DR4 | Dip-level EB test (compression over periods), its decision layer and calibration (docs/arms/eb-filter.md) |
 | `cosmos_search/residual/` | Simplest-model residual search | Eclipse baseline, flux-level residuals, ranking v1's demotion rule (docs/arms/residual.md) |
-| `cosmos_search/astrometry/` | unassigned | Non-Keplerian arm (A1–A3) |
+| `cosmos_search/astrometry/` | Astrometric non-Keplerian filter | Epoch loader, nested fits, cascade, simulator, decision rule, Kepler bound, dip localisation (A1–A3) |
 | `docs/` | DR4 plan and repo layout | Arms own their page under `docs/arms/` and `docs/infra/` |
 
 To change a package you don't own, message its owner thread first.

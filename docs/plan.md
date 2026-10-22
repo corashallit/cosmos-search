@@ -58,9 +58,9 @@ These apply to every arm and every thread.
 | T1–T4 | FFI access, detector in `dimming/`, injections, 10⁴-target comparison run | I1 | TESS thread |
 | T5 | TESS cross-check of Gaia candidates | T1, G6 | TESS thread |
 | **Astrometry (secondary)** | | | |
-| A1 | Reproduce the 12 pre-release sources with the source-update tool | I1 | unassigned |
-| A2 | Nested model fits (single, acceleration, 1–2 Keplerians) plus VIM and scan-angle terms | A1 | unassigned |
-| A3 | Injections of non-gravitational motion into real residuals | A2 | unassigned |
+| A1 | Reproduce the 12 pre-release sources ✓ (own fit: parallax factors to 2.5e-3, BH3, HD 114762, Gaia-4 orbits recovered) | I1 | Astrometry thread |
+| A2 | Nested model fits ✓ (5p/7p/9p, K1, K2, lens, neighbour, VIM, scan-angle terms) with physical plausibility; DR3 Kepler-bound rehearsal ✓ | A1 | Astrometry thread |
+| A3 | Injections into GOST-cadence simulations and into the 12 real pre-release series; rule astrometry-v1 pre-registered, sealed blind test passed ✓ (docs/arms/astrometry.md) | A2 | Astrometry thread |
 | **Vetting** | | | |
 | V1 | Packet builder, anonymiser and leak scan; FP-class catalogue; Stage 0 cross-candidate coincidence, band consistency and SSO check ✓ | G6 for real input | Vetting thread |
 | V2 | Stage A / Stage B agents, decoy generator, commit-then-reveal, scoring, held-out targets ✓. Known-answer control lists (Gaia: vetting; TESS: `tess/controls.csv`) | V1, truth repo ✓ | Vetting thread |
