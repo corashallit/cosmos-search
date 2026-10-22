@@ -47,7 +47,8 @@ INTERESTING = ("disk_occultation", "debris_transit", "other_astrophysical", "une
 S_SHORTLIST = 0.35
 # The shortlist rule in force for the D2 freeze (docs/dayone.md). score_batch's headline keys, the printed summary
 # and shortlist.csv come from this rule; every other rule is reported under report["rules"] as a comparison.
-ADOPTED_RULE = "v3b"
+# v5 passed all four pre-registered criteria on the confirmatory batch (docs/dayone.md, "Confirmatory result").
+ADOPTED_RULE = "v5"
 # Injected families an ideal v1 shortlist should keep; the others should read as EB, YSO or instrumental.
 TRAIN_FAMILIES = ("dip_train_poisson", "dip_train_primes", "dip_train_geometric")
 SINGLE_FAMILIES = ("grey_dip", "blue_dip", "chromatic_flip")
@@ -288,6 +289,9 @@ def score_batch(out, batch, plan=None, remote="origin"):
     if held.any():
         rep["held_out_recall"] = {r: score_v1(table, flag="aperiodic" if r == "v3b" else None,
                                               targets=HELD_OUT_FAMILIES)["target_decoy_recall"] for r in ("v3a", "v3b")}
+    # Rule v5 (docs/dayone.md, confirmatory batch): S alone, no pipeline flag shortlists (review R16). Its pass
+    # criteria are in dayone.confirm; here it is scored like the others, on the held-out families when present.
+    rules["v5"] = score_v1(table, targets=HELD_OUT_FAMILIES if held.any() else TARGET_FAMILIES)
     rep["rules"] = rules
     adopted = rules[ADOPTED_RULE]
     rep["adopted_rule"] = ADOPTED_RULE

@@ -521,3 +521,8 @@ NEOs within 0.8 au can fall outside the widened cone.
   only afterwards. A reserved pool of 135 controls in 9 DPAC classes, including spotted, RS CVn, chemically
   peculiar stars and AGN, is sealed for one confirmatory batch, along with four held-out injection families and
   pass criteria with stated power (`vetting.power`). The vetter's text no longer quotes calibration figures.
+- 2026-10-22. Rule v5 (S ≥ 0.35; no pipeline flag shortlists, review R16) adopted on the confirmatory batch, the
+  first run under the full pre-registration procedure (verdicts on origin before the reveal). 283 fresh blind
+  packets: held-out recall 22/48 (one-sided lower bound 33% vs the 30% criterion), reserved controls 3/135 (all
+  RS or SOLAR_LIKE), queue sample 1/100. Rule v3b on the same packets: 28/48, 20/135, 8/100. Hiding the pipeline
+  tests cut recall to 18/48. Most misses (15 of 26) and most of the queue (69 of 100) read as EBs (docs/dayone.md).
