@@ -86,7 +86,8 @@ def _job(job):
         return None
     inj = EC._apply(df, sig)
     g = inj[inj.band == "G"]
-    rec = recurrence.search(*recurrence.epochs(EC._lcs(inj, EC.GAIA_BANDS + EC.ZTF_BANDS)))
+    t_, d_, z_, s_ = recurrence.epochs(EC._lcs(inj, EC.GAIA_BANDS + EC.ZTF_BANDS), with_sigma=True)
+    rec = recurrence.search(t_, d_, z_, sigma=s_)
     return {"kind": kind, "family": family, "source_id": sid, "activity_host": a0, "activity": score(g.t, g.flux)[0],
             "testable": bool(rec["testable"]), "aperiodic": bool(rec.get("aperiodic", False)),
             "g_mag": src.get("phot_g_mean_mag")}

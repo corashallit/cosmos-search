@@ -57,7 +57,8 @@ def _job(job):
         inj = EC._apply(df, sig)
     lcs = EC._lcs(inj, EC.GAIA_BANDS + EC.ZTF_BANDS)
     ctx = M.prepare(lcs, src, tt)
-    raw = recurrence.search(*recurrence.epochs(lcs))
+    t_, d_, z_, s_ = recurrence.epochs(lcs, with_sigma=True)
+    raw = recurrence.search(t_, d_, z_, sigma=s_)
     rec = kind in RECURRENCE_KINDS or family in TRAIN_FAMILIES or family == "dip_train_periodic"
     base = {"kind": kind, "family": family, "source_id": sid, "drawn": True, "t_target": tt,
             "raw_testable": bool(raw["testable"]), "raw_aperiodic": bool(raw.get("aperiodic", False)),
