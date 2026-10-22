@@ -24,7 +24,8 @@ Statistics per source (all from the same fits):
 
 import numpy as np
 
-from . import models as M, physics
+from . import models as M
+from . import physics
 from .fit import Source, vim_index
 
 LENS_PHOT_DCHI2 = 25.0
@@ -76,7 +77,7 @@ def cascade(data, full=True):
                 for k, v in data.items()}
         out = _cascade(data, full)
         out.pop("_resid_z")
-        out["n_clipped"] = int(len(bad))
+        out["n_clipped"] = len(bad)
     out.pop("_vim_var", None)
     return out
 
@@ -141,10 +142,13 @@ def _cascade(data, full=True):
     out["dbic_implausible"] = float(max([bf.bic(n) - f.bic(n) for f in implausible.values()] + [-np.inf]))
     # nuisance blocks on top of the winner (non-linear parameters held)
     nuis = src.nuisance()
-    if nuis:
-        cand = src.solve(np.concatenate([bf.columns] + nuis, axis=1), best + "+N", k_extra=bf.k - bf.columns.shape[1])
+    used = []
+    for sub in [[b] for b in nuis] + ([nuis] if len(nuis) > 1 else []):
+        cand = src.solve(np.concatenate([fits[best].columns] + sub, axis=1), best + "+N",
+                         k_extra=fits[best].k - fits[best].columns.shape[1])
         if cand.bic(n) < bf.bic(n):
-            bf = cand
+            bf, used = cand, sub
+    nuis = used
     vi = vim_index(src, bf.columns)
     if vi and src.flux_err is not None:
         c = bf.x[vi]

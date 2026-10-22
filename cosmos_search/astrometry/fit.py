@@ -106,7 +106,12 @@ class Source:
         return np.concatenate(cols, axis=1)
 
     def nuisance(self):
-        return [M.blend(self.psi)]
+        blocks = [M.blend(self.psi)]
+        if self.fixed:
+            # VIM whose lever arm drifts linearly: a neighbour moving across the target's LSF changes both the flux
+            # and the direction the photocentre is pulled
+            blocks.append(self.fixed[0] * (self.t - self.t.mean())[:, None])
+        return blocks
 
     def five(self, extra=()):
         return self.solve(self.base(1, extra), "5p")
@@ -261,26 +266,31 @@ class Source:
         base = self.base(1) if base is None else base
         pj = self._projector(base)
         rho = np.geomspace(20, 1500, 24)
-        th = np.linspace(0, 2 * np.pi, 48, endpoint=False)
-        bb = np.array([0.02, 0.05, 0.1, 0.25, 0.5, 1.0])
-        gr, gt, gb = (a.ravel() for a in np.meshgrid(rho, th, bb, indexing="ij"))
-        blocks = M.neighbour(self.t[None, :], self.psi[None, :], gr[:, None], gt[:, None], gb[:, None])
-        c2 = self._profile(pj, blocks)
+        # theta and theta + pi give the same pull up to sign (the amplitude is free); the chi2 is narrow in theta
+        # (the pull matters only while the scan direction keeps the neighbour within ~2 LSF widths along scan)
+        th = np.linspace(0, np.pi, 72, endpoint=False)
+        bb = np.array([0.01, 0.03, 0.1, 0.3, 1.0])
+        ss = np.array([35.0, 50.0])
+        gr, gt, gb, gs = (a.ravel() for a in np.meshgrid(rho, th, bb, ss, indexing="ij"))
+        c2 = np.concatenate([self._profile(pj, M.neighbour(self.t[None, :], self.psi[None, :], gr[k:k + 4000, None],
+                                                           gt[k:k + 4000, None], gb[k:k + 4000, None],
+                                                           lsf=gs[k:k + 4000, None]))
+                             for k in range(0, len(gr), 4000)])
         i = int(np.argmin(c2))
 
         def unpack(z):
             return (np.exp(np.clip(z[0], np.log(10), np.log(2500))), z[1], 1 / (1 + np.exp(-np.clip(z[2], -30, 30))),
-                    (z[3], z[4]))
+                    (z[3], z[4]), np.exp(np.clip(z[5], np.log(20), np.log(90))))
 
         def obj(z):
-            r, t_, b, dmu = unpack(z)
-            return self._profile(pj, M.neighbour(self.t, self.psi, r, t_, b, dmu)[None])[0]
+            r, t_, b, dmu, s_ = unpack(z)
+            return self._profile(pj, M.neighbour(self.t, self.psi, r, t_, b, dmu, s_)[None])[0]
 
-        z0 = np.array([np.log(gr[i]), gt[i], np.log(gb[i] / (1 - gb[i] + 1e-3)), 0.0, 0.0])
-        res = minimize(obj, z0, method="Nelder-Mead", options={"xatol": 1e-4, "fatol": 1e-4, "maxiter": 800})
-        r, t_, b, dmu = unpack(res.x)
-        cols = np.concatenate([base, M.neighbour(self.t, self.psi, r, t_, b, dmu)], axis=1)
-        return self.solve(cols, "nb", k_extra=5, params={"rho": r, "theta": t_, "b": b, "dmu": dmu})
+        z0 = np.array([np.log(gr[i]), gt[i], np.log(gb[i] / (1 - gb[i] + 1e-3)), 0.0, 0.0, np.log(gs[i])])
+        res = minimize(obj, z0, method="Nelder-Mead", options={"xatol": 1e-4, "fatol": 1e-4, "maxiter": 1200})
+        r, t_, b, dmu, s_ = unpack(res.x if res.fun <= c2[i] else z0)
+        cols = np.concatenate([base, M.neighbour(self.t, self.psi, r, t_, b, dmu, s_)], axis=1)
+        return self.solve(cols, "nb", k_extra=6, params={"rho": r, "theta": t_, "b": b, "dmu": dmu, "lsf": s_})
 
     def changepoint(self, kind, base=None, extra=()):
         """Best step (position jump) or kick (proper-motion change) at a transit time, on top of base."""
@@ -314,7 +324,7 @@ def leverage(src, base, cols):
 
     A high-eccentricity orbit can put its periastron on one or two outlying transits; such an 'orbit' is an outlier
     absorber, not evidence for a companion. Near 1: two transits carry the whole signal."""
-    _, c0 = M.wls(base, src.y, src.s)
+    _ = M.wls(base, src.y, src.s)
     x, _ = M.wls(cols, src.y, src.s)
     xb, _ = M.wls(base, src.y, src.s)
     r0 = (src.y - base @ xb) / src.s

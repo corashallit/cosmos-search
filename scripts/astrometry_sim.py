@@ -14,7 +14,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from cosmos_search.astrometry import detect, simulate as S  # noqa: E402
+from cosmos_search.astrometry import detect
+from cosmos_search.astrometry import simulate as S
 
 GOST = "/mnt/project-files/concurrent/gost_dr4.parquet"
 STARS = "/mnt/project-files/concurrent/sample.parquet"
@@ -44,7 +45,7 @@ def run_shard(job):
         data, truth = S.simulate(rng, _CAD, kind, amp=amp)
         try:
             res = detect.cascade(data)
-        except Exception as e:  # keep the shard; record the failure
+        except Exception as e:  # noqa: BLE001 -- keep the shard; record the failure
             res = {"error": repr(e)[:200]}
         rows.append({**{f"truth_{a}": b for a, b in truth.items()}, **res, "shard": k, "i": i})
     tmp = path.with_suffix(".tmp")

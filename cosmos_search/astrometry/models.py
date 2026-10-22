@@ -80,18 +80,18 @@ NB_WINDOW_MAS = 1100.0
 NB_EDGE_MAS = 50.0
 
 
-def neighbour(t, psi, rho, theta, b, dmu=(0.0, 0.0)):
+def neighbour(t, psi, rho, theta, b, dmu=(0.0, 0.0), lsf=NB_LSF_MAS):
     """AL pull of an unresolved point neighbour at (rho, theta) with flux ratio b <= 1, moving at dmu (mas/yr).
 
     Deliberately not the simulator's pull (simulate._blend_pull, exact two-Gaussian peak with a hard window): the
-    detector uses the small-pull approximation b d g / (1 + b g), g = exp(-d^2 / 4 s^2), with s = 40 mas and a
-    logistic window edge, and its amplitude is a free linear parameter, so a mismatch between the true and assumed
-    image model is absorbed rather than rewarded."""
+    detector uses the small-pull approximation b d g / (1 + b g), g = exp(-d^2 / 4 s^2), with the LSF width s a free
+    parameter (the true image model is unknown) and a logistic window edge, and its amplitude is a free linear
+    parameter, so a mismatch between the true and assumed image model is absorbed rather than rewarded."""
     ox = rho * np.sin(theta) + dmu[0] * t
     oy = rho * np.cos(theta) + dmu[1] * t
     d = ox * np.sin(psi) + oy * np.cos(psi)
     dac = ox * np.cos(psi) - oy * np.sin(psi)
-    g = np.exp(-d ** 2 / (4 * NB_LSF_MAS ** 2))
+    g = np.exp(-d ** 2 / (4 * lsf ** 2))
     win = 1 / (1 + np.exp((np.abs(dac) - NB_WINDOW_MAS) / NB_EDGE_MAS)) / (
         1 + np.exp((np.abs(d) - NB_WINDOW_MAS) / NB_EDGE_MAS))
     return (b * d * g / (1 + b * g) * win)[..., None]

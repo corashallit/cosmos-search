@@ -21,9 +21,9 @@ Non-gravitational families (no force on a mass explains them):
 """
 
 import numpy as np
-import pandas as pd
 
-from . import geometry, models as M
+from . import geometry
+from . import models as M
 
 NOISE_ABC = (0.0372, 0.0557, 0.0117)  # mas; fitted to the pre-release, see module docstring
 RETENTION = 0.85  # DR4 AGIS-used transits / GOST predictions on the pre-release sources (median)
@@ -195,7 +195,12 @@ def simulate(rng, cadence, kind, amp=None, sid=None):
         d_al = ox * np.sin(psi) + oy * np.cos(psi)
         d_ac = ox * np.cos(psi) - oy * np.sin(psi)
         inside = (np.abs(d_al) < WINDOW_MAS) & (np.abs(d_ac) < WINDOW_MAS)
-        w += np.where(inside, _blend_pull(d_al, b), 0.0)
+        x = _blend_pull(d_al, b)
+        w += np.where(inside, x, 0.0)
+        # the same single-LSF fit returns an amplitude that includes the neighbour's overlap with the fitted LSF:
+        # flux and pull rise together, which is what lets VIM-type columns recognise a close or crossing neighbour
+        flux = np.where(inside, np.exp(-x ** 2 / (4 * LSF_SIGMA_MAS ** 2))
+                        + b * np.exp(-(x - d_al) ** 2 / (4 * LSF_SIGMA_MAS ** 2)), 1.0)
         # Gaia's image parameter determination sees a second peak when the neighbour is separated along scan by
         # more than ~one LSF width and not too faint (DR4 transit_proc_flags multi-source; DR3 ipd_frac_multi_peak)
         multi = inside & (np.abs(d_al) > MULTI_PEAK_MAS) & (b > MULTI_PEAK_B)
