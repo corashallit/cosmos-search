@@ -4,7 +4,7 @@ import pyarrow as pa
 import pytest
 
 from cosmos_search.gaia import epoch
-from cosmos_search.slow import detect, drift, known, select
+from cosmos_search.slow import checks, detect, drift, known, select
 
 YEAR = 365.25
 
@@ -161,7 +161,7 @@ def test_alert_lightcurve_and_epochs():
             "2021-01-01 00:00:00,2459215.5,16.00\n")
     lc = known.alert_lightcurve(text, "Gaia16zzz")
     assert list(lc["mag"]) == [15.0, 15.75, 16.0]
-    assert lc["t"].iloc[0] == pytest.approx(2457023.5 - known.GAIA_T0_JD)
+    assert lc["t"].iloc[0] == pytest.approx(2457023.5 - known.BTJD_T0_JD)
     ep = known.alert_epochs(lc)
     assert len(ep) == 2  # 2021 is after DR4's span
     assert ep["frac_corr"].min() < 0 < ep["frac_corr"].max() or 0 in list(ep["frac_corr"])
@@ -212,3 +212,46 @@ def test_adql_one_term_per_bin():
     assert "(phot_g_mean_mag >= 0 AND phot_g_mean_mag < 12 AND" in q and "> 6.5)" in q
     assert "BETWEEN 0 AND 34359738367" in q and "CASE" not in q
     assert "random_index_as < 1000000" in select.sample_adql(1e6)
+
+
+def test_checks_colour_and_wise():
+    c = checks.colour(0.017, 0.001, 0.010, 0.001)
+    assert c["z_grey"] > 3 and abs(c["z_dust"]) < 1
+    assert np.isnan(checks.colour(0.01, 0.001, np.nan, 0.001)["ratio"])
+    rng = np.random.default_rng(12)
+    mjd = np.concatenate([v + rng.uniform(0, 2, 12) for v in np.arange(56700, 60300, 182.6)])
+    flux = 1 + rng.normal(0, 0.003, mjd.size) - 0.02 * ((mjd > 57500) & (mjd < 58200))
+    lc = pd.DataFrame({"mjd": mjd, "band": "W1", "flux": flux, "err": 0.003})
+    w = checks.wise_change(lc, 57500, 58200)
+    assert w["W1"][0] == pytest.approx(-0.02, abs=0.004) and w["W1"][2] >= 3
+    assert np.isnan(w["W2"][0])
+    p = checks.wise_predictions(0.01, 5800)
+    assert p["W1"]["grey"] == -0.01 and p["W2"]["dust_shell_1000K"] > p["W2"]["dust_shell_300K"] > 0
+
+
+def test_checks_after():
+    t = np.r_[np.linspace(1200, 1850, 50), np.linspace(1900, 3000, 50)]  # BTJD, either side of 2020-01-20
+    z = pd.DataFrame({"band": "ztf_g", "t": t, "flux": np.where(t < 1868.5, 1.0, 0.97)})
+    a = checks.after(z)["ztf_g"]
+    assert a["change"] == pytest.approx(-0.03) and a["n_pre"] == 50
+
+
+def test_wise_slope():
+    rng = np.random.default_rng(13)
+    mjd = np.concatenate([v + rng.uniform(0, 2, 12) for v in np.arange(56700, 58000, 182.6)])
+    lc = pd.DataFrame({"mjd": mjd, "band": "W1", "flux": 1 - 0.01 * (mjd - 56700) / 365.25
+                       + rng.normal(0, 0.002, mjd.size), "err": 0.002})
+    s, e, n = checks.wise_slope(lc, 56600, 58100)["W1"]
+    assert s == pytest.approx(-0.01, abs=0.002) and n >= 6 and e < 0.002
+
+
+def test_outburst_is_not_a_trend():
+    # One bright outburst at the start: the median-based visit noise ignores it, the trend error must not.
+    rng = np.random.default_rng(14)
+    t = gaia_times(rng)
+    g = rng.normal(0, 1e-3, t.size)
+    g[t < 60] += 0.5
+    f = detect.star_features(epochs_frame(t, g)).iloc[0]
+    assert abs(f["slope_z"]) < 5
+    slow = detect.star_features(epochs_frame(t, rng.normal(0, 1e-3, t.size) - 0.004 * t / 365.25)).iloc[0]
+    assert slow["slope_z"] < -10

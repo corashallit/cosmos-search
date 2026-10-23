@@ -27,7 +27,7 @@ from cosmos_search.net import get_client
 
 ALERTS_URL = "http://gsaweb.ast.cam.ac.uk/alerts/alerts.csv"
 ALERT_LC_URL = "http://gsaweb.ast.cam.ac.uk/alerts/alert/{name}/lightcurve.csv/"
-GAIA_T0_JD = 2455197.5  # epoch photometry times are days since this JD (TCB)
+BTJD_T0_JD = 2457000.0  # epoch photometry times are BTJD, days since this JD (gaia.epoch.SCHEMA)
 VSX_HATS = "https://data.lsdb.io/hats/vsx/2026-06"
 DR4_START, DR4_END = "2014-07-25", "2020-01-20"
 RADIUS_ARCSEC = 2.0
@@ -107,13 +107,13 @@ def build(tap, alerts_text=None, hats=VSX_HATS):
 
 
 def alert_lightcurve(text, name):
-    """One alert's light curve (first line the alert name, then Date, JD(TCB), averagemag) as name, t (days
-    since GAIA_T0_JD, as epoch photometry) and G mag; points marked untrusted are dropped."""
+    """One alert's light curve (first line the alert name, then Date, JD(TCB), averagemag) as name, t (BTJD, as
+    epoch photometry; TCB and TDB differ by seconds) and G mag; points marked untrusted are dropped."""
     lc = pd.read_csv(io.StringIO(text), skiprows=1)
     lc.columns = [c.strip("#").strip() for c in lc.columns]
     mag = pd.to_numeric(lc["averagemag"], errors="coerce")
     ok = mag.notna()
-    return pd.DataFrame({"name": name, "t": lc.loc[ok, "JD(TCB)"].astype(float).to_numpy() - GAIA_T0_JD,
+    return pd.DataFrame({"name": name, "t": lc.loc[ok, "JD(TCB)"].astype(float).to_numpy() - BTJD_T0_JD,
                          "mag": mag[ok].to_numpy()})
 
 
@@ -133,7 +133,7 @@ def alert_lightcurves(names):
 def alert_epochs(lcs, start=DR4_START, end=DR4_END):
     """Alert light curves inside [start, end] in detect.star_features' input form: G only, fractional flux about
     each star's median, source_id numbering the alerts in order of name."""
-    t0 = (pd.Timestamp(start).to_julian_date() - GAIA_T0_JD, pd.Timestamp(end).to_julian_date() - GAIA_T0_JD)
+    t0 = (pd.Timestamp(start).to_julian_date() - BTJD_T0_JD, pd.Timestamp(end).to_julian_date() - BTJD_T0_JD)
     d = lcs[(lcs["t"] >= t0[0]) & (lcs["t"] <= t0[1])].copy()
     flux = 10 ** (-0.4 * d["mag"])
     d["frac_corr"] = flux / flux.groupby(d["name"]).transform("median") - 1

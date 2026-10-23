@@ -9,7 +9,9 @@ captures photon noise and any variability faster than the gap between visits, an
 slower than that. Every significance below is in units of that sigma, so an active or pulsating star does not
 pass simply for being variable; it passes only if its slow component stands out above its own fast scatter.
 
-- `slope_z`: OLS trend over visit means, in units of its error from sigma_visit.
+- `slope_z`: OLS trend over visit means, in units of its error from the larger of sigma_visit and the scatter
+  about the fitted line. sigma_visit alone (a median) misses rare large jumps: a cataclysmic variable's outburst
+  early in the data, or a long-period variable sampled at a few extreme phases, then reads as a steep fade.
 - `abbe`: von Neumann ratio / 2 of the visit means, ~1 for white noise and ~0 for a smooth change. The same
   statistic DR4 publishes for nearly every source (`all_source_photometry.phot_{g,bp,rp}_abbe_value`), so a
   whole-sky selection on TAP can be calibrated against it.
@@ -116,9 +118,12 @@ def star_features(epochs, col="frac_corr"):
         x = (tv - tv.mean()) / 365.25
         sxx = np.sum(x * x)
         slope = float(np.sum(x * (yv - yv.mean())) / sxx) if sxx > 0 else np.nan
+        resid = yv - yv.mean() - slope * x
+        sig_trend = max(sig, float(np.sqrt(np.sum(resid ** 2) / (len(tv) - 2))))
         s_dim, di, dj, s_br, _, _ = episodes(tv, yv, sig)
-        row = {"source_id": int(sid[a]), "n_visits": len(tv), "sigma_visit": sig, "abbe": abbe(yv),
-               "slope": slope, "slope_z": slope / (sig / np.sqrt(sxx)) if sxx > 0 else np.nan,
+        row = {"source_id": int(sid[a]), "n_visits": len(tv), "t_first": tv[0], "t_last": tv[-1],
+               "sigma_visit": sig, "abbe": abbe(yv),
+               "slope": slope, "slope_z": slope / (sig_trend / np.sqrt(sxx)) if sxx > 0 else np.nan,
                "s_dim": s_dim, "s_bright": s_br, "dim_depth": np.nan, "dim_t0": np.nan, "dim_t1": np.nan,
                "dim_visits": 0, "depth_bp": np.nan, "depth_bp_err": np.nan, "depth_rp": np.nan,
                "depth_rp_err": np.nan}
