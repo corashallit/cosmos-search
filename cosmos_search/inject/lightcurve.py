@@ -293,12 +293,14 @@ def sample(rng, family, t_min, t_max, t_ext=None, allow_held_out=False):
         return Composite(dips)
     if family in SPENT_SLOW:
         return _held_out_slow(rng, family, t_min, t_max, span)
+    if family in SPENT_PERIODIC:
+        return _held_out_periodic(rng, family, t_min, t_max, span)
     if family in HELD_OUT_FAMILIES + HELD_OUT_FAMILIES_V2 + HELD_OUT_SLOW:
         if not allow_held_out:
             raise HeldOutError(f"{family!r} is held out for the confirmatory batch; calibration and tuning may not "
                                "draw it (docs/dayone.md, review fixes)")
         if family in HELD_OUT_SLOW:
-            return _held_out_periodic(rng, family, t_min, t_max, span)
+            return _held_out_periodic_v2(rng, family, t_min, t_max, span)
         return _held_out(rng, family, t_min, t_end, span)
     if family == "repeat_long_dip":
         # The same long dip every period, at least 1.5 cycles in the span: a body or swarm on a long orbit.
@@ -364,10 +366,12 @@ HELD_OUT_FAMILIES_V2 = ("dip_intermittent", "dip_depth_trend", "dip_chromatic_tr
 # Slow shapes that the slow-change detector's first blind test used (docs/arms/slow-changes.md, "Blind test
 # (S6)"). That test has been revealed, so they are spent and free for calibration.
 SPENT_SLOW = ("staircase_fade", "slow_cycle", "accelerating_fade", "fade_with_dips")
-# Repeating slow shapes that the slow period search was not designed or calibrated on, for its blind test
-# (docs/arms/slow-changes.md, "Slow period search"). Same conditions as the held-out sets above. Its calibration
-# draws PERIODIC_FAMILIES.
-HELD_OUT_SLOW = ("sawtooth_dips", "drifting_cycle", "uneven_dips", "paired_dips")
+# Repeating slow shapes of the period search's first blind test (slow-blind-2), spent since its reveal.
+SPENT_PERIODIC = ("sawtooth_dips", "drifting_cycle", "uneven_dips", "paired_dips")
+# Repeating slow shapes that the improved period search was not designed or calibrated on, for its blind test
+# (docs/arms/slow-changes.md, "Slow period search"). Same conditions as the held-out sets above. Calibration draws
+# PERIODIC_FAMILIES and the spent shapes.
+HELD_OUT_SLOW = ("intermittent_dips", "growing_dips", "jittered_dips", "triple_dips")
 PERIODIC_FAMILIES = ("repeat_long_dip", "slow_cycle")
 
 
@@ -378,6 +382,56 @@ def _periodic_dips(rng, t_min, t_max, period, depth, dur, ingress, egress, beta=
     return [Dip(t0=float(t), covering=float(depth * k), ingress=ingress, egress=egress,
                 flat=max(dur - ingress - egress, 0.0), beta=beta)
             for t, k in zip(times, scale)]
+
+
+def _held_out_periodic_v2(rng, family, t_min, t_max, span):
+    """Repeating long dips that break strict repetition in other ways than the spent shapes."""
+    p_hi = max(41.0, span / 1.5)
+    beta = _chromatic(rng)
+    period = _loguniform(rng, 40.0, p_hi)
+    depth = _loguniform(rng, 0.003, 0.1)
+    if family == "intermittent_dips":
+        # A strict period, but each cycle's dip is there only with probability 0.4-0.8 (at least two are).
+        dur = period * _loguniform(rng, 0.05, 0.4)
+        ing = dur * rng.uniform(0.1, 0.5)
+        dips = _periodic_dips(rng, t_min, t_max, period, depth, dur, ing, ing, beta)
+        keep = rng.random(len(dips)) < rng.uniform(0.4, 0.8)
+        if keep.sum() < 2:
+            keep[rng.choice(len(dips), 2, replace=False)] = True
+        return Composite([d for d, k in zip(dips, keep) if k])
+    if family == "growing_dips":
+        # The depth grows or shrinks steadily from cycle to cycle, by a factor of 3-10 across the span.
+        dur = period * _loguniform(rng, 0.05, 0.4)
+        ing = dur * rng.uniform(0.1, 0.5)
+        dips = _periodic_dips(rng, t_min, t_max, period, depth, dur, ing, ing, beta)
+        factor = _loguniform(rng, 3.0, 10.0) ** float(rng.choice([-1, 1]))
+        for d in dips:
+            d.covering = float(depth * factor ** (np.clip((d.t0 - t_min) / span, 0, 1) - 1) if factor > 1
+                               else depth * factor ** np.clip((d.t0 - t_min) / span, 0, 1))
+        return Composite(dips)
+    if family == "jittered_dips":
+        # Nearly periodic: each dip's time moves by up to 5-20% of the period and its length by 0.5-1.5x.
+        dur0 = period * _loguniform(rng, 0.05, 0.3)
+        jitter = rng.uniform(0.05, 0.2)
+        parts = []
+        for t in np.arange(t_min - rng.uniform(0, period), t_max + period, period):
+            dur = dur0 * rng.uniform(0.5, 1.5)
+            ing = dur * rng.uniform(0.1, 0.5)
+            parts.append(Dip(t0=float(t + period * jitter * rng.uniform(-1, 1)), covering=depth, ingress=ing,
+                             egress=ing, flat=max(dur - 2 * ing, 0.0), beta=beta))
+        return Composite(parts)
+    if family == "triple_dips":
+        # Three long dips per period at fixed phases, 20-100% as deep as the first: a group of bodies on one orbit.
+        dur = period * _loguniform(rng, 0.03, 0.12)
+        ing = dur * rng.uniform(0.1, 0.5)
+        first = _periodic_dips(rng, t_min, t_max, period, depth, dur, ing, ing, beta)
+        parts = list(first)
+        for shift in np.sort(rng.uniform(0.15, 0.85, 2)) * period:
+            ratio = rng.uniform(0.2, 1.0)
+            parts += [Dip(t0=d.t0 + shift, covering=depth * ratio, ingress=ing, egress=ing, flat=d.flat, beta=beta)
+                      for d in first]
+        return Composite(parts)
+    raise ValueError(f"unknown family {family!r}")
 
 
 def _held_out_periodic(rng, family, t_min, t_max, span):
