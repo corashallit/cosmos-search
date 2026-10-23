@@ -36,7 +36,8 @@ from cosmos_search.slow.rule import mag_group
 SHARE = 0.001
 # Mirror (false-alarm) statistic for each score of a rule: the threshold on the score is the SHARE point of the
 # mirror among quiet stars.
-MIRRORS = {"s": "s_rise", "z": "slope_z", "rep": "s_rep_bright"}
+# s_rise_ns is s_rise with change dates shared by neighbours set aside (rule_v3).
+MIRRORS = {"s": "s_rise_ns", "z": "slope_z", "rep": "s_rep_bright"}
 
 
 def quiet_ids(epochs, max_ratio=1.5, max_extreme=8.0, min_n=20):
@@ -89,9 +90,9 @@ def thresholds(stats, mirrors=None, share=SHARE, n_boot=200, seed=0):
         for key, col in mirrors.items():
             if col not in d:
                 continue
-            x = d[col].to_numpy(float)
-            x = x[np.isfinite(x)]
-            if not len(x):
+            # A missing score (too few visits, or set aside as shared) counts as not passing.
+            x = np.nan_to_num(d[col].to_numpy(float), nan=-np.inf)
+            if not np.isfinite(x).any():
                 continue
             v = float(np.quantile(x, 1 - share))
             boot = [np.quantile(rng.choice(x, len(x)), 1 - share) for _ in range(n_boot)]

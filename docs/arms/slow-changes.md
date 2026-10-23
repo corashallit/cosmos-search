@@ -54,12 +54,12 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 | # | Milestone | Depends on | Status |
 |---|---|---|---|
 | S1 | Known answers matched to Gaia, DR4 columns checked | — | Done 2026-10-23 (below) |
-| S2 | Drift correction from neighbours (`drift`), tested on stars it was not fitted on | — | Magnitude/colour drift done 2026-10-23; sky term open (below) |
+| S2 | Drift correction from neighbours (`drift`), tested on stars it was not fitted on | — | Magnitude/colour drift done 2026-10-23; sky term measured 2026-10-23 (below): small, kept as a check; shared-date test in slow-v3 |
 | S3 | Trend, curvature and long-episode detector; fake slow fades and long dips for recall; brightenings as the false-alarm estimate | S2 | First version done 2026-10-23 (below) |
 | S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | Done 2026-10-23 (below); download routes in docs/infra/dr4-downloads.md |
 | S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | First version done 2026-10-23 (below); position needs DR4 epoch astrometry |
 | S6 | Pre-registered blind test of the detector: new fake shapes, fresh stars; known variable classes measured openly | S4, S5 | Run 2026-10-23 (below): fails on repeated slow cycles; Cora chose a slow period search, whose own blind test is written down (below) |
-| S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | |
+| S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | slow-v3 (fades read in time order, below); release-day thresholds from DR4's own stars ready (below) |
 | S8 | Verify top candidates: one new brightness measurement each; per-visit spectra for the best | S7 | |
 
 ## Known answers (S1)
@@ -491,8 +491,141 @@ What was learned:
 No variant is worth a third blind test, and Cora chose to keep slow-v2 as frozen (2026-10-23), with the recall of slow-blind-2 stated as its
 weakness on irregular repeats.
 
+## Fades in time order (slow-v3)
+
+Changes after slow-v2, made on 2026-10-23 to fix a misreading the blind tests reported, not to chase recall on a
+shape; the shapes searched for are the same. `cosmos_search/slow/rule_v3.py`, files in `prereg/rules/slow-v3/`.
+Checked with `scripts/slow_detect_check.py` and `scripts/slow_fade_compare.py` on shard 0/10 (where the thresholds
+are set) and on shard 3/10, whose stars no part of the slow-change work had used, with shard 0's thresholds.
+
+**What was wrong.** The episode score measures runs of visits against the star's median, so it takes whatever
+level the star spends most of its visits at as its normal one. A star that brightens for good partway through and
+spends more than half its visits bright shows its earlier visits as a dimming episode. At signal-to-noise ≥ 20,
+53% of late-starting brightenings were flagged as fades on shard 0 (16% in slow-blind-1, counted over all
+signal-to-noise). Read the other way round, a star that fades early and spends most visits faint shows its early
+visits as a brightening, and only the trend score could find it.
+
+**The change** (`detect.ordered_episodes`). Runs are read in time order. A faint run that opens the light curve,
+or follows visits that are themselves faint by more than half the run's depth, means the star got brighter: it
+scores as a rise (`s_rise`). A bright run that opens the light curve means the star got fainter afterwards: it
+scores as a fade (`s_fade`, kind "drop"). Runs with normal visits before them score as before ("dip", or "fade"
+when they reach the last visit). The two scores are exact mirror images (flipping a light curve swaps them; a test
+checks it), so rises stay the false-alarm estimate for fades.
+
+**What it costs.** A dimming already under way at the first visit and over inside the span looks exactly like a
+brightening; Gaia alone cannot tell which level is normal. On shard 0 these were 21% of the fake long dips (their
+start is drawn up to half a duration before the first visit, and durations reach 1,500 days against DR3's ~1,000)
+and every one of the long dips the change lost. They now go to a second list (`early`: faint at the first visit,
+normal later, change date not shared), which brightening stars also land in. Surveys from before 2014
+(Pan-STARRS, Catalina, ASAS-SN's first years) tell the two apart for any star on it. DR4's span is twice DR3's,
+so fewer dips straddle its start.
+
+**An instrument effect it uncovered.** With brightenings no longer absorbing them, 50 quiet shard-0 stars at
+G < 19 showed a drop in the 1% tail, against 24 jumps. Most are faint (G 18-19) red stars in the Galactic bulge
+and plane, and they drop on the same visit as hundreds of other stars in the same level-6 pixel (~0.84 deg²): on
+BTJD 269.2 (2015-09-07), 383 of 6,103 stars in one bulge pixel drop by more than s = 4, and other pixels show the
+same at their own dates. A step shared by a crowd on one scan is instrumental (crowding, which depends on scan
+direction, is the likely cause); a real occulter changes one star. `sky.shared_changes` counts, for each star,
+the other stars in its pixel whose change (in either direction, s > 4) falls within 1.5 days of its own, and sets
+the change aside when that count is beyond chance (Poisson probability below 10⁻³ given the pixel's strong
+changes spread over its distinct dates). It applies to both directions, so the mirror stays a mirror. On DR4 the
+test runs over the selected stars of each pixel; crowd artefacts pass the selection together, so they are there to
+be counted. The old median score had hidden the effect by counting these stars as brightenings, which raised its
+threshold: its episode score flagged 4-5 quiet stars against 12-18 mirror brightenings, so it ran below the
+intended 0.1% and lost recall for it.
+
+**Thresholds** (0.1% of quiet stars of both halves of shard 0, mirror with shared dates set aside): G < 19,
+s_fade > 6.04 (was s_dim > 7.41 in slow-v1, set on half B only); G ≥ 19, 17.09. The trend thresholds (3.94, 7.84)
+and the period search (s_rep > 7.55, 9.71) are unchanged.
+
+**Result.** Found at signal-to-noise ≥ 20, G < 19 (episode and trend scores; the period search is unchanged):
+
+| | Shard 0, median score (slow-v1/v2) | Shard 0, slow-v3 | Shard 3 (fresh), median score | Shard 3 (fresh), slow-v3 |
+|---|---|---|---|---|
+| Late-starting brightening flagged as a fade | 53% | 2.5% | 57% | 2.0% |
+| Late-starting fade | 84% | 90% | 84% | 92% |
+| Steady fade | 100% | 100% | 100% | 100% |
+| Long dip, fading list | 85% | 68% | 83% | 68% |
+| Long dip, fading or `early` list | | 86% | | 83% |
+
+At signal-to-noise 10-20 slow-v3 finds 67% of late-starting fades (shard 3) against 62%, and 29% of long dips
+against 27%.
+
+Quiet stars at G < 19 flagged as fading by the episode score: shard 0, 11 of 11,994 (mirror 13); shard 3, 18 of
+14,139 (mirror 11), so the episode score now runs at the intended 0.1%. With the trend score added (whose own
+fades outnumber its brightenings, 19 against 12 and 26 against 15, as among DR3 variables generally), 0.23% and
+0.31% of quiet stars are flagged, against 0.19% and 0.22% with the median score and against the blind tests'
+bound of 0.5-0.6%. Among all DR3 light curves at G < 19, the fading list holds 4.8% of stars (4.6% on shard 3)
+and the `early` list 1.2% (1.1%); these stars are DR3's variables, so neither share carries over to DR4's
+mostly quiet stars.
+
+The `early` list at the same threshold flags 1-4 quiet stars per shard (mirror: 5).
+
+## Sky term (S2)
+
+`slow/sky.py`. The magnitude and colour drift leaves a sky pattern in quiet stars' trends (S2). Gaia observes every
+star in a small patch in the same scans, so the pattern was modelled as an offset per patch and visit, measured
+from the patch's other stars, as differential photometry uses comparison stars: a precision-weighted mean of the
+stars' visit deviations (each star weighted by its own scatter, stars more than 4σ off left out), shrunk towards
+zero by τ² / (τ² + error²), with τ the scatter of true offsets found by maximum likelihood. Each star is corrected
+from the stars of the other half, so it never corrects itself.
+
+On shard 0, at level 6 (~0.84 deg², median 65 stars per pixel; DR3 has too few quiet stars per pixel, 2-5, so every
+star with a light curve served, weighted by its scatter): τ = 0.13% in G, 0.20% in BP and 0.09% in RP per visit
+(median 30 comparison stars per pixel and visit), real but small. The correction lowers the sky pattern in quiet stars' trends from 1.44 to 1.21 times what
+shuffling stars between pixels gives (p 0.01). At 0.1% false alarms it moves recall by under one point and the
+quiet stars flagged by one or two. It is not in slow-v3. It costs neighbours' light curves for every star, and on
+DR4 those come with the sample only when the sample is whole sky patches. It stays available as a check for
+candidates (`sky.offsets` on a candidate and its fetched neighbours), next to the shared-date test above, which is
+the part of the sky term that changes results.
+
+## Release-day thresholds
+
+`slow/release.py`, `scripts/slow_release_thresholds.py`. Every threshold above comes from DR3's quiet stars, which
+are DR3 variables that happen to be quiet. On release day the same 0.1% false-alarm level is set again from DR4's
+own stars:
+
+1. Sample: every star in a few hundred random small sky patches (`release.patch_ranges`, HEALPix level 9,
+   ~0.013 deg² each). Each star has the same chance of being drawn whatever the sky density, and its neighbours
+   come with it for the shared-date test. Fetched by source_id range, which is how the AIP mirror is fast
+   (`epoch.mirror_epoch_photometry`) and how the bulk files are split (docs/infra/dr4-downloads.md).
+2. Quiet stars from the light curves themselves (`release.quiet_ids`, the S2 definition).
+3. Drift tables fitted on each half of the quiet stars, each correcting the other half's stars, so no star is
+   corrected with a table it helped fit and both halves count towards the thresholds (half B alone left ~6 stars
+   beyond the 0.1% point on DR3, and thresholds moved by ±1 between runs). The search itself uses the table
+   fitted on all quiet stars.
+4. Scores for every star (shared-date test), period search for quiet stars, then the 0.1% points of the mirrors
+   per magnitude range with the count beyond them and a bootstrap 16-84% interval (`release.thresholds`).
+5. Rule files in slow-v3's format plus `release.json` (`release.write_rule`).
+
+How many: the false-alarm rate at a threshold set from N quiet stars is known to about 1/√(0.001 N), so ±20%
+needs 25,000 quiet stars per magnitude range (`release.stars_needed`). At G < 19 that is about 30,000 stars with
+light curves; at ~1,500 light curves per second from the AIP mirror, under a minute; at ESA DataLink's 0.3-1.5 per
+second, 6-28 hours.
+
+**Checked on DR3** (shard 0, run end to end by the script, 2026-10-23): 1,004,731 stars, 11,657 quiet at G < 19
+and 2,212 at G ≥ 19 by the light-curve definition (the frozen thresholds used 11,994 and 2,389 by the DR3 features'
+definition). Thresholds with their bootstrap 16-84% intervals, against the frozen slow-v3 values:
+
+| | Release-day code | Interval | Frozen |
+|---|---|---|---|
+| G < 19, episode (s_fade) | 5.87 | 5.65-6.41 | 6.04 |
+| G < 19, trend (slope_z) | 3.82 | 3.78-3.95 | 3.94 |
+| G < 19, repeat (s_rep) | 7.55 | 6.97-7.69 | 7.55 |
+| G ≥ 19, episode | 15.33 | 14.82-16.73 | 17.09 |
+| G ≥ 19, trend | 7.64 | 7.38-7.73 | 7.84 |
+| G ≥ 19, repeat | 10.05 | 9.00-11.52 | 9.71 |
+
+The code reproduces the frozen values within their sampling noise, apart from the faint episode threshold, which
+sits on 3 stars beyond the 0.1% point. That is the case for ~25,000 quiet stars per magnitude range on release day.
+
 ## Log
 
+- **2026-10-23.** Fades in time order (slow-v3, above): late-starting brightenings no longer pass as fades (53% →
+  2-2.5% at signal-to-noise ≥ 20), late-starting fades found 90-92% instead of 84%, on shard 0 and on fresh shard 3.
+  Dips already under way at the first visit move to a second list. A crowd of stars stepping on the same scan in
+  crowded fields, hidden before, is now set aside by a shared-date test. A sky offset per patch and visit is real
+  (0.13% in G) but changes results by under a point. Release-day threshold code ready and checked on DR3 (above).
 - **2026-10-23.** Ten ways to improve the slow period search (above): none worth a third blind test. BP and RP
   agreement adds 3-10 points of recall but 50-80% more flagged stars; dips that repeat every few visits inflate
   the noise estimate, and no estimate tried avoids that without raising the threshold as much. slow-v2 stays

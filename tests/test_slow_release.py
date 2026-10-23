@@ -115,3 +115,32 @@ def test_mirror_rows_to_table():
     g5 = lc[(lc["source_id"] == 5) & (lc["band"] == "G")]
     assert list(g5["flux"]) == [100.0, 101.0] and list(g5["flags"] & epoch.FLAG_VARI_REJECT) == [0, 1]
     assert "source_id IN (1, 2)" in epoch.mirror_adql(source_ids=[1, 2])
+
+
+def test_shared_changes_flags_a_crowd_stepping_on_one_date():
+    rng = np.random.default_rng(7)
+    n = 300
+    st = pd.DataFrame({"s_fade": rng.normal(0, 2, n), "s_rise": rng.normal(0, 2, n),
+                       "dim_t0": rng.choice(np.arange(0, 1000, 40.0), n), "rise_t0": rng.choice(np.arange(0, 1000, 40.0), n)})
+    st.loc[:29, "s_fade"], st.loc[:29, "dim_t0"] = 10.0, 520.0
+    out = sky.shared_changes(st, np.zeros(n))
+    assert out["shared_fade"][:30].all() and out["shared_fade"][30:].mean() < 0.05
+    one = pd.DataFrame({"s_fade": [10.0, 10.0], "s_rise": [0.0, 0.0], "dim_t0": [520.0, 600.0], "rise_t0": [np.nan] * 2})
+    t = sky.shared_changes(st, np.zeros(n), one, np.zeros(2))
+    assert list(t["shared_fade"]) == [True, False]
+
+
+def test_rule_v3_flags_fades_and_lists_early_faint_stars_apart():
+    from cosmos_search.slow import rule_v3
+
+    thr, rep, table = rule_v3.load()
+    assert set(thr) == {"G<19", "G>=19"} and len(table)
+    st = pd.DataFrame({"source_id": [1, 2, 3, 4], "gbin": np.int8(5), "n_visits": 30, "sigma_visit": 1e-3,
+                       "abbe": 0.5, "s_fade": [20.0, 0.0, 0.0, 0.0], "s_rise": [0.0, 20.0, 20.0, 0.0],
+                       "fade_kind": ["dip", "", "", ""], "rise_kind": ["", "jump", "bump", ""],
+                       "slope_z": [0.0, 0.0, 0.0, -10.0], "s_rep": 0.0, "dim_t0": [100.0, np.nan, np.nan, np.nan],
+                       "rise_t0": [np.nan, 300.0, 500.0, np.nan]})
+    out = rule_v3.apply(st, thr, rep)
+    assert list(out["flagged"]) == [True, False, False, True]
+    assert list(out["early"]) == [False, True, False, False]
+    assert list(out["by"]) == ["episode", "", "", "trend"]

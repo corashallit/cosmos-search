@@ -10,8 +10,9 @@ sky patches (`release.patch_ranges`), so that each star has the same chance of b
 neighbours are there to correct it.
 
 Steps (cosmos_search.slow.release): quiet stars from the light curves; drift tables fitted on each half of them,
-each correcting the other half; with --sky, sky offsets per HEALPix pixel at that level from the quiet stars of
-the other half (slow.sky); the detector and period-search scores of every quiet star; the 0.1% points of their
+each correcting the other half's stars (and every other star by its own half); with --sky, sky offsets per HEALPix pixel at that level from the quiet stars of
+the other half (slow.sky); the detector scores of every star (for the shared-date test, rule_v3.shared) and the period-search scores of quiet
+stars; the 0.1% points of their
 brightening mirrors per magnitude range, with the stars beyond them and bootstrap intervals; the rule files.
 --check-against prints the change from an existing rule's thresholds.
 """
@@ -26,22 +27,38 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from cosmos_search.slow import detect, drift, period, release, sky
+from cosmos_search.slow import detect, drift, period, release, rule_v3, sky
 
 _STATE = {}
 
 
-def _load(path):
+def _quiet(path):
+    """Pass 1: quiet stars' epochs from one file."""
     ep = drift.normalise(pq.read_table(path))
     q = release.quiet_ids(ep)
     return ep[ep["source_id"].isin(q)], q
 
 
-def _score(job):
-    ep = job
+def _score(path):
+    """Pass 2: every star of one file, drift-corrected by the other half's table (and sky-corrected), scored by
+    the detector; quiet stars also by the period search."""
+    cells, tables, quiet = _STATE["cells"], _STATE["tables"], _STATE["quiet"]
+    ep = drift.normalise(pq.read_table(path))
+    ep = ep[ep["source_id"].isin(cells.index)]
+    half = drift.half(ep["source_id"].to_numpy())
+    corr = np.zeros(len(ep))
+    for h in (0, 1):
+        m = half == h
+        corr[m] = drift.drift_at(ep[m], cells, tables[1 - h])
+    ep = ep.assign(frac_corr=ep["frac"].to_numpy() - corr)
+    if _STATE.get("sky") is not None:
+        off, _ = sky.correct_by_halves(ep, ep["source_id"].unique(), _STATE["sky"])
+        ep = ep.assign(frac_corr=ep["frac_corr"].to_numpy() - off)
     out = detect.star_features(ep)
     if _STATE.get("period"):
-        out = out.merge(period.star_features(ep), on="source_id", how="left")
+        qe = ep[ep["source_id"].isin(quiet)]
+        if len(qe):
+            out = out.merge(period.star_features(qe), on="source_id", how="left")
     return out
 
 
@@ -58,39 +75,39 @@ def main(argv=None):
     ap.add_argument("--check-against", help="an existing rule directory to compare with")
     ap.add_argument("--label", default="", help="what the sample is, for release.json")
     a = ap.parse_args(argv)
-    _STATE["period"] = not a.no_period
 
     files = sorted(Path(a.lightcurves).glob("*.parquet"))[: a.limit or None]
     with Pool(a.workers) as pool:
-        loaded = pool.map(_load, files, chunksize=1)
-    ep = pd.concat([x[0] for x in loaded], ignore_index=True)
+        loaded = pool.map(_quiet, files, chunksize=1)
+    qep = pd.concat([x[0] for x in loaded], ignore_index=True)
     quiet = np.concatenate([x[1] for x in loaded])
     aux = pd.read_parquet(a.aux, columns=["source_id", "phot_g_mean_mag", "bp_rp"])
-    aux = aux[aux["source_id"].isin(quiet)]
-    cells = drift.star_cells(aux)
-    ep = ep[ep["source_id"].isin(cells.index)]
+    ids = set()
+    for f in files:
+        ids.update(pq.read_table(f, columns=["source_id"])["source_id"].to_numpy().tolist())
+    cells = drift.star_cells(aux[aux["source_id"].isin(ids)])
     quiet = np.intersect1d(quiet, cells.index.to_numpy())
-    print(f"{len(files)} files, {len(quiet)} quiet stars, {len(ep)} epochs")
+    qep = qep[qep["source_id"].isin(quiet)]
+    half = drift.half(qep["source_id"].to_numpy())
+    tables = {h: drift.fit(qep[half == h], cells) for h in (0, 1)}
+    table = drift.fit(qep, cells)
+    print(f"{len(files)} files, {len(cells)} stars, {len(quiet)} quiet")
 
-    ep, table = release.cross_corrected(ep, cells, quiet)
-    if a.sky is not None:
-        off, _ = sky.correct_by_halves(ep, quiet, a.sky)
-        ep = ep.assign(frac_corr=ep["frac_corr"].to_numpy() - off)
-
-    # Score in chunks of whole stars.
-    ep = ep.sort_values(["source_id", "band", "t"], kind="stable")
-    ids = np.array_split(quiet, max(1, a.workers * 8))
-    sid = ep["source_id"].to_numpy()
-    chunks = [ep.iloc[np.searchsorted(sid, c[0], "left"):np.searchsorted(sid, c[-1], "right")] for c in ids if len(c)]
+    _STATE.update(cells=cells, tables=tables, quiet=set(map(int, quiet)), sky=a.sky, period=not a.no_period)
     with Pool(a.workers) as pool:
-        stats = pd.concat(pool.map(_score, chunks, chunksize=1), ignore_index=True)
+        stats = pd.concat(pool.map(_score, files, chunksize=1), ignore_index=True)
     stats = stats.join(cells, on="source_id")
-    mirrors = dict(release.MIRRORS) if _STATE["period"] else {k: v for k, v in release.MIRRORS.items() if k != "rep"}
-    thr = release.thresholds(stats, mirrors, share=a.share)
-    meta = {"label": a.label, "lightcurves": str(a.lightcurves), "files": len(files), "quiet_stars": int(len(quiet)),
-            "sky_level": a.sky, "mirrors": mirrors, "stars_needed_for_20pct": release.stars_needed(a.share, 0.2)}
+    sh = rule_v3.shared(stats)
+    stats["s_rise_ns"] = np.where(sh["shared_rise"].to_numpy(), np.nan, stats["s_rise"].to_numpy())
+    stats["shared_fade"], stats["shared_rise"] = sh["shared_fade"].to_numpy(), sh["shared_rise"].to_numpy()
+    qs = stats[stats["source_id"].isin(quiet)]
+    mirrors = dict(release.MIRRORS) if not a.no_period else {k: v for k, v in release.MIRRORS.items() if k != "rep"}
+    thr = release.thresholds(qs, mirrors, share=a.share)
+    meta = {"rule": rule_v3.NAME, "label": a.label, "lightcurves": str(a.lightcurves), "files": len(files),
+            "stars": int(len(stats)), "quiet_stars": int(len(qs)), "sky_level": a.sky, "mirrors": mirrors,
+            "stars_needed_for_20pct": release.stars_needed(a.share, 0.2)}
     out = release.write_rule(a.out, thr, table, meta, share=a.share)
-    stats.to_parquet(out / "quiet_stats.parquet", index=False)
+    stats.to_parquet(out / "stats.parquet", index=False)
     print(json.dumps(thr, indent=1))
     if a.check_against:
         old = json.loads((Path(a.check_against) / "thresholds.json").read_text())

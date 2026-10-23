@@ -74,11 +74,14 @@ def add_shared(stats, fakes):
     return stats, fakes
 
 
-def evaluate(stats, fakes, quiet, ep, ep_mirror):
+def evaluate(stats, fakes, quiet, ep, ep_mirror, fixed=None):
     stats = stats.copy()
     q = stats[stats["source_id"].isin(quiet)]
     thr = {}
     for g, d in q.groupby(mag_group(q["gbin"])):
+        if fixed:
+            thr[g] = {**fixed[g], "quiet": int(len(d))}
+            continue
         # NaN (a vetoed score) counts as not passing: quantile over all quiet stars, vetoed ones at -inf.
         thr[g] = {"s": float(np.quantile(np.nan_to_num(d[ep_mirror].to_numpy(), nan=-np.inf), 1 - SHARE)),
                   "z": float(np.nanquantile(d["slope_z"], 1 - SHARE)), "quiet": int(len(d))}
@@ -129,7 +132,10 @@ def main(argv=None):
     ap.add_argument("--detect", required=True)
     ap.add_argument("--detect-sky")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--fixed", help="a previous output of this script: use its thresholds (per variant) instead of "
+                                    "setting them from this run's quiet stars")
     a = ap.parse_args(argv)
+    fixed = json.loads(Path(a.fixed).read_text()) if a.fixed else {}
     quiet = quiet_ids(a.run)
     res = {}
     for tag, path in (("", a.detect), ("sky ", a.detect_sky)):
@@ -141,7 +147,9 @@ def main(argv=None):
         res[f"{tag}sky_pattern"] = sky_ratio(stats[stats["source_id"].isin(quiet)])
         for name, (ep, mir) in VARIANTS.items():
             if ep in stats:
-                res[f"{tag}{name}"] = evaluate(stats, fakes, quiet, ep, mir)
+                fx = fixed.get(f"{tag}{name}", {}).get("thresholds")
+                res[f"{tag}{name}"] = evaluate(stats, fakes, quiet, ep, mir,
+                                               {g: {"s": v["s"], "z": v["z"]} for g, v in fx.items()} if fx else None)
     found = {k: set(v.pop("found_ids")) for k, v in res.items() if isinstance(v, dict) and "found_ids" in v}
     keys = list(found)
     res["found_overlap"] = {f"{x} vs {y}": {"only_first": len(found[x] - found[y]), "only_second": len(found[y] - found[x])}
