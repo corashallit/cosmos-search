@@ -4,7 +4,7 @@ import pyarrow as pa
 import pytest
 
 from cosmos_search.gaia import epoch
-from cosmos_search.slow import detect, drift, known
+from cosmos_search.slow import detect, drift, known, select
 
 YEAR = 365.25
 
@@ -185,3 +185,30 @@ def test_slow_families_sample_and_fade(span):
                 assert fam == "secular_fade" or np.all(k <= 1 + 1e-12)
             if fam == "secular_fade":
                 assert sig.factor(t[-1], "G") < sig.factor(t[0], "G")
+
+
+def test_archive_score_separates_slow_from_fast():
+    rng = np.random.default_rng(10)
+    rows, n_each = [], 200
+    for i in range(3 * n_each):
+        t = gaia_times(rng, n_visits=40)
+        y = rng.normal(0, 1e-3, t.size)
+        if i >= n_each and i < 2 * n_each:
+            y += -0.004 * (t > 500)  # slow: one step down halfway, held for the rest
+        elif i >= 2 * n_each:
+            y += rng.normal(0, 4e-3, t.size)  # fast: extra scatter every epoch
+        rows.append(pd.DataFrame({"source_id": i, "band": np.int8(0), "t": t, "frac": y, "err_frac": 1e-3}))
+    s = select.epoch_summary(pd.concat(rows, ignore_index=True))
+    s["slow_z"] = select.slow_z(s["n"], s["uwv"], s["abbe"])
+    noise, slow, fast = (s["slow_z"].iloc[k * n_each:(k + 1) * n_each] for k in range(3))
+    assert 0.8 < s["uwv"].iloc[:n_each].median() < 1.2 and 0.85 < s["abbe"].iloc[:n_each].median() < 1.15
+    assert slow.median() > np.quantile(noise, 0.99)
+    assert np.quantile(fast, 0.9) < slow.median()
+
+
+def test_adql_one_term_per_bin():
+    cuts = pd.DataFrame({"gbin": [0, 1], "slow_z_min": [5.0, 6.5]})
+    q = select.adql(cuts, source_id_range=(0, 2**35 - 1))
+    assert "(phot_g_mean_mag >= 0 AND phot_g_mean_mag < 12 AND" in q and "> 6.5)" in q
+    assert "BETWEEN 0 AND 34359738367" in q and "CASE" not in q
+    assert "random_index_as < 1000000" in select.sample_adql(1e6)

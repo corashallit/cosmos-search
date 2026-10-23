@@ -32,7 +32,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from cosmos_search.inject import lightcurve as inj
-from cosmos_search.slow import detect, drift
+from cosmos_search.slow import detect, drift, select
 from cosmos_search.slow import known as known_mod
 
 FAMILIES = inj.SLOW_FAMILIES
@@ -52,6 +52,16 @@ def corrected(lc_df, cells, table):
     ep = drift.normalise(lc_df)
     ep["frac_corr"] = ep["frac"] - drift.drift_at(ep, cells, table)
     return ep
+
+
+def scored(ep):
+    """Detector statistics plus the DR4-like archive summary (select.epoch_summary on uncorrected fluxes, as
+    DR4 computes it)."""
+    f = detect.star_features(ep)
+    a = select.epoch_summary(ep, col="frac").rename(columns={"n": "n_epochs", "uwv": "uwv_g", "abbe": "abbe_g"})
+    f = f.merge(a, on="source_id", how="left")
+    f["slow_z"] = select.slow_z(f["n_epochs"], f["uwv_g"], f["abbe_g"])
+    return f
 
 
 def depth_g(sig, tv):
@@ -106,12 +116,12 @@ def one_file(job):
         return pd.read_parquet(done[0]), pd.read_parquet(done[1])
     cells, table, hosts = _STATE["cells"], _STATE["table"], _STATE["hosts"]
     lc = pq.read_table(Path(run) / "lightcurves" / name)
-    feat = detect.star_features(corrected(lc, cells, table))
+    feat = scored(corrected(lc, cells, table))
     fake, truth = injected(lc, hosts, file_index)
     if fake is not None:
         fcells = cells.reindex(truth["host"].to_numpy())
         fcells.index = pd.Index(truth["source_id"].to_numpy(), name="source_id")
-        ff = detect.star_features(corrected(fake, pd.concat([cells, fcells]), table))
+        ff = scored(corrected(fake, pd.concat([cells, fcells]), table))
         truth = truth.merge(ff, on="source_id", how="left")
     feat.to_parquet(done[0], index=False)
     truth.to_parquet(done[1], index=False)
