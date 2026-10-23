@@ -18,15 +18,27 @@ DEFAULT_MAX_GB = 5.0
 
 
 def default_root():
+    """COSMOS_CACHE_DIR, else the local data store's cache/http (net/local.py), else ~/.cache."""
+    from .local import data_dir
+
     root = os.environ.get("COSMOS_CACHE_DIR")
-    return Path(root) if root else Path.home() / ".cache" / "cosmos-search" / "http"
+    if root:
+        return Path(root)
+    store = data_dir()
+    return store / "cache" / "http" if store else Path.home() / ".cache" / "cosmos-search" / "http"
+
+
+def default_max_gb():
+    from .local import PERSISTENT_CACHE_GB, data_dir
+
+    return PERSISTENT_CACHE_GB if data_dir() else DEFAULT_MAX_GB
 
 
 class ResponseCache:
     def __init__(self, root=None, max_bytes=None):
         self.root = Path(root) if root else default_root()
         if max_bytes is None:
-            max_bytes = float(os.environ.get("COSMOS_CACHE_MAX_GB", DEFAULT_MAX_GB)) * 1e9
+            max_bytes = float(os.environ.get("COSMOS_CACHE_MAX_GB", default_max_gb())) * 1e9
         self.max_bytes = int(max_bytes)
         self._lock = threading.Lock()
         self._written = 0

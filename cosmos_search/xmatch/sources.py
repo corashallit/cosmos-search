@@ -4,7 +4,8 @@
   sky-wide: static files, partition pruning, nothing to download.
 - TapSource: an ADQL cone on a TAP service through the shared client (IRSA for CatWISE2020 and unWISE).
 - MemorySource: a DataFrame already in memory (tests, or a catalogue fetched once for a small field).
-- AutoSource: HATS when the survey has a HATS copy, TAP otherwise.
+- AutoSource: a local mirror when this machine has one (mirror.py), else HATS when the survey has a HATS
+  copy, TAP otherwise.
 
 lsdb reads over fsspec/aiohttp, so those reads bypass cosmos_search.net. They still refuse to run under
 COSMOS_BLIND, send the project User-Agent, and stay within the per-host limits in docs/infra/net.md
@@ -18,6 +19,7 @@ import time
 import numpy as np
 import pandas as pd
 
+from . import mirror
 from .geometry import MAS_PER_DEG, separation_mas
 
 HATS_WORKERS = 4
@@ -59,16 +61,24 @@ class HatsSource:
         self._cats = {}
         self._lock = threading.Lock()
 
+    def location(self, survey):
+        """Where survey is read from: an explicit url, else a local mirror holding its columns, else its HATS url."""
+        if survey.name in self.urls:
+            return self.urls[survey.name]
+        return mirror.local(name=survey.name, columns=survey.columns) or survey.hats
+
     def catalog(self, survey):
         import lsdb
 
         with self._lock:
             if survey.name not in self._cats:
-                url = self.urls.get(survey.name, survey.hats)
+                url = self.location(survey)
                 if not url:
                     raise ValueError(f"{survey.name} has no HATS location")
-                self._cats[survey.name] = lsdb.open_catalog(
-                    url, columns=survey.columns, storage_options=hats_storage_options())
+                opts = hats_storage_options()
+                if "://" not in str(url):  # local mirror: no HTTP options (the blind check above still ran)
+                    opts = None
+                self._cats[survey.name] = lsdb.open_catalog(url, columns=survey.columns, storage_options=opts)
             return self._cats[survey.name]
 
     def fetch(self, survey, ra, dec, radius_deg):
@@ -122,7 +132,7 @@ class AutoSource:
         self.tapsrc = tap or TapSource()
 
     def fetch(self, survey, ra, dec, radius_deg):
-        if survey.hats:
+        if survey.hats or mirror.local(name=survey.name, columns=survey.columns):
             return self.hats.fetch(survey, ra, dec, radius_deg)
         if survey.tap:
             return self.tapsrc.fetch(survey, ra, dec, radius_deg)

@@ -54,8 +54,10 @@ def ztf(source_id, ra, dec):
     import io
 
     from cosmos_search.net import get_client
+    from cosmos_search.net.local import persistent
 
-    body = get_client().get_bytes(ZTF_LC.format(ra=ra, dec=dec, r=ZTF_RADIUS_ARCSEC / 3600), cache=False)
+    # Kept on machines with a local data store, so reruns do not wait on IRSA (~20 s a call) or its outages.
+    body = get_client().get_bytes(ZTF_LC.format(ra=ra, dec=dec, r=ZTF_RADIUS_ARCSEC / 3600), cache=persistent())
     rows = pd.read_csv(io.BytesIO(body)) if body else pd.DataFrame()
     out = []
     for _, r in rows.groupby("oid") if len(rows) else ():

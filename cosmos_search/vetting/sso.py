@@ -17,11 +17,19 @@ geocentric cone widened by the largest parallax, then one Miriade call per dip f
 near one line of sight shifts by the same sky-plane vector divided by its distance, so the reference fixes the
 shift for all of them.
 
+Local fallback. SkyBoT and Miriade go down for hours at a time, so where this machine has the local ephemeris
+(sso_local.py, built by cache-tools/build_sso.py) it is used first: the same cone, computed from MPCORB orbits
+integrated with ASSIST, seen from the spacecraft directly. It agrees with JPL Horizons to ~0.1 arcsec, but has no
+comets and ages with its MPCORB file. COSMOS_SSO=remote forces SkyBoT and Miriade; COSMOS_SSO=local refuses them.
+Each dip records which was used ("source").
+
 Times: candidates carry BTJD (BJD_TDB - 2457000). SkyBoT wants the epoch at the observer, so the barycentric
 light-travel time towards the source is removed (up to +-8.3 min; Gaia at L2 and TESS are within ~5 light s of
 the geocentre for this purpose). Main-belt bodies move ~30-40 arcsec/h, so a few minutes of timing slack or
 SkyBoT's ephemeris uncertainty (Err column) sit inside the search radii below.
 """
+
+import os
 
 import numpy as np
 
@@ -114,6 +122,25 @@ def _offset(ra, dec, ra0, dec0):
 
 def nearby(jd_utc, ra, dec, radius_arcsec, arm, client=None):
     """Bodies within radius of (ra, dec) as seen from the arm's spacecraft, each with its observer-centric sep."""
+    return nearby_with_source(jd_utc, ra, dec, radius_arcsec, arm, client)[0]
+
+
+def nearby_with_source(jd_utc, ra, dec, radius_arcsec, arm, client=None):
+    """(bodies, "local" or "skybot"): the local ephemeris when it covers the epoch (see the module notes). Passing
+    a client asks for the remote services through it, unless COSMOS_SSO=local."""
+    from . import sso_local
+
+    mode = os.environ.get("COSMOS_SSO", "auto").lower()
+    if mode == "local" or (mode != "remote" and client is None and sso_local.available()):
+        try:
+            return sso_local.cone(jd_utc, ra, dec, radius_arcsec, observer=arm), "local"
+        except LookupError:  # epoch or spacecraft outside the local ephemeris
+            if mode == "local":
+                raise
+    return _nearby_remote(jd_utc, ra, dec, radius_arcsec, arm, client), "skybot"
+
+
+def _nearby_remote(jd_utc, ra, dec, radius_arcsec, arm, client=None):
     margin = np.degrees(OBSERVER_DIST_AU[arm] / MIN_DIST_AU) * 3600
     bodies = cone(jd_utc, ra, dec, radius_arcsec + margin, client)
     if not bodies:
@@ -157,11 +184,11 @@ def check(cand, dips=None, client=None, radius_arcsec=None):
         return []
     out = []
     for d, jd in zip(dips, np.atleast_1d(observer_jd_utc(times, ra, dec))):
-        bodies = nearby(float(jd), ra, dec, radius, cand.arm, client)
+        bodies, source = nearby_with_source(float(jd), ra, dec, radius, cand.arm, client)
         for b in bodies:
             b["flux_ratio"] = flux_ratio(b["v_mag"], star, cand.arm) if star is not None else None
         depth = abs(d.get("depth", 0.0)) or 1e-3
         bright = [b for b in bodies if b["flux_ratio"] is not None and b["flux_ratio"] >= 0.1 * depth]
         verdict = "sso_bright" if bright else "sso_faint" if bodies else "clear"
-        out.append({"t_min": d["t_min"], "jd_utc": float(jd), "verdict": verdict, "bodies": bodies})
+        out.append({"t_min": d["t_min"], "jd_utc": float(jd), "verdict": verdict, "bodies": bodies, "source": source})
     return out
