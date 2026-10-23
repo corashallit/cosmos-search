@@ -78,7 +78,7 @@ These apply to every arm and every thread.
 
 | Item | Status |
 |---|---|
-| Day-one stream capacity (arms/gaia-dimmers.md) | Is DR4 epoch photometry on the CDN at release (DR3's was)? If yes, how many sessions split the bulk stream. If no, the size of the random DataLink channel, set at D1 from DR3 yields |
+| Day-one stream capacity (infra/dr4-downloads.md) | ESA's approved bulk plan puts DR4 epoch photometry on the CDN as Parquet; `gaia.dr4_routes` checks on release day whether it is there, or in AIP's database, and `gaia.dr4_bulk` splits the bulk stream across kore and cloud containers by --shard. DataLink (0.1-1.5 light curves/s) is the last resort |
 | Durable store | Deferred; ~50–100 GB is enough for this track (storage.md) |
 | Vetting budget | ~10³, ~10⁴ outer limit (decided) |
 | Collaborators for follow-up | After D4. Candidates: Wright group (Penn State), Project Hephaistos (Uppsala), Boyajian (LSU) |
