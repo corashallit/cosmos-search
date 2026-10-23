@@ -1,7 +1,7 @@
 """Gaia DR4 epoch photometry from ESA's bulk download files, streamed into a local light-curve cache.
 
     python -m cosmos_search.gaia.dr4_bulk list
-    python -m cosmos_search.gaia.dr4_bulk pull --out DIR [--select sel.parquet] [--random-share 0.001] [--all] \\
+    python -m cosmos_search.gaia.dr4_bulk pull --out DIR [--select sel.parquet] [--random-share 0.001] \\
         [--durable DIR] [--workers 8] [--shard i/n] [--limit N]
 
 ESA's approved plan for the DR4 bulk download (technical note GAIA-CZ-TN-ESA-JDB-128, 2024-10-21) puts the
@@ -14,8 +14,13 @@ the columns `gaia.dr4.COLUMNS` names. `list` shows what is there; check it on re
 `pull` downloads files in parallel (each worker one file at a time, md5-checked when ESA publishes sums), keeps
 the transits of the chosen stars, converts them to the shared light-curve schema (`epoch.SCHEMA`) and writes one
 Parquet per bulk file plus a done-marker, so a stopped or reclaimed run resumes where it stopped and sessions
-split the files with --shard without talking. Stars kept: those in --select (a Parquet with source_id), a
-deterministic random share (`features.control_mask`, the same hash as the DR3 controls), or --all.
+split the files with --shard without talking. Stars kept: those in --select (a Parquet with source_id) and a
+deterministic random share (`features.control_mask`, the same hash as the DR3 controls).
+
+Nothing stages the release: each raw file is deleted as soon as it is read, so peak disk per machine is about
+--workers raw files (DR3's epoch files reached 2.2 GB; ESA aims for evenly sized DR4 files) plus the kept light
+curves (~3.9 kB a star). The whole release is 7.2 TB, which no machine of ours holds. `keep_all` (API only, no CLI
+flag) keeps every star of a file and is meant for a detector that consumes each file's output and discards it.
 
 Measured 2026-10-23: one cloud container reads ESA's CDN at ~32 MB/s per stream and ~120 MB/s with 8 streams;
 kore pulled DR3's 73 GB at ~45 MB/s. At 120 MB/s DR4's light curves take ~17 h to download in one container.
@@ -24,6 +29,7 @@ kore pulled DR3's 73 GB at ~45 MB/s. At 120 MB/s DR4's light curves take ~17 h t
 import argparse
 import json
 import re
+import shutil
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -142,8 +148,22 @@ def read_kept(path, select=None, random_share=0.0, keep_all=False, batch_rows=1 
     return pa.concat_tables(parts)
 
 
+# Free space a download needs beyond the file itself, so a full disk fails the file cleanly instead of mid-write.
+DISK_MARGIN = 2e9
+
+
+def check_space(directory, size, margin=DISK_MARGIN):
+    free = shutil.disk_usage(directory).free
+    if free < (size or 0) + margin:
+        raise OSError(f"{free / 1e9:.1f} GB free in {directory}, need {((size or 0) + margin) / 1e9:.1f} GB for the "
+                      "next file; free space or run fewer --workers")
+
+
 def process_file(info, out, select_path=None, random_share=0.0, keep_all=False, durable=None, local=None):
-    """Download one bulk file (or read `local`), keep the chosen stars, write their light curves (epoch.SCHEMA)."""
+    """Download one bulk file (or read `local`), keep the chosen stars, write their light curves (epoch.SCHEMA).
+
+    The raw file lives in out/tmp only while it is read and is deleted afterwards, also on errors, so a machine
+    holds at most one raw file per worker."""
     out = Path(out)
     t0 = time.time()
     dest = out / "lightcurves" / f"{info['name']}.parquet"
@@ -152,7 +172,10 @@ def process_file(info, out, select_path=None, random_share=0.0, keep_all=False, 
     if local:
         rows, t_dl = read_kept(local, select, random_share, keep_all), 0.0
     else:
-        with get_client().streamed(info["url"], md5=info.get("md5")) as path:
+        tmp_dir = out / "tmp"
+        tmp_dir.mkdir(exist_ok=True)
+        check_space(tmp_dir, info.get("size"))
+        with get_client().streamed(info["url"], dest=tmp_dir / f"{info['name']}.parquet", md5=info.get("md5")) as path:
             t_dl = time.time() - t0
             rows = read_kept(path, select, random_share, keep_all)
     t1 = time.time()
@@ -223,7 +246,6 @@ def main(argv=None):
     pl.add_argument("--prefix", default=PREFIX)
     pl.add_argument("--select", help="Parquet with a source_id column: stars to keep")
     pl.add_argument("--random-share", type=float, default=0.0, help="also keep this share of stars at random")
-    pl.add_argument("--all", action="store_true", help="keep every star")
     pl.add_argument("--workers", type=int, default=8)
     pl.add_argument("--shard", type=dr3_pass._shard, default=(0, 1))
     pl.add_argument("--limit", type=int)
@@ -235,7 +257,7 @@ def main(argv=None):
     if not files:
         print(f"no epoch photometry Parquet files under {a.prefix}; run `list` to see what is there", file=sys.stderr)
         return 2
-    return 1 if pull(a.out, files, a.select, a.random_share, a.all, a.durable, a.workers, a.shard, a.limit,
+    return 1 if pull(a.out, files, a.select, a.random_share, False, a.durable, a.workers, a.shard, a.limit,
                      log=lambda m: print(m, flush=True)) else 0
 
 

@@ -124,3 +124,35 @@ def test_datalink_pull_runs_small_calls_in_parallel_and_resumes(tmp_path, monkey
     assert len(calls) == 3  # resumed: nothing pulled twice
     got = pa.concat_tables([pq.read_table(p) for p in sorted((tmp_path / "lightcurves").iterdir())])
     assert set(got["source_id"].to_pylist()) == set(ids)
+
+
+def test_raw_file_goes_to_work_tmp_and_is_deleted(tmp_path, monkeypatch):
+    import contextlib
+    import shutil
+
+    src = bulk_file(tmp_path / "src.parquet")
+    seen = []
+
+    class Streaming:
+        @contextlib.contextmanager
+        def streamed(self, url, dest=None, md5=None):
+            shutil.copyfile(src, dest)
+            seen.append(dest)
+            try:
+                yield dest
+            finally:
+                dest.unlink()
+
+    monkeypatch.setattr(dr4_bulk, "get_client", lambda: Streaming())
+    out = tmp_path / "out"
+    dr4_bulk.process_file({"name": "x", "url": "https://cdn/x.parquet", "size": src.stat().st_size}, out,
+                          random_share=0.5)
+    assert seen[0].parent == out / "tmp" and not any((out / "tmp").iterdir())
+
+
+def test_check_space_refuses_a_file_that_does_not_fit(tmp_path):
+    import pytest
+
+    dr4_bulk.check_space(tmp_path, 1)
+    with pytest.raises(OSError, match="free"):
+        dr4_bulk.check_space(tmp_path, 10**18)

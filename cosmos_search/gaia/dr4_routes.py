@@ -7,7 +7,7 @@ Three routes, in the order to prefer them (measured on DR3, 2026-10-23):
 
 | Route | DR3 rate | What it suits |
 |---|---|---|
-| ESA bulk files on the CDN (`gaia.dr4_bulk`) | ~120 MB/s per container, so all 7.2 TB in ~17 h; scales with containers | every star, no prefilter |
+| ESA bulk files on the CDN (`gaia.dr4_bulk`) | ~120 MB/s per container, so all 7.2 TB pass in ~17 h; scales with containers | any selection size, read as the files stream past |
 | A mirror's database table (AIP: `epoch.mirror_epoch_photometry`) | ~1,500 light curves/s, ~3,000/s with 4 queries | a selection of millions |
 | ESA DataLink | 0.2-1.5 light curves/s, ≤ 50 ids per call | ≤ ~10^4 stars, and per-CCD G (DataLink only) |
 
@@ -91,8 +91,8 @@ def recommend(r):
     cdn, tables, dl = r["cdn"], r["tables"], r["datalink"]
     if cdn.get("epoch_photometry_files"):
         return (f"Bulk files are up ({cdn['epoch_photometry_files']} files, {cdn['epoch_photometry_bytes'] / 1e12:.2f} TB): "
-                "check one with `dr4_bulk list`, then pull every star with `dr4_bulk pull --all`, split by --shard "
-                "across containers.")
+                "check one with `dr4_bulk list`, then `dr4_bulk pull --select ... --random-share ...`, split by --shard "
+                "across kore and cloud containers. Each raw file is deleted once read.")
     mirrors = [m for m, v in tables.items() if m != "esa" and any("epoch_photometry" in t for t in v.get("tables", []))]
     if mirrors:
         return (f"No bulk files yet; {', '.join(mirrors)} has an epoch_photometry table: run the whole-sky selection "

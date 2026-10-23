@@ -8,7 +8,7 @@ measured on DR3 on 2026-10-23. Code: `gaia/dr4_routes.py` (release-day check), `
 
 | Route | Measured on DR3 | DR4 status | Suits |
 |---|---|---|---|
-| ESA bulk files on the CDN (`dr4_bulk pull`) | 32 MB/s per stream, 122 MB/s with 8 streams from one cloud container; kore pulled DR3's 73 GB at 45 MB/s (2026-10-21) | Planned: ESA's approved note puts transit-level epoch photometry on the CDN as Parquet (below); nothing under `Gaia/gdr4/` yet | Every star, no prefilter: 7.2 TB in ~17 h of download per container at 122 MB/s |
+| ESA bulk files on the CDN (`dr4_bulk pull`) | 32 MB/s per stream, 122 MB/s with 8 streams from one cloud container; kore pulled DR3's 73 GB at 45 MB/s (2026-10-21) | Planned: ESA's approved note puts transit-level epoch photometry on the CDN as Parquet (below); nothing under `Gaia/gdr4/` yet | Any selection size: all 7.2 TB stream past in ~17 h per container at 122 MB/s, and only kept stars are written |
 | AIP's database table (`epoch.mirror_epoch_photometry`) | ~1,500 light curves/s, ~3,000/s with 4 queries (by source_id range) | AIP served DR2's and DR3's light curves as a table; no DR4 announcement | A selection of millions: 2.5 × 10⁷ in 2-5 h |
 | ESA DataLink (`epoch.datalink_epoch_photometry`) | 0.1-1.5 light curves/s whatever the request shape (below) | DataLink only for per-CCD G | ≤ ~10⁴ stars; per-CCD G for the top candidates |
 
@@ -70,9 +70,20 @@ light curves) would take months to years this way.
 
 The slow-change selection keeps 0.1-1% of stars (`slow/select.py`; recall in docs/arms/slow-changes.md): 2.5 × 10⁶
 to 2.5 × 10⁷ light curves. In the shared schema (`epoch.SCHEMA`, zstd) DR3 light curves take ~3.9 kB a star, so
-10-100 GB, plus ~10 GB for a 0.1% random reference sample. That fits on kore (771 GB free on 2026-10-23, before the
-HATS mirror). All 7.2 TB does not, and does not need to: with bulk files the detector runs on every star as the files
-stream past, and only kept light curves are written.
+10-100 GB, plus ~10 GB for a 0.1% random reference sample. That fits on kore, even with the HATS mirror there.
+The whole release does not fit anywhere we have, and nothing stages it: `dr4_bulk pull` downloads one raw file per
+worker into WORK/tmp, keeps the chosen stars' transits, writes their light curves and deletes the raw file (also when
+reading fails). Per-star summary statistics for every star come from ESA's `all_source_photometry` on TAP (755 GB as
+a table), so none are written here either.
+
+Peak disk per machine is about `--workers` × the largest raw file, plus the kept light curves of its shard. DR4 file
+sizes are not known yet; DR3's epoch files reached 2.2 GB and ESA's note aims for even sizes, so 8 workers need
+≲ 20 GB of scratch. Before each download the streamer checks for the file's size plus 2 GB free and otherwise fails
+that file, which the next run retries. On kore, set `--out` inside ~/cosmos-data so scratch lands on the big disk.
+
+Whether every star should be screened as the files pass (the detector run per file, with only its flags and the
+selected light curves kept) is a choice for the slow-change search; the API's `keep_all` exists for that hook and has
+no command-line flag, so a pull cannot write the whole release by accident.
 
 Processing a DR4-shaped Parquet file (built from a DR3 bulk file: 286,289 transits, 21.8 MB): converting every
 transit to `epoch.SCHEMA` runs at ~15 MB/s per core; keeping a 1% share runs at ~70 MB/s per core (mostly reading).
@@ -86,8 +97,7 @@ So a 4-core container keeping a selection is limited by its network (~120 MB/s),
    route to use.
 2. Bulk files up: `python -m cosmos_search.gaia.dr4_bulk list`, read one file and check its columns against
    `gaia.dr4.COLUMNS`, then `dr4_bulk pull --out WORK --durable DEST --select selection.parquet --random-share 0.001
-   --shard i/n` on kore and on several cloud containers (or `--all` with the detector run per file). Resumes from
-   done-markers.
+   --shard i/n` on kore and on several cloud containers. Resumes from done-markers; raw files are deleted as read.
 3. No bulk files, AIP table up: whole-sky selection on ESA TAP (`slow/select.py`), light curves from AIP by
    source_id range.
 4. Neither: DataLink for the top of the selection, and re-check the CDN and AIP daily.
