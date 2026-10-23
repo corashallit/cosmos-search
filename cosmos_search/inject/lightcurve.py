@@ -139,12 +139,14 @@ class Cycle:
     period: float
     amplitude: float
     beta: float = 0.0
+    dpdt: float = 0.0  # the period at time t is period * (1 + dpdt * (t - t0))
     kind: str = field(default="cycle", init=False)
 
     def factor(self, t, band):
         scale = (wavelength(band) / REF_UM) ** -self.beta
-        phase = 2 * np.pi * (np.asarray(t, dtype=float) - self.t0) / self.period
-        return 1.0 - self.amplitude * scale * (1 - np.cos(phase)) / 2
+        dt = np.asarray(t, dtype=float) - self.t0
+        cycles = dt / self.period if self.dpdt == 0 else np.log1p(self.dpdt * dt) / (self.dpdt * self.period)
+        return 1.0 - self.amplitude * scale * (1 - np.cos(2 * np.pi * cycles)) / 2
 
 
 @dataclass
@@ -289,13 +291,23 @@ def sample(rng, family, t_min, t_max, t_ext=None, allow_held_out=False):
         dips = [Dip(t0=float(t0), covering=depth, ingress=dur / 4, egress=dur / 4, flat=dur / 2)
                 for t0 in event_times(rng, kind, t_min, t_end, **kw)]
         return Composite(dips)
+    if family in SPENT_SLOW:
+        return _held_out_slow(rng, family, t_min, t_max, span)
     if family in HELD_OUT_FAMILIES + HELD_OUT_FAMILIES_V2 + HELD_OUT_SLOW:
         if not allow_held_out:
             raise HeldOutError(f"{family!r} is held out for the confirmatory batch; calibration and tuning may not "
                                "draw it (docs/dayone.md, review fixes)")
         if family in HELD_OUT_SLOW:
-            return _held_out_slow(rng, family, t_min, t_max, span)
+            return _held_out_periodic(rng, family, t_min, t_max, span)
         return _held_out(rng, family, t_min, t_end, span)
+    if family == "repeat_long_dip":
+        # The same long dip every period, at least 1.5 cycles in the span: a body or swarm on a long orbit.
+        period = _loguniform(rng, 40.0, max(41.0, span / 1.5))
+        dur = period * _loguniform(rng, 0.05, 0.4)
+        ing = dur * rng.uniform(0.1, 0.5)
+        beta = _chromatic(rng)
+        depth = _loguniform(rng, 0.002, 0.1)
+        return Composite(_periodic_dips(rng, t_min, t_max, period, depth, dur, ing, ing, beta))
     if family == "secular_fade":
         return SecularTrend(rate_per_year=-_loguniform(rng, 1e-3, 5e-2), t_ref=(t_min + t_max) / 2,
                             beta=float(rng.choice([0.0, rng.uniform(1, 3)])))
@@ -349,9 +361,62 @@ HELD_OUT_FAMILIES = ("dip_train_clustered", "dip_train_drifting", "dip_swarm", "
 # that tests rule v6 (docs/dayone.md, "Rule v6"), under the same conditions: no calibration, flag or rule has used
 # them, and nobody looks at how a flag responds to them before that batch is revealed.
 HELD_OUT_FAMILIES_V2 = ("dip_intermittent", "dip_depth_trend", "dip_chromatic_train", "dip_doublets")
-# Slow changes the slow-change detector was not designed or calibrated on, for its blind test
-# (docs/arms/slow-changes.md, "Blind test (S6)"). Same conditions as above.
-HELD_OUT_SLOW = ("staircase_fade", "slow_cycle", "accelerating_fade", "fade_with_dips")
+# Slow shapes that the slow-change detector's first blind test used (docs/arms/slow-changes.md, "Blind test
+# (S6)"). That test has been revealed, so they are spent and free for calibration.
+SPENT_SLOW = ("staircase_fade", "slow_cycle", "accelerating_fade", "fade_with_dips")
+# Repeating slow shapes that the slow period search was not designed or calibrated on, for its blind test
+# (docs/arms/slow-changes.md, "Slow period search"). Same conditions as the held-out sets above. Its calibration
+# draws PERIODIC_FAMILIES.
+HELD_OUT_SLOW = ("sawtooth_dips", "drifting_cycle", "uneven_dips", "paired_dips")
+PERIODIC_FAMILIES = ("repeat_long_dip", "slow_cycle")
+
+
+def _periodic_dips(rng, t_min, t_max, period, depth, dur, ingress, egress, beta=0.0, depths=None):
+    """Trapezoid dips every `period` across [t_min, t_max], from a random phase; depths[k] scales dip k."""
+    times = np.arange(t_min - rng.uniform(0, period), t_max + period, period)
+    scale = np.ones(len(times)) if depths is None else depths(len(times))
+    return [Dip(t0=float(t), covering=float(depth * k), ingress=ingress, egress=egress,
+                flat=max(dur - ingress - egress, 0.0), beta=beta)
+            for t, k in zip(times, scale)]
+
+
+def _held_out_periodic(rng, family, t_min, t_max, span):
+    """Repeating slow changes with a shape other than the calibrated equal, symmetric dips and the sinusoid."""
+    p_hi = max(41.0, span / 1.5)
+    beta = _chromatic(rng)
+    if family == "sawtooth_dips":
+        # A fast drop and a slow recovery every cycle: a trailing tail of material.
+        period = _loguniform(rng, 40.0, p_hi)
+        dur = period * _loguniform(rng, 0.1, 0.5)
+        ing = dur * rng.uniform(0.03, 0.15)
+        return Composite(_periodic_dips(rng, t_min, t_max, period, _loguniform(rng, 0.003, 0.1), dur, ing,
+                                        dur - ing, beta))
+    if family == "drifting_cycle":
+        # A sinusoidal dimming whose period lengthens or shortens by 15-40% across the span.
+        period = _loguniform(rng, 60.0, p_hi)
+        change = float(rng.choice([-1, 1]) * rng.uniform(0.15, 0.4))
+        return Cycle(t0=float(rng.uniform(t_min, t_max)), period=period, amplitude=_loguniform(rng, 0.003, 0.1),
+                     beta=beta, dpdt=change / span)
+    if family == "uneven_dips":
+        # A long dip every period whose depth changes from cycle to cycle (20-100% of the deepest).
+        period = _loguniform(rng, 40.0, p_hi)
+        dur = period * _loguniform(rng, 0.05, 0.4)
+        ing = dur * rng.uniform(0.1, 0.5)
+        return Composite(_periodic_dips(rng, t_min, t_max, period, _loguniform(rng, 0.003, 0.1), dur, ing, ing,
+                                        beta, depths=lambda n: rng.uniform(0.2, 1.0, n)))
+    if family == "paired_dips":
+        # Two long dips per period, the second at phase 0.2-0.8 and 20-100% as deep: two bodies on one orbit, or
+        # an eccentric binary seen at a long period.
+        period = _loguniform(rng, 60.0, p_hi)
+        dur = period * _loguniform(rng, 0.04, 0.2)
+        ing = dur * rng.uniform(0.1, 0.5)
+        depth = _loguniform(rng, 0.003, 0.1)
+        first = _periodic_dips(rng, t_min, t_max, period, depth, dur, ing, ing, beta)
+        shift, ratio = period * rng.uniform(0.2, 0.8), rng.uniform(0.2, 1.0)
+        second = [Dip(t0=d.t0 + shift, covering=depth * ratio, ingress=ing, egress=ing, flat=d.flat, beta=beta)
+                  for d in first]
+        return Composite(first + second)
+    raise ValueError(f"unknown family {family!r}")
 
 
 def _chromatic(rng):
