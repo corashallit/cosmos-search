@@ -66,6 +66,13 @@ helps is several small calls at once, which `dayone.datalink` now does by defaul
 `--chunk`). Overall 0.1-1.5 light curves/s, 10⁴-10⁵ a day. The DR4 selection of 0.1-1% of ~2.5 × 10⁹ stars (2.5 × 10⁶ to 2.5 × 10⁷
 light curves) would take months to years this way.
 
+Per connection the rate is capped: on kore ~12 MB/s per stream from the Gaia CDN (47 MB/s with 4) and ~2 MB/s from
+S3 or data.lsdb.io (measured by the kore caching thread, 2026-10-23). So `dr4_bulk` fetches each file of 64 MB or
+more as 32 MB byte ranges over `--streams` connections (default 4; the CDN honours ranges), on top of `--workers`
+files at a time, and checks the md5 over the reassembled file. In a cloud container single streams already ran at
+27-79 MB/s and 4-8 ranges at 40-63 MB/s on 114-229 MB DR3 files, so the gain there is small and noisy; on kore it
+should be ~4×. Memory per worker is about streams × 32 MB.
+
 ## How many light curves, and where they live
 
 The slow-change selection keeps 0.1-1% of stars (`slow/select.py`; recall in docs/arms/slow-changes.md): 2.5 × 10⁶
