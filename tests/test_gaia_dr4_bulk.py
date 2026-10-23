@@ -156,3 +156,53 @@ def test_check_space_refuses_a_file_that_does_not_fit(tmp_path):
     dr4_bulk.check_space(tmp_path, 1)
     with pytest.raises(OSError, match="free"):
         dr4_bulk.check_space(tmp_path, 10**18)
+
+
+class RangeServer:
+    """Serves `body` with byte ranges (or ignores them when ranges=False), counting the requests."""
+
+    def __init__(self, body, ranges=True):
+        self.body, self.ranges, self.gets, self.streams = body, ranges, [], 0
+
+    def get(self, url, headers=None):
+        import types
+
+        a, b = map(int, headers["Range"].removeprefix("bytes=").split("-"))
+        self.gets.append((a, b))
+        if not self.ranges:
+            return types.SimpleNamespace(status_code=200, content=self.body)
+        return types.SimpleNamespace(status_code=206, content=self.body[a:b + 1])
+
+    def streamed(self, url, dest=None, md5=None):
+        import contextlib
+
+        @contextlib.contextmanager
+        def cm():
+            self.streams += 1
+            dest.write_bytes(self.body)
+            yield dest
+
+        return cm()
+
+
+def test_ranged_download_reassembles_checks_md5_and_cleans_up(tmp_path, monkeypatch):
+    import hashlib
+
+    import pytest
+
+    monkeypatch.setattr(dr4_bulk, "RANGE_BYTES", 1000)
+    monkeypatch.setattr(dr4_bulk, "RANGE_MIN", 2000)
+    body = np.random.default_rng(3).bytes(10_500)
+    srv = RangeServer(body)
+    dest = tmp_path / "f.bin"
+    with dr4_bulk.fetched("u", dest, len(body), hashlib.md5(body).hexdigest(), streams=4, client=srv) as p:
+        assert p.read_bytes() == body
+    assert len(srv.gets) == 11 and srv.streams == 0 and not dest.exists()
+    with pytest.raises(OSError, match="md5"):
+        with dr4_bulk.fetched("u", dest, len(body), "0" * 32, streams=4, client=srv):
+            pass
+    assert not dest.exists()
+    plain = RangeServer(body, ranges=False)
+    with dr4_bulk.fetched("u", dest, len(body), None, streams=4, client=plain) as p:
+        assert p.read_bytes() == body and plain.streams == 1  # fell back to one stream
+    assert not dest.exists()

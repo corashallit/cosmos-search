@@ -27,12 +27,14 @@ kore pulled DR3's 73 GB at ~45 MB/s. At 120 MB/s DR4's light curves take ~17 h t
 """
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -159,7 +161,71 @@ def check_space(directory, size, margin=DISK_MARGIN):
                       "next file; free space or run fewer --workers")
 
 
-def process_file(info, out, select_path=None, random_share=0.0, keep_all=False, durable=None, local=None):
+# Ranged downloads: one connection is capped well below a machine's link (kore: ~12 MB/s per stream from the Gaia
+# CDN, ~2 MB/s from S3; a cloud container ~21-32 MB/s), so a large file is fetched as RANGE_BYTES pieces over
+# `streams` connections and written at their offsets. Each piece is held in memory once, so memory per worker is
+# about streams x RANGE_BYTES.
+RANGE_BYTES = 32 << 20
+RANGE_MIN = 2 * RANGE_BYTES
+STREAMS = 4
+
+
+def _fetch_range(client, url, start, end, attempts=4):
+    want = end - start + 1
+    for i in range(attempts):
+        resp = client.get(url, headers={"Range": f"bytes={start}-{end}"})
+        if resp.status_code == 206 and len(resp.content) == want:
+            return resp.content
+        if resp.status_code == 200:  # server ignored the range: give up on splitting
+            raise _NoRanges
+        time.sleep(2 ** i)
+    raise OSError(f"range {start}-{end} of {url}: {resp.status_code}, {len(resp.content)} of {want} bytes")
+
+
+class _NoRanges(Exception):
+    pass
+
+
+@contextmanager
+def fetched(url, dest, size=None, md5=None, streams=STREAMS, client=None):
+    """Download url to dest, yield its Path, delete it afterwards (also on errors). Files of RANGE_MIN or more are
+    fetched as byte ranges over `streams` connections; smaller ones, or servers that ignore ranges, in one stream."""
+    client = client or get_client()
+    dest = Path(dest)
+    try:
+        if streams > 1 and size and size >= RANGE_MIN:
+            try:
+                with open(dest, "wb") as fh:
+                    fh.truncate(size)
+                spans = [(a, min(a + RANGE_BYTES, size) - 1) for a in range(0, size, RANGE_BYTES)]
+
+                def one(span):
+                    body = _fetch_range(client, url, *span)
+                    with open(dest, "r+b") as fh:
+                        fh.seek(span[0])
+                        fh.write(body)
+
+                with ThreadPoolExecutor(streams) as pool:
+                    list(pool.map(one, spans))
+                if md5:
+                    h = hashlib.md5()
+                    with open(dest, "rb") as fh:
+                        for block in iter(lambda: fh.read(1 << 24), b""):
+                            h.update(block)
+                    if h.hexdigest() != md5.lower():
+                        raise OSError(f"md5 mismatch for {url}")
+                yield dest
+                return
+            except _NoRanges:
+                dest.unlink(missing_ok=True)
+        with client.streamed(url, dest=dest, md5=md5) as path:
+            yield path
+    finally:
+        dest.unlink(missing_ok=True)
+
+
+def process_file(info, out, select_path=None, random_share=0.0, keep_all=False, durable=None, local=None,
+                 streams=STREAMS):
     """Download one bulk file (or read `local`), keep the chosen stars, write their light curves (epoch.SCHEMA).
 
     The raw file lives in out/tmp only while it is read and is deleted afterwards, also on errors, so a machine
@@ -175,7 +241,7 @@ def process_file(info, out, select_path=None, random_share=0.0, keep_all=False, 
         tmp_dir = out / "tmp"
         tmp_dir.mkdir(exist_ok=True)
         check_space(tmp_dir, info.get("size"))
-        with get_client().streamed(info["url"], dest=tmp_dir / f"{info['name']}.parquet", md5=info.get("md5")) as path:
+        with fetched(info["url"], tmp_dir / f"{info['name']}.parquet", info.get("size"), info.get("md5"), streams) as path:
             t_dl = time.time() - t0
             rows = read_kept(path, select, random_share, keep_all)
     t1 = time.time()
@@ -204,7 +270,7 @@ def is_done(name, out, durable=None):
 
 
 def pull(out, files=None, select=None, random_share=0.0, keep_all=False, durable=None, workers=8, shard=(0, 1),
-         limit=None, log=print):
+         limit=None, log=print, streams=STREAMS):
     """Process every bulk file in this shard that is not done yet. Returns the number of failures."""
     if not (keep_all or select or random_share > 0):
         raise ValueError("choose stars: select, random_share or keep_all")
@@ -217,7 +283,7 @@ def pull(out, files=None, select=None, random_share=0.0, keep_all=False, durable
     log(f"{len(files)} files, {len(mine)} in shard {shard[0]}/{shard[1]}, {len(todo)} to do ({total / 1e9:.1f} GB)")
     failures, done_bytes, t0 = 0, 0, time.time()
     with ProcessPoolExecutor(workers) as pool, (out / "manifest.jsonl").open("a") as fh:
-        futures = {pool.submit(process_file, f, out, select, random_share, keep_all, durable, f.get("local")): f
+        futures = {pool.submit(process_file, f, out, select, random_share, keep_all, durable, f.get("local"), streams): f
                    for f in todo}
         for i, fut in enumerate(as_completed(futures), 1):
             f = futures[fut]
@@ -246,7 +312,8 @@ def main(argv=None):
     pl.add_argument("--prefix", default=PREFIX)
     pl.add_argument("--select", help="Parquet with a source_id column: stars to keep")
     pl.add_argument("--random-share", type=float, default=0.0, help="also keep this share of stars at random")
-    pl.add_argument("--workers", type=int, default=8)
+    pl.add_argument("--workers", type=int, default=8, help="files at a time (each holds one raw file on disk)")
+    pl.add_argument("--streams", type=int, default=STREAMS, help="connections per file (byte ranges)")
     pl.add_argument("--shard", type=dr3_pass._shard, default=(0, 1))
     pl.add_argument("--limit", type=int)
     a = ap.parse_args(argv)
@@ -258,7 +325,7 @@ def main(argv=None):
         print(f"no epoch photometry Parquet files under {a.prefix}; run `list` to see what is there", file=sys.stderr)
         return 2
     return 1 if pull(a.out, files, a.select, a.random_share, False, a.durable, a.workers, a.shard, a.limit,
-                     log=lambda m: print(m, flush=True)) else 0
+                     log=lambda m: print(m, flush=True), streams=a.streams) else 0
 
 
 if __name__ == "__main__":
