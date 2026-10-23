@@ -56,7 +56,7 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 | S1 | Known answers matched to Gaia, DR4 columns checked | — | Done 2026-10-23 (below) |
 | S2 | Drift correction from neighbours (`drift`), tested on stars it was not fitted on | — | Magnitude/colour drift done 2026-10-23; sky term open (below) |
 | S3 | Trend, curvature and long-episode detector; fake slow fades and long dips for recall; brightenings as the false-alarm estimate | S2 | First version done 2026-10-23 (below) |
-| S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | |
+| S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | Done 2026-10-23 (below); DataLink download rate open |
 | S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | |
 | S6 | Pre-registered blind test: new fakes; controls from active stars, giants, young stars, known eclipsing binaries | S4, S5 | |
 | S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | |
@@ -180,8 +180,45 @@ those. R CrB stars whose median state is the faint one show their recoveries as 
 
 Open: the sky term from S2; thresholds per colour; families held out of all calibration for the blind test (S6).
 
+## Whole-sky selection (S4)
+
+DR4's light curves come through DataLink only, so the detector runs on stars picked first from the per-star
+columns of `all_source_photometry` (`slow/select.py`). For noise of variance σ² plus a change slower than the gap
+between measurements, of variance s², consecutive differences hold only the noise, so the Abbé value is about
+σ² / (σ² + s²) and the unit-weight variance about (σ² + s²) / err². Their combination
+
+    slow_z = √n × uwv × (1 − Abbé)
+
+is the variance of the slow part over the squared errors, scaled by its noise: near 0 for constant stars whatever
+the error scale, large for slow changes, small for stars that vary faster than Gaia's visits (large uwv, Abbé
+near 1). Cuts are set per G bin so a fixed share of stars passes.
+
+On release day: draw a random sample with `select.sample_adql` (`random_index_as`), set the cuts per G bin from
+it with `select.thresholds`, then run `select.adql(cuts)` over the sky in source_id slices. The Gaia archive's
+ADQL has no CASE expression (checked on DR3, 2026-10-23), so each G bin is its own OR term; the query shape runs on
+the DR3 archive.
+
+Checked with `scripts/slow_select_check.py` on the same DR3 run: slow_z computed from each star's epochs (G,
+uncorrected fluxes, as DR4 computes it), cuts set on quiet half-B stars, and the question asked of every fake the
+detector finds at its 0.1% thresholds: did the selection keep it? At G < 19:
+
+| Share of quiet stars selected | Long dips kept | Late-starting fades kept | Steady fades kept |
+|---|---|---|---|
+| 0.1% | 94% | 87% | 82% |
+| 1% | 97% | 94% | 92% |
+| 10% | 99% | 99% | 98% |
+
+So a selection of 0.1-1% of stars loses little of what the detector can find, and the light curves to fetch fall
+from the whole catalogue to its 0.1-1%. The rate at which DataLink serves DR4 light curves sets which share
+is affordable; it is unknown until release. DR3's quiet stars are not white-noise stars (median uwv 1.9-4.9 and
+Abbé 0.88-0.94 by G bin: underestimated errors and correlated calibration), which is why the cuts come from the
+stars themselves. At G ≥ 19 too few fakes are found to say anything. Not yet used: the BP and RP Abbé values
+(a dust or grey change shows in all three bands), and `phot_g_harmonic_amplitude` to drop doubles.
+
 ## Log
 
+- **2026-10-23.** Whole-sky selection (S4, above): selecting 0.1% of stars by √n × uwv × (1 − Abbé) per G bin
+  keeps 82-94% of what the detector finds at G < 19; 1% keeps 92-97%.
 - **2026-10-23.** Detector first version (S3, above): fades found near the ideal, long dips need about twice the
   signal-to-noise; faint stars (G ≥ 19, mostly quasars) need their own thresholds; 79% of smooth fading alerts
   pass at DR4's sampling.
