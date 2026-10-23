@@ -58,7 +58,7 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 | S3 | Trend, curvature and long-episode detector; fake slow fades and long dips for recall; brightenings as the false-alarm estimate | S2 | First version done 2026-10-23 (below) |
 | S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | Done 2026-10-23 (below); DataLink download rate open |
 | S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | First version done 2026-10-23 (below); position needs DR4 epoch astrometry |
-| S6 | Pre-registered blind test of the detector: new fake shapes, fresh stars; known variable classes measured openly | S4, S5 | Run 2026-10-23 (below): fails on repeated slow cycles; how to cover them is open |
+| S6 | Pre-registered blind test of the detector: new fake shapes, fresh stars; known variable classes measured openly | S4, S5 | Run 2026-10-23 (below): fails on repeated slow cycles; Cora chose a slow period search, whose own blind test is written down (below) |
 | S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | |
 | S8 | Verify top candidates: one new brightness measurement each; per-visit spectra for the best | S7 | |
 
@@ -344,8 +344,7 @@ the same as a pulsating or spotted star. Scoring smoothness alone (Abbé below i
 0.36) was tried afterwards on the calibration stars (shard 0, 1,852 fakes): recall at signal-to-noise ≥ 20 goes
 from 18% to 54%. It still misses cycles shorter than a third of the span (7% for more than 3 cycles), which need a
 period search, and it flags 5.5% of DR3's G < 19 light curves, so on DR4 it would pass most of the whole-sky
-selection. Whether to add it, leave cycles to the period test of `ebfilter`, or build a slow period search is
-Cora's call (asked 2026-10-23).
+selection. Cora chose to build a slow period search (2026-10-23, next section).
 
 **Known variable classes** (active and spotted stars, giants and long-period variables, young stars, eclipsing
 binaries) are measured openly on shard 1, after the reveal, from DPAC's classes. They need no blinding: the
@@ -355,8 +354,78 @@ question is how many such stars pass, which sets the workload for the checks per
 `flags.csv`; `commit` archives the flags in `prereg/verdicts/slow-blind-1/` and refuses a dirty tree; the archive
 commit is pushed; `reveal` refuses unless that commit is on origin and the hashes match.
 
+## Slow period search
+
+Cora's choice after the blind test above (2026-10-23): look for dimming that repeats. `cosmos_search/slow/period.py`,
+calibrated with `scripts/slow_period_check.py` on shard 0/10.
+
+**Method.** The detector's episode score, computed on the light curve folded at trial periods from 20 days to
+two-thirds of the span (so at least 1.5 cycles are seen): the best window of visits that sit together in phase,
+3 visits up to 60% of them, its deepest visit left out, against the star's own visit-to-visit scatter, after
+removing a straight-line trend. Its mirror, repeated brightening, is the false-alarm estimate. A window counts as
+repeating only if (a) its visits come from at least two cycles, (b) they form at least two groups in time, (c) the
+visits between those groups are back at normal brightness (not more than 3σ faint) and (d) the window still shows
+a 3σ deficit with its strongest group removed. Conditions (c) and (d) were added after a single long dip was found
+passing as "repeating" on a test light curve: folded at a period shorter than the dip, or longer with one normal
+visit sharing its phase, one dip looked like two. The eclipsing-binary filter's period test was not reused: it is
+built for eclipses of hours to days.
+
+**New shapes set aside before any tuning** (pushed in 5495052, before the search existed;
+`inject.lightcurve.HELD_OUT_SLOW`): sawtooth dips (a fast drop and slow recovery each cycle), a drifting cycle
+(period lengthening or shortening by 15-40% over the span), uneven dips (each cycle 20-100% as deep as the deepest)
+and paired dips (two dips per period, the second at phase 0.2-0.8 and 20-100% as deep). Calibration used only an
+equal, symmetric repeating long dip (`repeat_long_dip`) and the spent slow cycle.
+
+**Noise yardstick.** Three were compared on a quarter of shard 0 (1,416 quiet stars, 3,834 other stars):
+
+| Yardstick | Repeating long dips found (SNR ≥ 20) | Slow cycles found | Other stars flagged (dimming / brightening) |
+|---|---|---|---|
+| Visit-to-visit scatter (as the detector) | 69% | 25% | 3.0% / 2.0% |
+| Scatter inside each visit | 79% | 55% | 22% / 22% |
+| Scatter about the fitted two-level model | 31% | 17% | 1.7% / 1.6% |
+
+Scatter inside a visit misses the variability between visits that most variable stars have, so it would pass a
+fifth of DR3's light curves. The visit-to-visit scatter was kept. Its weak spot is the cycle of a few months:
+with Gaia's visits one to two months apart, such a cycle shows up as visit-to-visit scatter and raises the
+yardstick with it.
+
+**Calibration** (shard 0/10, all 323 files): thresholds at 0.1% of quiet half-B stars' repeated brightenings,
+G < 19: s_rep > 7.55; G ≥ 19: s_rep > 9.71. Quiet half-A stars: 5 repeated dimmings against 7 repeated
+brightenings of 7,132. A 5% sample of all stars (49,230): 935 repeated dimmings against 881 brightenings. At G < 19
+the search adds 486 stars (1.25%) to the 1,663 (4.3%) that the detector flags.
+
+Found at G < 19, detector or period search together (detector alone in brackets), by expected signal-to-noise:
+
+| | 10-20 | 20-40 | > 40 |
+|---|---|---|---|
+| Repeating long dip | 13% (2%) | 57% (14%) | 78% (54%) |
+| Slow cycle | 4% (3%) | 17% (11%) | 31% (22%) |
+
+Slow cycles with more than three cycles in the span are almost never found (1%), for the reason above. A single
+long dip is called repeating in 6% of cases. DR4 has about twice the visits and span, which helps both.
+
+**Blind test of the period search** (written down and pushed before the draw; same procedure as above,
+`python scripts/slow_blind.py make --rule slow-v2 --batch slow-blind-2`):
+
+- **Rule `slow-v2`** (`cosmos_search/slow/rule_v2.py`, files in `prereg/rules/slow-v2/`): slow-v1 or s_rep above
+  its threshold.
+- **Stars:** shard 2/10 of DR3, none shared with shards 0 or 1.
+- **Batch:** 5,000 quiet stars as they are at G < 19 and 2,000 at G ≥ 19; 600 of each new shape and 300 each of
+  the repeating long dip and the slow cycle, at G < 19; 300 repeated brightenings, reported only.
+- **P1:** natural stars flagged at most 0.6% in each magnitude range (expected about 0.2%: 0.17% on quiet half A).
+- **P2:** each new shape at signal-to-noise ≥ 20 found at least as often as the calibrated shape it most resembles
+  in the same batch, minus 15 points: sawtooth, uneven and paired dips against the repeating long dip; the
+  drifting cycle against the slow cycle.
+- **P3:** the calibrated shapes at signal-to-noise ≥ 20 within 10 points of shard 0: repeating long dip 65%,
+  slow cycle 25%.
+- **What follows.** All pass: slow-v2 is frozen for DR4 with this batch's recall. P1 fails: thresholds from more
+  quiet stars, as for slow-v1. P2 fails for a shape: its recall is stated as a weakness, and whether a fix is
+  worth a third blind test is Cora's call. P3 fails: find out why before freezing.
+
 ## Log
 
+- **2026-10-23.** Slow period search (above): repeating long dips at signal-to-noise 20-40 found 57% of
+  the time instead of 14%; slow cycles stay weak (17%). Its blind test written down before the draw.
 - **2026-10-23.** Blind test (S6, above). False alarms 0.16% (pass), calibrated shapes 85-100% (pass), new shapes
   67% pooled (fail): staircase and accelerating fades over 90%, repeated slow cycles 17%. How to cover
   repeated cycles is open (above).

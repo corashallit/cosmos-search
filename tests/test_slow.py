@@ -285,3 +285,52 @@ def test_rule_slow_v1_flags_and_scores():
     rows = [r | {"flagged": False} if r["family"] == "slow_cycle" else r for r in rows]
     s = rule.score(pd.DataFrame(rows))
     assert not s["criteria"]["P2_held_out_recall"]["pass"] and not s["pass"]
+
+
+def test_period_search_finds_repeated_dips_not_one_episode():
+    from cosmos_search.inject import lightcurve as inj
+    from cosmos_search.slow import detect, period
+
+    rng = np.random.default_rng(3)
+    tv = np.sort(rng.uniform(0, 1000, 40))
+    noise = rng.normal(0, 0.002, 40)
+    dips = inj.Composite(inj._periodic_dips(rng, 0, 1000, 220.0, 0.02, 60.0, 10.0, 10.0))
+    y = noise + dips.factor(tv, "G") - 1
+    r = period.star_scores(tv, y, detect.visit_sigma(y))
+    assert r["s_rep"] > 8 and r["rep_events"] >= 2 and abs(r["rep_period"] - 220.0) < 15
+    assert r["s_rep_bright"] < r["s_rep"]
+    one = inj.Dip(t0=500.0, covering=0.02, ingress=20.0, egress=20.0, flat=200.0)
+    y1 = noise + one.factor(tv, "G") - 1
+    r1 = period.star_scores(tv, y1, detect.visit_sigma(y1))
+    assert not r1["s_rep"] > 5 and r1["s_rep_any"] > r["s_rep"]  # found as one episode, not as repeating
+    rn = period.star_scores(tv, noise, detect.visit_sigma(noise))
+    assert rn["s_rep_any"] < 6
+
+
+def test_period_window_counts_wrapped_event_once():
+    from cosmos_search.slow import period
+
+    # Two visits either side of phase 0 in the same cycle form one event; a window holding only them is invalid.
+    tv = np.array([99.0, 101.0, 150.0, 199.5, 250.0, 330.0])
+    r = period._scan(tv, np.zeros(6), 1.0, np.array([0.01]), 3)
+    assert np.isfinite(r["dim"]).all()
+    assert period.events(np.argsort(tv), 0, 2, tv, np.zeros(6), 1.0)[0] == 1
+    # Two separate faint events with baseline between them pass both conditions; one event does not.
+    dev = np.array([-5.0, 0.0, 0.0, -5.0, 0.0, 0.0])
+    n_ev, z_between, z_rest = period.events(np.array([0, 3, 1, 2, 4, 5]), 0, 2, tv, dev, 1.0)
+    assert n_ev == 2 and z_between == 0 and z_rest == 5
+
+
+def test_rule_slow_v2_adds_repeated_dimming():
+    import pandas as pd
+
+    from cosmos_search.slow import rule_v2
+
+    thr, thr_p, table = rule_v2.load()
+    assert set(thr_p) == {"G<19", "G>=19"} and len(table)
+    stats = pd.DataFrame({"source_id": [1, 2, 3], "gbin": [5, 5, 5], "n_visits": 30, "sigma_visit": 0.01,
+                          "abbe": 0.5, "s_dim": [8.0, 1.0, 1.0], "s_bright": 0.0, "slope_z": 0.0,
+                          "s_rep": [9.0, 9.0, 1.0], "rep_period": 200.0})
+    f = rule_v2.apply(stats, thr, thr_p)
+    assert f["flagged"].tolist() == [True, True, False]
+    assert f["by"].tolist() == ["episode+repeat", "repeat", ""]
