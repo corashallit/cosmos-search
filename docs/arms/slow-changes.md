@@ -58,7 +58,7 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 | S3 | Trend, curvature and long-episode detector; fake slow fades and long dips for recall; brightenings as the false-alarm estimate | S2 | First version done 2026-10-23 (below) |
 | S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | Done 2026-10-23 (below); DataLink download rate open |
 | S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | First version done 2026-10-23 (below); position needs DR4 epoch astrometry |
-| S6 | Pre-registered blind test of the detector: new fake shapes, fresh stars; known variable classes measured openly | S4, S5 | Run 2026-10-23 (below): fails on repeated slow cycles; a score for them is next |
+| S6 | Pre-registered blind test of the detector: new fake shapes, fresh stars; known variable classes measured openly | S4, S5 | Run 2026-10-23 (below): fails on repeated slow cycles; how to cover them is open |
 | S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | |
 | S8 | Verify top candidates: one new brightness measurement each; per-visit spectra for the best | S7 | |
 
@@ -337,11 +337,15 @@ Why the misses (looked at after the reveal):
   deepest point, 52%: those dips mostly fall in a single visit, which the slow search leaves out on purpose (the
   short-dip search covers them), so here too the signal-to-noise measure overstates.
 
-What follows, as written above: the detector is not frozen as it stands. The slow cycle is the shape it misses,
-and a simple score for it exists: a smooth light curve (low Abbé) whose visit fluxes lean to the faint side
-(dimming-only cycles have a flat top and a tail of low points). Its mirror, smooth light curves that lean to the
-bright side, gives the false-alarm estimate as for the other scores. The slow-cycle shape is now spent: its
-recall after the change will be stated as not blind-tested, or tested again with new shapes.
+What follows, as written above: the detector is not frozen as it stands, and the slow-cycle shape is now spent
+(any recall quoted for it after a change is not blind-tested). A first idea, a score for smooth light curves that
+lean to the faint side, does not work: this shape is a sinusoid, which has no lean, and in relative flux it looks
+the same as a pulsating or spotted star. Scoring smoothness alone (Abbé below its 0.1% value for quiet stars,
+0.36) was tried afterwards on the calibration stars (shard 0, 1,852 fakes): recall at signal-to-noise ≥ 20 goes
+from 18% to 54%. It still misses cycles shorter than a third of the span (7% for more than 3 cycles), which need a
+period search, and it flags 5.5% of DR3's G < 19 light curves, so on DR4 it would pass most of the whole-sky
+selection. Whether to add it, leave cycles to the period test of `ebfilter`, or build a slow period search is
+Cora's call (asked 2026-10-23).
 
 **Known variable classes** (active and spotted stars, giants and long-period variables, young stars, eclipsing
 binaries) are measured openly on shard 1, after the reveal, from DPAC's classes. They need no blinding: the
@@ -354,8 +358,8 @@ commit is pushed; `reveal` refuses unless that commit is on origin and the hashe
 ## Log
 
 - **2026-10-23.** Blind test (S6, above). False alarms 0.16% (pass), calibrated shapes 85-100% (pass), new shapes
-  67% pooled (fail): staircase and accelerating fades over 90%, repeated slow cycles 17%. Next: a score for
-  smooth light curves that lean to the faint side.
+  67% pooled (fail): staircase and accelerating fades over 90%, repeated slow cycles 17%. How to cover
+  repeated cycles is open (above).
 - **2026-10-23.** Blind test written down (S6, above) before drawing the batch: four new fake shapes, fresh
   stars from shard 1/10, frozen thresholds and drift table, pass criteria P1-P3.
 - **2026-10-23.** Checks per candidate (S5, above): colour, NEOWISE change or slope against what grey, dust and
