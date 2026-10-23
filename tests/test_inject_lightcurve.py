@@ -74,7 +74,7 @@ def test_held_out_families_refused_unless_confirmatory_and_out_of_calibration():
 
     rng = np.random.default_rng(11)
     t = np.linspace(0.0, 1000.0, 4000)
-    for fam in lc.HELD_OUT_FAMILIES + lc.HELD_OUT_FAMILIES_V2:
+    for fam in lc.HELD_OUT_FAMILIES + lc.HELD_OUT_FAMILIES_V2 + lc.HELD_OUT_SLOW:
         with pytest.raises(lc.HeldOutError):
             lc.sample(rng, fam, 0.0, 1000.0)
         for _ in range(20):
@@ -83,16 +83,17 @@ def test_held_out_families_refused_unless_confirmatory_and_out_of_calibration():
             assert np.all(np.isfinite(k)) and np.all(k > 0) and np.all(k <= 1)
             json.dumps(lc.truth(sig))
     # Held out means no calibration or tuning code draws them.
-    used = set(lc.FAMILIES)
+    used = set(lc.FAMILIES) | set(lc.SLOW_FAMILIES)
     for mod, names in (("cosmos_search.dayone.recurrence_cal", ("FAMILIES",)),
                        ("cosmos_search.ebfilter.cal", ("TARGET_FAMILIES", "OTHER_FAMILIES", "HOST_FAMILIES")),
                        ("cosmos_search.dayone.decoys", ("COUNTS", "COUNTS4", "TRAINS")),
                        ("cosmos_search.dayone.single_cal", ("FAMILIES", "SINGLE_FAMILIES", "TARGET_FAMILIES")),
-                       ("cosmos_search.inject.classes.dimming", ("FAMILIES",))):
+                       ("cosmos_search.inject.classes.dimming", ("FAMILIES",)),
+                       ("scripts.slow_detect_check", ("FAMILIES",))):
         try:
             m = importlib.import_module(mod)
         except ImportError:
             continue
         for n in names:
             used |= set(getattr(m, n, ()))
-    assert not used & set(lc.HELD_OUT_FAMILIES + lc.HELD_OUT_FAMILIES_V2)
+    assert not used & set(lc.HELD_OUT_FAMILIES + lc.HELD_OUT_FAMILIES_V2 + lc.HELD_OUT_SLOW)

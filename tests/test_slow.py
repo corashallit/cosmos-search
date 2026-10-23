@@ -255,3 +255,33 @@ def test_outburst_is_not_a_trend():
     assert abs(f["slope_z"]) < 5
     slow = detect.star_features(epochs_frame(t, rng.normal(0, 1e-3, t.size) - 0.004 * t / 365.25)).iloc[0]
     assert slow["slope_z"] < -10
+
+
+def test_rule_slow_v1_flags_and_scores():
+    import pandas as pd
+
+    from cosmos_search.slow import rule
+
+    thr, table = rule.load()
+    assert set(thr) == {"G<19", "G>=19"} and len(table)
+    stats = pd.DataFrame({"source_id": [1, 2, 3, 4], "gbin": [5, 5, 9, 9], "n_visits": 30, "sigma_visit": 0.01,
+                          "abbe": 0.5, "s_dim": [8.0, 1.0, 8.0, 1.0], "s_bright": 0.0,
+                          "slope_z": [0.0, -5.0, 0.0, -9.0]})
+    f = rule.apply(stats, thr)
+    assert f["flagged"].tolist() == [True, True, False, True]
+    assert f["by"].tolist() == ["episode", "trend", "", "trend"]
+
+    rng = np.random.default_rng(0)
+    rows = [{"id": i, "group": "natural", "family": "", "gbin": 5, "flagged": i < 10, "by": "", "snr": np.nan}
+            for i in range(5000)]
+    for fam in ("staircase_fade", "slow_cycle", "accelerating_fade", "fade_with_dips"):
+        rows += [{"id": 0, "group": "held_out", "family": fam, "gbin": 5, "flagged": rng.random() < 0.85,
+                  "by": "trend", "snr": 30.0} for _ in range(150)]
+    for fam, r in rule.KNOWN_S3.items():
+        rows += [{"id": 0, "group": "known", "family": fam, "gbin": 5, "flagged": rng.random() < r, "by": "episode",
+                  "snr": 30.0} for _ in range(100)]
+    s = rule.score(pd.DataFrame(rows))
+    assert s["criteria"]["P1_false_alarm"]["pass"] and s["criteria"]["P2_held_out_recall"]["pass"]
+    rows = [r | {"flagged": False} if r["family"] == "slow_cycle" else r for r in rows]
+    s = rule.score(pd.DataFrame(rows))
+    assert not s["criteria"]["P2_held_out_recall"]["pass"] and not s["pass"]

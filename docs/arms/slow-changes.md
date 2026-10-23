@@ -58,7 +58,7 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 | S3 | Trend, curvature and long-episode detector; fake slow fades and long dips for recall; brightenings as the false-alarm estimate | S2 | First version done 2026-10-23 (below) |
 | S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | Done 2026-10-23 (below); DataLink download rate open |
 | S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | First version done 2026-10-23 (below); position needs DR4 epoch astrometry |
-| S6 | Pre-registered blind test: new fakes; controls from active stars, giants, young stars, known eclipsing binaries | S4, S5 | |
+| S6 | Pre-registered blind test of the detector: new fake shapes, fresh stars; known variable classes measured openly | S4, S5 | Run 2026-10-23 (below): fails on repeated slow cycles; how to cover them is open |
 | S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | |
 | S8 | Verify top candidates: one new brightness measurement each; per-visit spectra for the best | S7 | |
 
@@ -254,8 +254,114 @@ was expected; the point was to see the checks work:
 
 Output: `checks.csv` (one row per star) and the NEOWISE and ZTF epochs.
 
+## Blind test (S6)
+
+Written down and pushed before the batch is drawn. Nothing below changes after the draw.
+
+**What is tested.** The detector of S3 with its settings frozen as `slow-v1` (`cosmos_search/slow/rule.py`): a
+star is flagged when its dimming-episode score or its fading trend passes the threshold for its magnitude range
+(G < 19: s_dim > 7.41 or slope_z < −3.94; G ≥ 19: s_dim > 17.1 or slope_z < −7.91), after correcting its epochs
+with the drift table. Thresholds and drift table come from shard 0/10 of DR3 and are frozen in
+`prereg/rules/slow-v1/` (sha256 of each file goes into the batch plan).
+
+**Stars.** Shard 1/10 of DR3's epoch photometry (1,042,022 sources, none shared with shard 0). Quiet stars by the
+same definition as in S2 (`drift.reference_mask`): 16,711, of which 14,060 at G < 19.
+
+**Batch** (`scripts/slow_blind.py`, seed from the operating system, answers sealed with age to Cora's key and
+the reveal key):
+
+| Group | Stars | What it measures |
+|---|---|---|
+| Quiet stars as they are, G < 19 | 5,000 | false alarms |
+| Quiet stars as they are, G ≥ 19 | 2,000 | false alarms |
+| New shapes, 600 each, G < 19 | 2,400 | recall on shapes the detector was not designed or calibrated on |
+| Calibrated shapes (long dip, late-starting fade, steady fade), 300 each, G < 19 | 900 | whether S3's recall holds on fresh stars |
+| Late-starting brightenings, G < 19 | 300 | reported only: how often a brightening is flagged as a fade |
+
+Each fake goes into its own quiet star, which never also appears as a natural star. Ids are anonymous and the
+order is shuffled.
+
+The four new shapes (`inject.lightcurve.HELD_OUT_SLOW`) were defined for this test and have not been run through
+the detector. `sample()` refuses them unless a confirmatory batch asks, and a test checks that no calibration
+code lists them:
+
+- **Staircase fade:** 2-5 abrupt drops of 0.2-3% each that stay down.
+- **Slow cycle:** repeated fades and full recoveries, period 150-1,000 days, depth 0.2-10%.
+- **Accelerating fade:** a fade that starts slowly and speeds up (depth × x^p, p = 2-4), 0.2-10%.
+- **Fade with dips:** a gradual fade of 0.2-5% with a few to ~20 short dips (1-20 days, 0.5-10%) after it starts.
+
+Half of each are grey, half reddened (as for the calibrated shapes).
+
+**Signal-to-noise** of a fake, as in S3: its deepest G deficit at the visits × √(visits below half that depth) ÷
+the host star's own visit-to-visit noise.
+
+**Pass criteria** (all three must hold):
+
+| | Criterion | Expected from shard 0 |
+|---|---|---|
+| P1 | Natural stars flagged: at most 0.5% in each magnitude range | 0.23% (G < 19), 0.33% (G ≥ 19) |
+| P2 | New shapes at G < 19 and signal-to-noise ≥ 20: pooled recall at least 70% with 95% lower bound at least 60%, and each shape at least 50% | no expectation (unseen shapes); the calibrated shapes give 83-100% |
+| P3 | Calibrated shapes at signal-to-noise ≥ 20: each within 10 points of S3 | long dip 83%, late-starting fade 84%, steady fade 100% |
+
+**What each outcome leads to.**
+
+- All pass: the detector is frozen for DR4 as it stands (S7), and the recall quoted for DR4 is this batch's.
+- P1 fails: the thresholds do not carry over between sets of stars; set them from both shards before DR4 (on DR4
+  they come from DR4's own stars in any case) and say so.
+- P2 fails for a shape: the detector misses that kind of change. Add a score aimed at it if one is simple; the
+  shape is then spent, and its recall after the change is stated as not blind-tested.
+- P3 fails: S3's recall figures were optimistic; find out why before freezing.
+
+**Result** (batch `slow-blind-1`, flags archived in `prereg/verdicts/slow-blind-1/` and pushed before the
+reveal; full numbers in the batch's `score.json`). The test fails as a whole, on P2:
+
+| | Result | Pass? |
+|---|---|---|
+| P1 | 8 of 5,000 natural stars flagged at G < 19 (0.16%, 95% upper bound 0.29%); 1 of 2,000 at G ≥ 19 (0.05%) | yes |
+| P2 | New shapes pooled: 558 of 838 (67%, lower bound 64%). Staircase fade 96% (324/339), accelerating fade 92% (116/126), fade with dips 55% (80/145), slow cycle 17% (38/228) | **no** (pooled under 70%; slow cycle under 50%) |
+| P3 | Long dip 85% (47/55), late-starting fade 86% (73/85), steady fade 100% (50/50) | yes |
+
+Reported only: 49 of 300 late-starting brightenings (16%) were flagged as fades, all by the episode score. The
+stretch before a brightening looks like a dimming that never recovers inside the span. The checks per candidate
+(ZTF after 2020, and whether an episode touches the start of the light curve) have to sort these out.
+
+Why the misses (looked at after the reveal):
+
+- **Slow cycle.** Recall falls with the number of cycles inside the span: 57% (30/53) for up to 1.5 cycles, 20%
+  for 1.5-2, 4% for 2-3 and 1% above 3. The detector looks for one episode against the star's median. With
+  several cycles the median sits partway down, and each trough holds only a few of DR3's ~24 visits. The
+  signal-to-noise measure adds up every trough, which suits a search that stacks cycles and overstates what a
+  one-episode search can see. These light curves are smooth (median Abbé 0.40 against 0.95 for quiet stars), so
+  the selection score of S4 keeps them; the detector is what drops them.
+- **Fade with dips.** When the fade is deeper than the deepest dip, 11 of 12 are found. When a short dip is the
+  deepest point, 52%: those dips mostly fall in a single visit, which the slow search leaves out on purpose (the
+  short-dip search covers them), so here too the signal-to-noise measure overstates.
+
+What follows, as written above: the detector is not frozen as it stands, and the slow-cycle shape is now spent
+(any recall quoted for it after a change is not blind-tested). A first idea, a score for smooth light curves that
+lean to the faint side, does not work: this shape is a sinusoid, which has no lean, and in relative flux it looks
+the same as a pulsating or spotted star. Scoring smoothness alone (Abbé below its 0.1% value for quiet stars,
+0.36) was tried afterwards on the calibration stars (shard 0, 1,852 fakes): recall at signal-to-noise ≥ 20 goes
+from 18% to 54%. It still misses cycles shorter than a third of the span (7% for more than 3 cycles), which need a
+period search, and it flags 5.5% of DR3's G < 19 light curves, so on DR4 it would pass most of the whole-sky
+selection. Whether to add it, leave cycles to the period test of `ebfilter`, or build a slow period search is
+Cora's call (asked 2026-10-23).
+
+**Known variable classes** (active and spotted stars, giants and long-period variables, young stars, eclipsing
+binaries) are measured openly on shard 1, after the reveal, from DPAC's classes. They need no blinding: the
+question is how many such stars pass, which sets the workload for the checks per candidate (S5).
+
+**Procedure** (as for the astrometry blind test): `make` draws the batch and seals the answers; `run` writes
+`flags.csv`; `commit` archives the flags in `prereg/verdicts/slow-blind-1/` and refuses a dirty tree; the archive
+commit is pushed; `reveal` refuses unless that commit is on origin and the hashes match.
+
 ## Log
 
+- **2026-10-23.** Blind test (S6, above). False alarms 0.16% (pass), calibrated shapes 85-100% (pass), new shapes
+  67% pooled (fail): staircase and accelerating fades over 90%, repeated slow cycles 17%. How to cover
+  repeated cycles is open (above).
+- **2026-10-23.** Blind test written down (S6, above) before drawing the batch: four new fake shapes, fresh
+  stars from shard 1/10, frozen thresholds and drift table, pass criteria P1-P3.
 - **2026-10-23.** Checks per candidate (S5, above): colour, NEOWISE change or slope against what grey, dust and
   re-emission predict, ZTF after 2020. On DR3's 40 strongest candidates all are known variable classes; spotted
   stars' fades are neither grey nor dusty in W1, as a change in the star predicts.
