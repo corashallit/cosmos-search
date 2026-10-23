@@ -10,6 +10,9 @@ Three sources, all with changes inside DR4's span (2014-07-25 to 2020-01-20) or 
   need a change of about a magnitude, so these are the large-amplitude end only.
 - VSX stars typed R CrB, UX Ori or DY Per: deep, irregular, dust-driven fades.
 
+Alerts also come with Gaia's own G light curves, one point per field-of-view transit through to now
+(`alert_lightcurves`): DR4's sampling over DR4's span, for testing the detector on known answers before DR4 is out.
+
 Each row keeps the nearest Gaia DR3 source within RADIUS_ARCSEC of the catalogue position. VSX positions are
 J2000 and alert positions come from Gaia itself, so a few arcsec covers both; `sep_arcsec` and the G magnitude
 let a reader reject a wrong neighbour.
@@ -23,6 +26,8 @@ import pandas as pd
 from cosmos_search.net import get_client
 
 ALERTS_URL = "http://gsaweb.ast.cam.ac.uk/alerts/alerts.csv"
+ALERT_LC_URL = "http://gsaweb.ast.cam.ac.uk/alerts/alert/{name}/lightcurve.csv/"
+GAIA_T0_JD = 2455197.5  # epoch photometry times are days since this JD (TCB)
 VSX_HATS = "https://data.lsdb.io/hats/vsx/2026-06"
 DR4_START, DR4_END = "2014-07-25", "2020-01-20"
 RADIUS_ARCSEC = 2.0
@@ -99,3 +104,39 @@ def build(tap, alerts_text=None, hats=VSX_HATS):
         alerts_text = get_client().get(ALERTS_URL).text
     known = pd.concat([pd.DataFrame([BOYAJIAN]), fading_alerts(alerts_text), vsx_slow(hats)], ignore_index=True)
     return match_gaia(known, tap)
+
+
+def alert_lightcurve(text, name):
+    """One alert's light curve (first line the alert name, then Date, JD(TCB), averagemag) as name, t (days
+    since GAIA_T0_JD, as epoch photometry) and G mag; points marked untrusted are dropped."""
+    lc = pd.read_csv(io.StringIO(text), skiprows=1)
+    lc.columns = [c.strip("#").strip() for c in lc.columns]
+    mag = pd.to_numeric(lc["averagemag"], errors="coerce")
+    ok = mag.notna()
+    return pd.DataFrame({"name": name, "t": lc.loc[ok, "JD(TCB)"].astype(float).to_numpy() - GAIA_T0_JD,
+                         "mag": mag[ok].to_numpy()})
+
+
+def alert_lightcurves(names):
+    """Light curves of the named alerts from the Gaia Science Alerts site; failed downloads are skipped."""
+    client, out = get_client(), []
+    for n in names:
+        try:
+            r = client.get(ALERT_LC_URL.format(name=n))
+            r.raise_for_status()
+            out.append(alert_lightcurve(r.text, n))
+        except Exception as e:  # noqa: BLE001 (one missing alert should not stop the rest)
+            print(f"{n}: {e}")
+    return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=["name", "t", "mag"])
+
+
+def alert_epochs(lcs, start=DR4_START, end=DR4_END):
+    """Alert light curves inside [start, end] in detect.star_features' input form: G only, fractional flux about
+    each star's median, source_id numbering the alerts in order of name."""
+    t0 = (pd.Timestamp(start).to_julian_date() - GAIA_T0_JD, pd.Timestamp(end).to_julian_date() - GAIA_T0_JD)
+    d = lcs[(lcs["t"] >= t0[0]) & (lcs["t"] <= t0[1])].copy()
+    flux = 10 ** (-0.4 * d["mag"])
+    d["frac_corr"] = flux / flux.groupby(d["name"]).transform("median") - 1
+    d["source_id"] = d["name"].astype("category").cat.codes.astype(np.int64)
+    d["band"] = np.int8(0)
+    return d.sort_values(["source_id", "t"]).reset_index(drop=True)
