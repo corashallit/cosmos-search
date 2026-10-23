@@ -57,7 +57,7 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 | S2 | Drift correction from neighbours (`drift`), tested on stars it was not fitted on | — | Magnitude/colour drift done 2026-10-23; sky term open (below) |
 | S3 | Trend, curvature and long-episode detector; fake slow fades and long dips for recall; brightenings as the false-alarm estimate | S2 | First version done 2026-10-23 (below) |
 | S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | Done 2026-10-23 (below); DataLink download rate open |
-| S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | |
+| S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | First version done 2026-10-23 (below); position needs DR4 epoch astrometry |
 | S6 | Pre-registered blind test: new fakes; controls from active stars, giants, young stars, known eclipsing binaries | S4, S5 | |
 | S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | |
 | S8 | Verify top candidates: one new brightness measurement each; per-visit spectra for the best | S7 | |
@@ -128,7 +128,10 @@ noise is the scatter of one visit measured from differences between consecutive 
 variability faster than the weeks between visits and every statistic below asks whether the slow part stands out
 above the star's own fast scatter. Per star, in G:
 
-- `slope_z`: the linear trend over the visits, in units of its error.
+- `slope_z`: the linear trend over the visits, in units of its error, taken from the larger of the visit noise
+  and the scatter about the line. (With the visit noise alone, a median, outbursting and large-amplitude pulsating
+  stars passed as steep fades: a few big jumps barely move a median. Fixed 2026-10-23 after the check sheet below
+  showed them.)
 - `s_dim`: the strongest dimming episode, over every run of at least 3 consecutive visits spanning at least 20
   days and at most 60% of the visits: the run's mean deficit below the star's median, times the square root of
   the number of visits, over the noise. The run's deepest visit is left out, so one deep visit (a short dip)
@@ -139,18 +142,18 @@ above the star's own fast scatter. Per star, in G:
 A star passes if `s_dim` or `-slope_z` exceeds a threshold set so that 0.1% of quiet stars pass by brightening.
 
 **False alarms.** In quiet stars of half B (never used for the drift) dimming and brightening are equally common
-(beyond 8: 22 dimming episodes against 24 brightening; 30 fading trends against 23 brightening). Faint stars need
+(beyond 8: 22 dimming episodes against 24 brightening; beyond 5, 17 fading trends against 13). Faint stars need
 their own thresholds: at G ≥ 19 the quiet stars' tails reach more than twice as far in both directions, and the
 stars there are mostly blue and slowly wandering, as quasars are. Thresholds at 0.1%:
 
 | G | Quiet stars | `s_dim` | `-slope_z` |
 |---|---|---|---|
-| < 19 | 6,023 | 7.4 | 6.9 |
-| ≥ 19 | 1,228 | 17.1 | 17.9 |
+| < 19 | 6,023 | 7.4 | 3.9 |
+| ≥ 19 | 1,228 | 17.1 | 7.9 |
 
 DR3 only has light curves for stars it classed as variable, so even these quiet stars are not typical; DR4's
 thresholds have to come from DR4's own brightenings, at the far smaller false-alarm rates a billion stars need.
-Among all DR3 light curves at G < 19, 30,703 pass against 26,369 brightening: a 16% excess of dimming among
+Among all DR3 light curves at G < 19, 33,833 pass against 30,895 brightening: a 10% excess of dimming among
 DR3 variables, which this sample cannot attribute.
 
 **Recall.** One fake of each family per quiet half-B star (21,762 fakes), injected into the raw light curve
@@ -159,11 +162,11 @@ the visits below half of it, over the host's noise. Share found at G < 19:
 
 | Signal-to-noise | Steady fade | Fade that starts partway | Long dip (20-1,500 days) |
 |---|---|---|---|
-| < 5 | 3% | 0.4% | 0.2% |
-| 5-10 | 66% | 5% | 2% |
-| 10-20 | 99% | 48% | 28% |
-| 20-40 | 100% | 80% | 75% |
-| > 40 | 100% | 95% | 93% |
+| < 5 | 16% | 1% | 0.2% |
+| 5-10 | 92% | 21% | 2% |
+| 10-20 | 99% | 61% | 27% |
+| 20-40 | 100% | 81% | 73% |
+| > 40 | 100% | 86% | 92% |
 
 The steady fade is found close to the ideal (`slope_z` does nearly all of it). Long dips need about twice the
 signal-to-noise: the search over every possible run costs some, leaving out the deepest visit costs some more,
@@ -173,9 +176,9 @@ DR4 doubles the span and the visits. At G ≥ 19 almost nothing is found at the 
 
 **Known answers.** DR3 ends on 2017-05-28, before most fading alerts, so the 22 known answers with DR3 light
 curves mostly show nothing (5 pass). The alerts' own Gaia light curves, one point per transit over DR4's span
-(`python -m cosmos_search.slow alert-lcs`, 358 with enough visits), are a better check: 211 pass. Of the 241
-whose light curves are smooth (Abbe < 0.5) 190 pass (79%); of the 117 that change faster than Gaia's visits
-(one-day dips, erratic young stars) 21 pass, which is the intended behaviour, since the short-dip search covers
+(`python -m cosmos_search.slow alert-lcs`, 358 with enough visits), are a better check: 216 pass. Of the 241
+whose light curves are smooth (Abbe < 0.5) 194 pass (80%); of the 117 that change faster than Gaia's visits
+(one-day dips, erratic young stars) 22 pass, which is the intended behaviour, since the short-dip search covers
 those. R CrB stars whose median state is the faint one show their recoveries as brightenings.
 
 Open: the sky term from S2; thresholds per colour; families held out of all calibration for the blind test (S6).
@@ -204,24 +207,63 @@ detector finds at its 0.1% thresholds: did the selection keep it? At G < 19:
 
 | Share of quiet stars selected | Long dips kept | Late-starting fades kept | Steady fades kept |
 |---|---|---|---|
-| 0.1% | 94% | 87% | 82% |
-| 1% | 97% | 94% | 92% |
-| 10% | 99% | 99% | 98% |
+| 0.1% | 95% | 77% | 69% |
+| 1% | 98% | 88% | 82% |
+| 10% | 99% | 98% | 95% |
 
-So a selection of 0.1-1% of stars loses little of what the detector can find, and the light curves to fetch fall
+So a selection of 0.1-1% of stars keeps most of what the detector can find (the weakest steady fades, which the
+trend statistic reaches and the variance-based score does not, are what it loses), and the light curves to fetch fall
 from the whole catalogue to its 0.1-1%. The rate at which DataLink serves DR4 light curves sets which share
-is affordable; it is unknown until release. DR3's quiet stars are not white-noise stars (median uwv 1.9-4.9 and
+is affordable. DR3's DataLink served 1.5 light curves per second at best and 0.27 on a busy afternoon, with no
+gain from parallel calls (docs/infra/gaia-epoch.md): 0.2-1.3 × 10⁵ a day. At that rate 0.1% of DR4's ~2 × 10⁹
+stars takes two weeks to three months, and 1% ten times longer. Unless DR4 also offers bulk files, plan for a
+share near 0.1%, highest scores first. DR3's quiet stars are not white-noise stars (median uwv 1.9-4.9 and
 Abbé 0.88-0.94 by G bin: underestimated errors and correlated calibration), which is why the cuts come from the
 stars themselves. At G ≥ 19 too few fakes are found to say anything. Not yet used: the BP and RP Abbé values
 (a dust or grey change shows in all three bands), and `phot_g_harmonic_amplitude` to drop doubles.
 
+## Checks per candidate (S5)
+
+`slow/checks.py`, run on DR3 with `scripts/slow_checks.py`. Each check asks a question that the explanations
+answer differently:
+
+| Check | Grey occulter | Dust in front | Dust shell re-emitting | Change in the star |
+|---|---|---|---|---|
+| BP depth / RP depth (`colour`) | 1 | ~1.7 | ~1.7 | > 1 for cooling |
+| NEOWISE W1/W2 change over the episode, or W1/W2 slope against Gaia's (`wise_change`, `wise_slope`) | same as G | ~0.05-0.07 of G | brighter (+5% in W2 per 1% of G at 300 K; far more if hotter) | well below G (Rayleigh-Jeans side) |
+| ZTF after 2020-01-20 (`after`) | — | — | — | — |
+
+ZTF says whether a change went on, stopped or recovered after DR4's span. NEOWISE comes from IRSA's
+`neowiser_p1bs_psd` single exposures (clean frames, one component, no contamination flags), averaged per ~6-month
+visit. Position during the episode (`astrometry.dips`) needs DR4's epoch astrometry and is not in yet.
+
+Run on 2026-10-23 on the 40 strongest DR3 candidates at G < 17 (30 dimming episodes with smooth light curves,
+10 fading trends). Every one carries a DPAC variability class: eclipsing binaries, RS CVn and other spotted stars,
+quasars, Be stars, long-period variables. DR3's light curves are of stars already classed as variable, so this
+was expected; the point was to see the checks work:
+
+- The first version of the sheet showed outbursting and large-amplitude pulsating stars as the steepest "fades",
+  which led to the trend-error fix above (S3).
+- The steady fades that remain are smooth (Abbé 0.02-0.04). For two of the three spotted stars with NEOWISE
+  coverage W1 fades at 0.4 and 0.6 of Gaia's rate (the third is too noisy to say): more than dust in front allows (0.07), less than grey blocking (1). That is what a
+  change in the star's own temperature or spot coverage gives.
+- NEOWISE covered 14 of the 30 episodes; the rest were shorter than its 6-month spacing or fell between visits.
+  8 of the 40 stars had no clean NEOWISE exposures (crowded fields). ZTF had enough epochs either side of 2020 for 17.
+- 16 of the 30 episodes are grey within 2σ and 5 dust-like. The grey ones are mostly eclipses of long-period
+  binaries, which is why the class and the periodicity search (`ebfilter`) come first in the order of checks.
+
+Output: `checks.csv` (one row per star) and the NEOWISE and ZTF epochs.
+
 ## Log
 
+- **2026-10-23.** Checks per candidate (S5, above): colour, NEOWISE change or slope against what grey, dust and
+  re-emission predict, ZTF after 2020. On DR3's 40 strongest candidates all are known variable classes; spotted
+  stars' fades are neither grey nor dusty in W1, as a change in the star predicts.
 - **2026-10-23.** Whole-sky selection (S4, above): selecting 0.1% of stars by √n × uwv × (1 − Abbé) per G bin
-  keeps 82-94% of what the detector finds at G < 19; 1% keeps 92-97%.
+  keeps 69-95% of what the detector finds at G < 19; 1% keeps 82-98%. DR3's DataLink rate points to ~0.1%.
 - **2026-10-23.** Detector first version (S3, above): fades found near the ideal, long dips need about twice the
-  signal-to-noise; faint stars (G ≥ 19, mostly quasars) need their own thresholds; 79% of smooth fading alerts
-  pass at DR4's sampling.
+  signal-to-noise; faint stars (G ≥ 19, mostly quasars) need their own thresholds; 80% of smooth fading alerts
+  pass at DR4's sampling. Trend error made robust to rare large jumps the same day (S5 check sheet).
 - **2026-10-23.** Made the main search after a step-back review (Cora's decision, 2026-10-23). DR3 numbers behind
   it: trend error 0.03% per year at G 13-14 and 0.05 at G 15-16 for the quietest DR3 stars over 2.6 years, with
   star-to-star spread only 1.2-1.3× the error; median trend of quiet stars +0.02 to +0.1% per year at G < 17
