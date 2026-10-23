@@ -22,6 +22,21 @@ pass simply for being variable; it passes only if its slow component stands out 
   MAX_EPISODE_FRACTION of the visits so the median stays a baseline.
 - `depth_bp`, `depth_rp` (and errors): the mean BP and RP deficits over the G episode's time window, for the
   colour of the change. Grey bodies give equal fractional depths; dust gives depth_bp > depth_rp.
+
+Which level is the star's normal one. `s_dim` measures runs against the median, so it takes the level the star
+spends most of its visits at as normal. A star that brightens for good partway through, and spends more than half
+its visits bright, then shows its earlier visits as a dimming episode: on DR3, 16% of late-starting brightenings
+were flagged as fades this way (slow-blind-1). `s_fade` and `s_rise` read the light curve in time order instead:
+a run of faint visits that starts the light curve, or follows visits that are themselves faint (by more than half
+the run's depth), is a star that got brighter, so it scores in `s_rise`; a run of bright visits that starts the
+light curve is a star that got fainter afterwards, so it scores in `s_fade`. Closed runs (normal visits before
+them) score as before. The two are mirror images, so `s_rise` stays the false-alarm estimate for `s_fade`. The
+cost is a dimming episode already under way at the first visit, which reads as a rise; DR4's longer span makes
+those rarer. `fade_kind` says which run made `s_fade`: "dip" (normal before and after), "fade" (normal before,
+faint to the last visit) or "drop" (bright first, fainter for the rest); `rise_kind` likewise for `s_rise` ("bump",
+"rise", "jump"), with its bright window `rise_t0`-`rise_t1`. The episode window, `dim_depth` and the
+band depths describe that run, with the normal level taken from the visits outside the window. `s_dim` and
+`s_bright` stay as they were for the frozen rules slow-v1 and slow-v2.
 """
 
 import numpy as np
@@ -56,12 +71,9 @@ def abbe(yv):
     return float(np.sum(np.diff(yv) ** 2) / (len(yv) - 1) / (2 * v)) if v > 0 else np.nan
 
 
-def episodes(tv, yv, sigma):
-    """Strongest dimming and brightening runs of consecutive visits.
-
-    Each run's most extreme visit (deepest for dimming, brightest for brightening) is left out of its sum, so no
-    single visit can make an episode: one deep visit is a short dip, which the short-dip search covers.
-    Returns (s_dim, i, j, s_bright, i, j) with runs as visit index ranges [i, j)."""
+def _runs(tv, yv, sigma):
+    """Every candidate run of consecutive visits with its dimming and brightening scores (deepest or brightest
+    visit left out) and whether it is open at the start (see the module docstring). None if no run qualifies."""
     n = len(yv)
     dev = yv - np.median(yv)
     c = np.r_[0.0, np.cumsum(dev)]
@@ -70,7 +82,7 @@ def episodes(tv, yv, sigma):
     keep = (length <= MAX_EPISODE_FRACTION * n) & (tv[j - 1] - tv[i] >= MIN_EPISODE_DAYS)
     i, j, length = i[keep], j[keep], length[keep]
     if not len(i):
-        return np.nan, -1, -1, np.nan, -1, -1
+        return None
     # lo[a, b] = min(dev[a:b + 1]), hi likewise, for b >= a.
     later = np.arange(n)[None, :] >= np.arange(n)[:, None]
     lo = np.minimum.accumulate(np.where(later, dev[None, :], np.inf), axis=1)
@@ -79,20 +91,69 @@ def episodes(tv, yv, sigma):
     norm = np.sqrt(length - 1) * sigma
     dim = -(run - lo[i, j - 1]) / norm  # positive = fainter than the median
     bright = (run - hi[i, j - 1]) / norm
+    # Open at the start: the run begins the light curve, or the visits before it sit on the run's side of the
+    # median by more than half the run's mean offset (the same level continues back to the first visit).
+    with np.errstate(invalid="ignore", divide="ignore"):
+        lead = np.where(i > 0, c[i] / np.maximum(i, 1), np.nan)
+    half = run / length / 2
+    open_lo = (i == 0) | (lead < half)
+    open_hi = (i == 0) | (lead > half)
+    return i, j, dim, bright, open_lo, open_hi
+
+
+def episodes(tv, yv, sigma):
+    """Strongest dimming and brightening runs of consecutive visits, against the median.
+
+    Each run's most extreme visit (deepest for dimming, brightest for brightening) is left out of its sum, so no
+    single visit can make an episode: one deep visit is a short dip, which the short-dip search covers.
+    Returns (s_dim, i, j, s_bright, i, j) with runs as visit index ranges [i, j)."""
+    r = _runs(tv, yv, sigma)
+    if r is None:
+        return np.nan, -1, -1, np.nan, -1, -1
+    i, j, dim, bright = r[:4]
     a, b = int(np.argmax(dim)), int(np.argmax(bright))
     return float(dim[a]), int(i[a]), int(j[a]), float(bright[b]), int(i[b]), int(j[b])
 
 
+def _fade(tv, yv, sigma):
+    """Strongest getting-fainter run in time order: (score, kind, t0, t1) with [t0, t1] the faint window."""
+    r = _runs(tv, yv, sigma)
+    if r is None:
+        return np.nan, "", np.nan, np.nan
+    i, j, dim, bright, open_lo, open_hi = r
+    # A run open at the start that also reaches the last visit shows no change in time either way: neither.
+    to_end = j == len(yv)
+    fade = np.maximum(np.where(open_lo, -np.inf, dim), np.where(open_hi & ~to_end, bright, -np.inf))
+    a = int(np.argmax(fade))
+    n = len(yv)
+    if open_hi[a] and not to_end[a] and bright[a] >= dim[a]:
+        return float(fade[a]), "drop", float(tv[j[a]]), float(tv[-1])
+    return float(fade[a]), ("dip" if j[a] < n else "fade"), float(tv[i[a]]), float(tv[j[a] - 1])
+
+
+def ordered_episodes(tv, yv, sigma):
+    """The runs read in time order (module docstring): the strongest getting-fainter run and, as its mirror, the
+    strongest getting-brighter run (the same on the flipped light curve).
+
+    Returns ((s_fade, kind, t0, t1), (s_rise, kind, t0, t1)): kinds "dip", "fade" or "drop" ("bump", "rise",
+    "jump" for brightening), windows the faint (bright) visits."""
+    up = _fade(tv, -yv, sigma)
+    names = {"dip": "bump", "fade": "rise", "drop": "jump", "": ""}
+    return _fade(tv, yv, sigma), (up[0], names[up[1]], up[2], up[3])
+
+
 def _band_depth(t, y, t0, t1):
-    """Mean deficit of one band's visits inside [t0, t1] against that band's median, and its error."""
+    """Mean deficit of one band's visits inside [t0, t1] against the median of its visits outside, and its
+    error."""
     if len(t) < MIN_VISITS:
         return np.nan, np.nan
     tv, yv = visits(t, y)
     inside = (tv >= t0) & (tv <= t1)
-    if inside.sum() < 1:
+    if inside.sum() < 1 or (~inside).sum() < 1:
         return np.nan, np.nan
     sig = visit_sigma(yv)
-    return float(np.median(yv) - yv[inside].mean()), float(sig / np.sqrt(inside.sum()))
+    return (float(np.median(yv[~inside]) - yv[inside].mean()),
+            float(sig * np.sqrt(1 / inside.sum() + np.pi / 2 / (~inside).sum())))
 
 
 def star_features(epochs, col="frac_corr"):
@@ -120,17 +181,19 @@ def star_features(epochs, col="frac_corr"):
         slope = float(np.sum(x * (yv - yv.mean())) / sxx) if sxx > 0 else np.nan
         resid = yv - yv.mean() - slope * x
         sig_trend = max(sig, float(np.sqrt(np.sum(resid ** 2) / (len(tv) - 2))))
-        s_dim, di, dj, s_br, _, _ = episodes(tv, yv, sig)
+        s_dim, _, _, s_br, _, _ = episodes(tv, yv, sig)
+        (s_fade, kind, t0, t1), (s_rise, rkind, r0, r1) = ordered_episodes(tv, yv, sig)
         row = {"source_id": int(sid[a]), "n_visits": len(tv), "t_first": tv[0], "t_last": tv[-1],
                "sigma_visit": sig, "abbe": abbe(yv),
                "slope": slope, "slope_z": slope / (sig_trend / np.sqrt(sxx)) if sxx > 0 else np.nan,
-               "s_dim": s_dim, "s_bright": s_br, "dim_depth": np.nan, "dim_t0": np.nan, "dim_t1": np.nan,
-               "dim_visits": 0, "depth_bp": np.nan, "depth_bp_err": np.nan, "depth_rp": np.nan,
-               "depth_rp_err": np.nan}
-        if di >= 0:
-            t0, t1 = tv[di], tv[dj - 1]
-            row.update(dim_depth=float(np.median(yv) - yv[di:dj].mean()), dim_t0=t0, dim_t1=t1,
-                       dim_visits=dj - di)
+               "s_dim": s_dim, "s_bright": s_br, "s_fade": s_fade, "s_rise": s_rise, "fade_kind": kind,
+               "rise_kind": rkind, "rise_t0": r0, "rise_t1": r1,
+               "dim_depth": np.nan, "dim_t0": np.nan, "dim_t1": np.nan, "dim_visits": 0, "depth_bp": np.nan,
+               "depth_bp_err": np.nan, "depth_rp": np.nan, "depth_rp_err": np.nan}
+        if kind:
+            inside = (tv >= t0) & (tv <= t1)
+            row.update(dim_depth=float(np.median(yv[~inside]) - yv[inside].mean()) if (~inside).any() else np.nan,
+                       dim_t0=t0, dim_t1=t1, dim_visits=int(inside.sum()))
             for code, name in ((1, "bp"), (2, "rp")):
                 m = np.flatnonzero(bb == code) + a
                 d, de = _band_depth(t[m], y[m], t0, t1)

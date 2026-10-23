@@ -224,3 +224,54 @@ def datalink_epoch_photometry(source_ids, client=None, cache=True):
         resp.raise_for_status()
         tables.append(read_epoch_csv(resp.content))
     return pa.concat_tables(tables) if tables else SCHEMA.empty_table()
+
+
+# -- partner data centres ---------------------------------------------------------------------------
+
+# Gaia@AIP serves DR3 epoch photometry as a TAP table with the bulk files' columns, one row per source. Measured
+# 2026-10-23: 20,000 light curves by source_id range in 13 s (~1,500 per second; 4 queries in parallel ~3,000),
+# against 0.3-1.5 per second from ESA's DataLink. An IN list of 500 ids took 21 s, so query by source_id range
+# (a range is a patch of sky: source_id // 2**35 is the level-12 HEALPix pixel). Whether partner centres
+# (CDS, ASDC, ARI, AIP, Flatiron) carry DR4's epoch photometry is not known before release.
+MIRRORS = {"aip": "https://gaia.aip.de/tap"}
+MIRROR_TABLE = "gaiadr3.epoch_photometry"
+
+
+def mirror_adql(table=MIRROR_TABLE, source_id_range=None, source_ids=None, top=None):
+    """ADQL for light curves from a partner centre's epoch-photometry table (DR3 bulk-file columns)."""
+    cols = ", ".join(("source_id", "n_transits") + tuple(_NUMERIC) + _BOOL)
+    where = []
+    if source_id_range is not None:
+        where.append(f"source_id BETWEEN {int(source_id_range[0])} AND {int(source_id_range[1])}")
+    if source_ids is not None:
+        where.append(f"source_id IN ({', '.join(str(int(s)) for s in source_ids)})")
+    top = f"TOP {int(top)} " if top else ""
+    return f"SELECT {top}{cols} FROM {table}" + (f" WHERE {' AND '.join(where)}" if where else "")
+
+
+def mirror_rows_to_table(rows):
+    """Light-curve table (SCHEMA) from an astropy table of mirror rows (array-valued columns)."""
+    if not len(rows):
+        return SCHEMA.empty_table()
+
+    def arrays(name, dtype, fill):
+        parts = [np.ma.filled(np.ma.asarray(v, dtype=dtype), fill) for v in rows[name]]
+        return np.concatenate(parts) if parts else np.empty(0, dtype)
+
+    n = np.array([len(np.atleast_1d(v)) for v in rows["transit_id"]], dtype=np.int64)
+    cols = {name: arrays(name, dtype, -1 if dtype is np.int64 else np.nan) for name, dtype in _NUMERIC.items()}
+    for name in _BOOL:
+        cols[name] = arrays(name, bool, False)
+    if any(len(v) != n.sum() for v in cols.values()):
+        raise ValueError("array length mismatch in mirror rows")
+    return _to_long(np.repeat(np.asarray(rows["source_id"], np.int64), n), cols)
+
+
+def mirror_epoch_photometry(source_id_range=None, source_ids=None, mirror="aip", table=MIRROR_TABLE,
+                            client=None, cache=False):
+    """Light curves from a partner data centre's TAP service, as a light-curve table (SCHEMA)."""
+    from cosmos_search.net.tap import Tap
+
+    tap = Tap(MIRRORS.get(mirror, mirror), client=client, job_slots=4)
+    adql = mirror_adql(table, source_id_range=source_id_range, source_ids=source_ids)
+    return mirror_rows_to_table(tap.query(adql, sync=True, maxrec=10**7, cache=cache))
