@@ -44,13 +44,13 @@ live on local disk and the code reads them first. `cosmos_search.net.local.data_
 
 | What | Where under `~/cosmos-data` | Size on disk | Read by | Built by |
 |---|---|---|---|---|
-| Gaia DR3 `gaia_source`, the 34 columns the matcher and `dayone.rank.context` read (positions, astrometry and its correlations, G/BP/RP, RUWE, IPD, blending counts) | `mirror/hats/gaia_dr3` | ~190 GB | `xmatch` neighbours and blending (`HatsSource`) | `cache-tools/mirror_hats.py` from MAST's S3 copy |
+| Gaia DR3 `gaia_source`, the 34 columns the matcher and `dayone.rank.context` read (positions, astrometry and its correlations, G/BP/RP, RUWE, IPD, blending counts) | `mirror/hats/gaia_dr3` | ~190 GB | `xmatch` neighbours and blending (`HatsSource`) | `scripts/mirror_hats.py` from MAST's S3 copy |
 | TIC v8.2, matcher columns | `mirror/hats/tic` | ~60 GB | `xmatch` | same, MAST S3 |
 | 2MASS PSC, AllWISE (columns before `use_src` only, see data-sources.md), eROSITA-DE DR2 (all columns), VSX 2026-06 (all columns), ZTF DR22 object index (positions, ids, filter, field, CCD, epochs; no light curves) | `mirror/hats/<survey>` | ~10, ~25, 1.3, 0.5, ~45 GB | `xmatch`; VSX also `slow.known` | same, data.lsdb.io |
-| SIMBAD `basic`, ASAS-SN variables (VizieR II/366), matcher columns | `mirror/hats/simbad`, `mirror/hats/asassn_vars` | ~2 GB | `xmatch` (otherwise TAP-only) | `cache-tools/mirror_tap.py` |
-| Asteroid ephemeris: every MPCORB orbit (1.58 M) integrated with ASSIST (DE440 + 16 asteroids), states every 20 d 2014-06 to 2027-01, plus hourly Sun, Earth, Gaia and TESS positions | `mirror/sso/ephemeris` | ~17 GB | `vetting.sso` (first; SkyBoT/Miriade as fallback) | `cache-tools/build_sso.py` |
+| SIMBAD `basic`, ASAS-SN variables (VizieR II/366), matcher columns | `mirror/hats/simbad`, `mirror/hats/asassn_vars` | ~2 GB | `xmatch` (otherwise TAP-only) | `scripts/mirror_tap.py` |
+| Asteroid ephemeris: every MPCORB orbit (1.58 M) integrated with ASSIST (DE440 + 16 asteroids), states every 20 d 2014-06 to 2027-01, plus hourly Sun, Earth, Gaia and TESS positions | `mirror/sso/ephemeris` | ~17 GB | `vetting.sso` (first; SkyBoT/Miriade as fallback) | `scripts/build_sso.py` |
 | Response cache: TAP results, ZTF light curves (IRSA service), TESScut sector lists, TGLC/QLP light curves, DataLink pulls made with `cache=True` | `cache/http` | grows to 100 GB (LRU) | everything through `cosmos_search.net` | filled as runs go |
-| Gaia DR3 epoch photometry bulk files | `gaia-dr3-epoch-raw` | 73 GB | DR3 rehearsal stream | `cache-tools/fetch_gaia_epoch_raw.py` |
+| Gaia DR3 epoch photometry bulk files | `gaia-dr3-epoch-raw` | 73 GB | DR3 rehearsal stream | `~/cosmos-data/cache-tools/fetch_gaia_epoch_raw.py` |
 
 How the code chooses: `xmatch.mirror.local(name, columns)` returns a mirror when its `mirror.json` exists and it
 holds every column asked for; otherwise the read goes remote exactly as before. Mirrors are byte-for-byte the
@@ -70,5 +70,5 @@ Not cached, and why:
 - **DR4 tables**: not released until 2026-12-02. DR4 epoch photometry (7.2 TB) streams through, as planned.
 
 Refresh: rerun the builder; each skips what is already complete. MPCORB ages (new discoveries, improved orbits),
-so rebuild the asteroid ephemeris before a DR4 vetting run (`build_sso.py elements integrate observers`, ~2 h).
+so rebuild the asteroid ephemeris before a DR4 vetting run (`scripts/build_sso.py` elements, integrate, observers; ~2 h).
 Budget: the mirrors and ephemeris take ~350 GB of kore's 926 GB, leaving ~400 GB for DR4 working data.

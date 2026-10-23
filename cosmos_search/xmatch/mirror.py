@@ -1,6 +1,6 @@
 """Local HATS mirrors of the surveys, read before the remote copies.
 
-cache-tools/mirror_hats.py (for the data.lsdb.io and MAST catalogues) and cache-tools/mirror_tap.py (for tables
+scripts/mirror_hats.py (for the data.lsdb.io and MAST catalogues) and scripts/mirror_tap.py (for tables
 only on TAP) write <data dir>/mirror/hats/<survey name>/, a HATS catalogue of the columns the code reads, with a
 mirror.json naming its source, columns and row count. A survey is served locally when that mirror is complete and
 has every column the read asks for; otherwise the read goes to the remote copy as before.

@@ -18,7 +18,7 @@ near one line of sight shifts by the same sky-plane vector divided by its distan
 shift for all of them.
 
 Local fallback. SkyBoT and Miriade go down for hours at a time, so where this machine has the local ephemeris
-(sso_local.py, built by cache-tools/build_sso.py) it is used first: the same cone, computed from MPCORB orbits
+(sso_local.py, built by scripts/build_sso.py) it is used first: the same cone, computed from MPCORB orbits
 integrated with ASSIST, seen from the spacecraft directly. It agrees with JPL Horizons to ~0.1 arcsec, but has no
 comets and ages with its MPCORB file. COSMOS_SSO=remote forces SkyBoT and Miriade; COSMOS_SSO=local refuses them.
 Each dip records which was used ("source").

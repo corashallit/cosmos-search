@@ -1,6 +1,6 @@
 """Known solar-system bodies near a line of sight, computed locally: the fallback for sso.py when SkyBoT is down.
 
-The ephemeris is built once by cache-tools/build_sso.py (docs/storage.md): every MPCORB orbit (~1.6 M asteroids, no
+The ephemeris is built once by scripts/build_sso.py (docs/storage.md): every MPCORB orbit (~1.6 M asteroids, no
 comets) integrated with ASSIST (DE440 plus the 16 largest asteroids) and stored as heliocentric ICRF states every
 `step_days`, with hourly barycentric positions of the Sun, the Earth, Gaia and TESS. A query takes the nearest
 snapshot, moves every body two-body to the light-emission time, and keeps those within the radius as seen from
@@ -196,7 +196,7 @@ def _load(root):
 def load(root=None):
     root = Path(root) if root else default_dir()
     if root is None or not (root / "manifest.json").exists() or not (root / "epochs.npy").exists():
-        raise FileNotFoundError(f"no local solar-system ephemeris at {root} (build it with cache-tools/build_sso.py)")
+        raise FileNotFoundError(f"no local solar-system ephemeris at {root} (build it with scripts/build_sso.py)")
     return _load(str(root))
 
 
