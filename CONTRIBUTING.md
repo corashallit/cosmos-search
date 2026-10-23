@@ -26,6 +26,7 @@ Several Claude threads work in this repo at once. These rules keep them out of e
 | `cosmos_search/ebfilter/`, `inject/classes/eclipsing_binary.py` | Eclipsing-binary filter for DR4 | Dip-level EB test (compression over periods), its decision layer and calibration (docs/arms/eb-filter.md) |
 | `cosmos_search/residual/` | Simplest-model residual search | Eclipse baseline, flux-level residuals, ranking v1's demotion rule (docs/arms/residual.md) |
 | `cosmos_search/astrometry/` | Astrometric non-Keplerian filter | Epoch loader, nested fits, cascade, simulator, decision rule, Kepler bound, dip localisation (A1–A3) |
+| `cosmos_search/slow/` | Strategy review before DR4 (until a dedicated thread) | Slow-change search: known answers, calibration drift, trends (docs/arms/slow-changes.md) |
 | `docs/` | DR4 plan and repo layout | Arms own their page under `docs/arms/` and `docs/infra/` |
 
 To change a package you don't own, message its owner thread first.

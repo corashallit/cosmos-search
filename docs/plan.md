@@ -46,7 +46,9 @@ These apply to every arm and every thread.
 | I3 | Versioned target queries with a freeze manifest | I1 | Archive thread |
 | I4 | Durable store | Cora | Cora |
 | I5 | Proper-motion-aware cross-match ✓ (`xmatch/`; docs/infra/xmatch.md): 2MASS, AllWISE, CatWISE2020, unWISE, NEOWISE epochs, TIC, eROSITA DR2, ZTF DR22, VSX, ASAS-SN, SIMBAD. Calibrated per batch, Gaia neighbours compete for survey sources, false-match rate measured on the shifted sky per run, `p_cal` and `p_chance_0.9` per source | I1 | Cross-match thread |
-| **Gaia dimmers (main)** | | | |
+| **Slow changes (main since 2026-10-23)** | | | |
+| S1–S8 | Known answers, drift correction, trend and long-episode detector, whole-sky TAP selection, per-candidate checks, blind test, freeze, verification (docs/arms/slow-changes.md) | I1, I5 | Strategy review thread |
+| **Short dips (built; runs on DR4 as is, no further tuning since 2026-10-23)** | | | |
 | G1 | DR3 rehearsal sample: full DR3 epoch photometry (11.75 M) plus random controls ✓ (features for every source; docs/infra/gaia-epoch.md) | I2 | Archive thread |
 | G2 | Detectors v0: invariance tests (FoV pairs, bands: stage-0 mask ✓ `vetting/stage0.py`), dip colour, secular trend, surprisal score. The per-candidate path (DataLink → `stage0.clean_long` → detector) is not written yet | G1 | TESS thread's survey-agnostic detector in `dimming/`, then Gaia-specific tests |
 | G3 | Empirical nulls (brightening mirror, stratified permutation) and calibrated false-alarm rates. Mirror competition per G bin ✓ on all of DR3 (`scripts/dr3_g3.py`; arms/gaia-dimmers.md log). No power yet at G ≥ 16; stratified permutation not started | G2 | DR4 plan thread (library ✓ `stats/`); detector owner (strata and runs) |
