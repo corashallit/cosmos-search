@@ -1,0 +1,190 @@
+{
+ "hats": "https://data.lsdb.io/hats/wise/allwise/allwise",
+ "hats_creation_date": "2026-10-23T18:35UTC",
+ "n_columns": 298,
+ "cones": {
+  "highlat": {
+   "ra": 180.0,
+   "dec": 30.0,
+   "radius_arcsec": 300,
+   "hats_rows": 333,
+   "irsa_rows": 333,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 333,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    1779,
+    1782,
+    1785,
+    1788
+   ]
+  },
+  "kepler": {
+   "ra": 301.5644,
+   "dec": 44.4568,
+   "radius_arcsec": 90,
+   "hats_rows": 34,
+   "irsa_rows": 34,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 34,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    924
+   ]
+  },
+  "plane": {
+   "ra": 114.066,
+   "dec": -24.876,
+   "radius_arcsec": 45,
+   "hats_rows": 6,
+   "irsa_rows": 6,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 6,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    2493
+   ]
+  },
+  "south_pole": {
+   "ra": 10.0,
+   "dec": -89.5,
+   "radius_arcsec": 120,
+   "hats_rows": 64,
+   "irsa_rows": 64,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 64,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    2048
+   ]
+  },
+  "north_pole": {
+   "ra": 200.0,
+   "dec": 89.0,
+   "radius_arcsec": 120,
+   "hats_rows": 71,
+   "irsa_rows": 71,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 71,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    767
+   ]
+  },
+  "lmc_edge": {
+   "ra": 75.0,
+   "dec": -66.0,
+   "radius_arcsec": 45,
+   "hats_rows": 8,
+   "irsa_rows": 8,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 8,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    2070
+   ]
+  },
+  "gal_centre": {
+   "ra": 266.4,
+   "dec": -28.9,
+   "radius_arcsec": 60,
+   "hats_rows": 15,
+   "irsa_rows": 15,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 15,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    1801
+   ]
+  },
+  "ecl_pole": {
+   "ra": 270.0,
+   "dec": 66.56,
+   "radius_arcsec": 45,
+   "hats_rows": 14,
+   "irsa_rows": 14,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 14,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    725,
+    1002
+   ]
+  },
+  "ra0": {
+   "ra": 0.5,
+   "dec": 0.5,
+   "radius_arcsec": 120,
+   "hats_rows": 57,
+   "irsa_rows": 57,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 57,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    1216
+   ]
+  },
+  "ra90_s": {
+   "ra": 90.0,
+   "dec": -45.0,
+   "radius_arcsec": 120,
+   "hats_rows": 74,
+   "irsa_rows": 74,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 74,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    2132,
+    2133,
+    2472,
+    2474
+   ]
+  },
+  "ra330_n": {
+   "ra": 330.0,
+   "dec": 20.0,
+   "radius_arcsec": 120,
+   "hats_rows": 70,
+   "irsa_rows": 70,
+   "only_hats": 0,
+   "only_irsa": 0,
+   "matched": 70,
+   "columns_compared": 297,
+   "columns_disagreeing": [],
+   "columns_matching_next_irsa_column": [],
+   "order4_pixels": [
+    790
+   ]
+  }
+ }
+}
