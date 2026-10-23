@@ -98,3 +98,29 @@ def test_route_recommendation_prefers_bulk_then_mirror_then_datalink():
     assert dr4_routes.recommend(mirror).startswith("No bulk files yet; aip")
     bulk = {**mirror, "cdn": {"epoch_photometry_files": 3000, "epoch_photometry_bytes": 7.2e12}}
     assert dr4_routes.recommend(bulk).startswith("Bulk files are up (3000 files, 7.20 TB)")
+
+
+def test_datalink_pull_runs_small_calls_in_parallel_and_resumes(tmp_path, monkeypatch):
+    from cosmos_search.dayone import datalink
+
+    calls = []
+
+    def fake(ids, cache=True):
+        calls.append(list(ids))
+        parts = []
+        for sid in ids:
+            t = dr4_rows()
+            t["source_id"] = sid
+            parts.append(dr4.epoch_photometry_to_lc(t))
+        return pa.concat_tables(parts)
+
+    monkeypatch.setattr(datalink.epoch, "datalink_epoch_photometry", fake)
+    ids = list(range(1, 13))
+    datalink.pull(ids, tmp_path, workers=3, chunk=5, log=lambda r: None)
+    assert sorted(len(c) for c in calls) == [2, 5, 5]
+    assert sorted(x.name for x in (tmp_path / "features").iterdir()) == [
+        "chunk-00000000-5.parquet", "chunk-00000005-5.parquet", "chunk-00000010-2.parquet"]
+    datalink.pull(ids, tmp_path, workers=3, chunk=5, log=lambda r: None)
+    assert len(calls) == 3  # resumed: nothing pulled twice
+    got = pa.concat_tables([pq.read_table(p) for p in sorted((tmp_path / "lightcurves").iterdir())])
+    assert set(got["source_id"].to_pylist()) == set(ids)

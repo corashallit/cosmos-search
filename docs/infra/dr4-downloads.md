@@ -57,10 +57,13 @@ Logged in, DR3, csv unless stated. The 50-id cap still holds (51 ids: HTTP 500).
 | 10 ids, anonymous | 118 s | |
 | 4 × 10 ids in parallel | 181 s wall (0.22/s) | |
 | 8 × 5 ids in parallel | 27 s wall (1.5/s) | |
-| 4 × 5 ids one after another | 214 s (0.09/s) | 21:2x UTC, busy archive |
+| 4 × 5 ids one after another | 214 s (0.09/s) | ~21:20 UTC, busy archive |
+| 4 × 5 ids in parallel, straight after | 66 s (0.30/s) | 3× the serial rate at the same moment |
+| repeat: serial, then parallel | 184 s, then 87 s | 2× again |
 
-The cost is per star on the server and swings by 10× with the archive's load, so request shape barely matters:
-0.1-1.5 light curves/s, 10⁴-10⁵ a day. The DR4 selection of 0.1-1% of ~2.5 × 10⁹ stars (2.5 × 10⁶ to 2.5 × 10⁷
+The cost is per star on the server and swings by 10× with the archive's load. Format aside, the one shape that
+helps is several small calls at once, which `dayone.datalink` now does by default (4 calls of 5 ids; `--workers`,
+`--chunk`). Overall 0.1-1.5 light curves/s, 10⁴-10⁵ a day. The DR4 selection of 0.1-1% of ~2.5 × 10⁹ stars (2.5 × 10⁶ to 2.5 × 10⁷
 light curves) would take months to years this way.
 
 ## How many light curves, and where they live
