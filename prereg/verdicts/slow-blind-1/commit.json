@@ -1,0 +1,31 @@
+{
+ "batch": "slow-blind-1",
+ "flags_sha256": "fcf86b18e406d9452e33aa3290de27eeb2ae6a354ca2604440a618df42424125",
+ "plan": {
+  "n": 10600,
+  "counts": {
+   "brightening/ramp_brighten/G<19": 300,
+   "held_out/accelerating_fade/G<19": 600,
+   "held_out/fade_with_dips/G<19": 600,
+   "held_out/slow_cycle/G<19": 600,
+   "held_out/staircase_fade/G<19": 600,
+   "known/long_dip/G<19": 300,
+   "known/ramp_fade/G<19": 300,
+   "known/secular_fade/G<19": 300,
+   "natural/-/G<19": 5000,
+   "natural/-/G>=19": 2000
+  },
+  "run": "/home/user/slow/dr3b",
+  "batch_sha256": "f01bd67d4495f9ccb45743fe95ce877c3cd42352f0538dfbe4bbd96827a34935",
+  "cells_sha256": "99b943c6dce9bf1c7e2c91370be4c9f27f821c6c706d1405077afd4d7f5410d8",
+  "truth_sha256": "882f5889cd6a79b4115d99652682b981c100f06bb3cfa5065cdef1576c731bdd",
+  "code_commit": "492822856d52145f14057e5fdeef196e4accac9e",
+  "rule": "slow-v1",
+  "rule_files": {
+   "drift_table.parquet": "de7c25351845f0c350caae484b2ffc0ca6b780872cd7647abc3b23fc4dee038f",
+   "thresholds.json": "89bd7caeaa23343af8278dd34c58d20c979970a2fb9d5a7399269ee4408e0614"
+  }
+ },
+ "code_commit": "492822856d52145f14057e5fdeef196e4accac9e",
+ "rule": "slow-v1"
+}
