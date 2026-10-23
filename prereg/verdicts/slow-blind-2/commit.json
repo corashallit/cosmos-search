@@ -1,0 +1,31 @@
+{
+ "batch": "slow-blind-2",
+ "flags_sha256": "7f4aca6469fd5715edf103027dedc91b38f12ea7e0b994b55cc67ee1287c6614",
+ "plan": {
+  "n": 10300,
+  "counts": {
+   "brightening/repeat_brighten/G<19": 300,
+   "held_out/drifting_cycle/G<19": 600,
+   "held_out/paired_dips/G<19": 600,
+   "held_out/sawtooth_dips/G<19": 600,
+   "held_out/uneven_dips/G<19": 600,
+   "known/repeat_long_dip/G<19": 300,
+   "known/slow_cycle/G<19": 300,
+   "natural/-/G<19": 5000,
+   "natural/-/G>=19": 2000
+  },
+  "run": "/home/user/slow/dr3c",
+  "batch_sha256": "75191baa789432f8e6c513b80dde173686ced6cddab2097d5f16b251ecee1b05",
+  "cells_sha256": "94771cafe150966ee6481a6842986af172bdee951048d9d57ec6bdae428330de",
+  "truth_sha256": "f3465934acdda70d7ac07bfe1b405b6ce82fb7b4954296464736de1e9e6fc3e0",
+  "code_commit": "b59a8d32e6eb997173e5ba3e0e83063232e4edfb",
+  "rule": "slow-v2",
+  "rule_files": {
+   "drift_table.parquet": "de7c25351845f0c350caae484b2ffc0ca6b780872cd7647abc3b23fc4dee038f",
+   "period_thresholds.json": "50d8f1eef389b54007e0c548607611b0ead845ca314fcf222627612809c45935",
+   "thresholds.json": "89bd7caeaa23343af8278dd34c58d20c979970a2fb9d5a7399269ee4408e0614"
+  }
+ },
+ "code_commit": "b59a8d32e6eb997173e5ba3e0e83063232e4edfb",
+ "rule": "slow-v2"
+}

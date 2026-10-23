@@ -7,9 +7,10 @@
     python scripts/slow_blind.py reveal --dir D --batch slow-blind-1                   # refuses unless pushed
 
 --run is a dr3_pass output that kept every light curve and shares no stars with the one the rule was calibrated
-on (shard 1/10 against shard 0/10). The batch holds quiet stars as they are, and quiet stars of G < 19 carrying one
-fake each: the held-out slow shapes (inject.lightcurve.HELD_OUT_SLOW), the calibrated ones (SLOW_FAMILIES), and
-late-starting brightenings. Every light curve gets an anonymous id and the order is shuffled; each host star is
+on (shard 1/10 or 2/10 against shard 0/10). The batch holds quiet stars as they are, and quiet stars of G < 19
+carrying one fake each: the rule's new shapes, the shapes it was calibrated on, and brightenings (`_families`).
+slow-v1 (slow-blind-1) tested the detector; slow-v2 adds the slow period search and tests it on new repeating
+shapes (inject.lightcurve.HELD_OUT_SLOW). Every light curve gets an anonymous id and the order is shuffled; each host star is
 used once and never also appears as a natural star. Nobody sees the truth until the flags are committed and on
 origin."""
 
@@ -28,7 +29,7 @@ import pyarrow.parquet as pq
 
 from cosmos_search.inject import lightcurve as inj
 from cosmos_search.inject.sealed import write_sealed
-from cosmos_search.slow import detect, drift, rule
+from cosmos_search.slow import detect, drift, period, rule, rule_v2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from slow_detect_check import BAND_NAMES, corrected, depth_g, scored
@@ -60,12 +61,33 @@ def _band_codes(lc):
     return lc
 
 
+RULES = {rule.NAME: rule, rule_v2.NAME: rule_v2}
+
+
 def _signal(rng, family, t_min, t_max):
     if family == "ramp_brighten":
         sig = inj.sample(rng, "ramp_fade", t_min, t_max)
         sig.fraction = -sig.fraction
         return sig
+    if family == "repeat_brighten":
+        sig = inj.sample(rng, "repeat_long_dip", t_min, t_max)
+        for p in sig.parts:
+            p.covering = -p.covering
+        return sig
     return inj.sample(rng, family, t_min, t_max, allow_held_out=family in inj.HELD_OUT_SLOW)
+
+
+def _families(a):
+    """(family, group, count) for the batch of each rule's blind test."""
+    if a.rule == rule.NAME:  # slow-blind-1: its new shapes are spent since (inject.lightcurve.SPENT_SLOW)
+        return [(f, "held_out", a.n_held_out) for f in inj.SPENT_SLOW] + \
+            [(f, "known", a.n_known) for f in inj.SLOW_FAMILIES] + [("ramp_brighten", "brightening", a.n_bright)]
+    return [(f, "held_out", a.n_held_out) for f in inj.HELD_OUT_SLOW] + \
+        [(f, "known", a.n_known) for f in inj.PERIODIC_FAMILIES] + [("repeat_brighten", "brightening", a.n_bright)]
+
+
+def _table(a):
+    return RULES[a.rule].load()[-1]
 
 
 def make(a):
@@ -73,7 +95,7 @@ def make(a):
     d.mkdir(parents=True, exist_ok=True)
     if (d / "batch.parquet").exists():
         raise SystemExit("batch exists; a blind batch is drawn once")
-    _, table = rule.load()
+    table = _table(a)
     rng = np.random.default_rng(int.from_bytes(os.urandom(16), "little"))
 
     names = sorted(p.name for p in (Path(a.run) / "lightcurves").glob("*.parquet"))
@@ -87,8 +109,7 @@ def make(a):
     bright = rng.permutation(quiet[cells["gbin"].to_numpy() <= rule.FAINT_GBIN - 1])
     faint = rng.permutation(quiet[cells["gbin"].to_numpy() >= rule.FAINT_GBIN])
 
-    fams = [(f, "held_out", a.n_held_out) for f in inj.HELD_OUT_SLOW] + \
-           [(f, "known", a.n_known) for f in inj.SLOW_FAMILIES] + [("ramp_brighten", "brightening", a.n_bright)]
+    fams = _families(a)
     n_hosts = sum(n for *_, n in fams)
     if a.n_nat + n_hosts > len(bright) or a.n_nat_faint > len(faint):
         raise SystemExit(f"not enough quiet stars: {len(bright)} at G < 19, {len(faint)} at G >= 19")
@@ -145,20 +166,27 @@ def make(a):
                                         for (g, f, m), n in tt.groupby(["group", "family", "mag"]).size().items()},
             "run": str(a.run),
             "batch_sha256": _sha(d / "batch.parquet"), "cells_sha256": _sha(d / "cells.parquet"),
-            "truth_sha256": truth_sha, "code_commit": _git("rev-parse", "HEAD"), "rule": rule.NAME,
-            "rule_files": {p.name: _sha(p) for p in sorted(rule.RULE_DIR.iterdir())}}
+            "truth_sha256": truth_sha, "code_commit": _git("rev-parse", "HEAD"), "rule": a.rule,
+            "rule_files": {p.name: _sha(p) for p in sorted(RULES[a.rule].RULE_DIR.iterdir())}}
     (d / "plan.json").write_text(json.dumps(plan, indent=1))
     print(json.dumps(plan, indent=1))
 
 
 def run(a):
     d = Path(a.dir)
-    thr, table = rule.load()
+    rule_name = json.loads((d / "plan.json").read_text())["rule"]
     batch = pd.read_parquet(d / "batch.parquet")
     cells = pd.read_parquet(d / "cells.parquet").set_index("source_id")
-    stats = scored(corrected(batch, cells, table)).join(cells, on="source_id")
+    if rule_name == rule.NAME:
+        thr, table = rule.load()
+        stats = scored(corrected(batch, cells, table)).join(cells, on="source_id")
+        flags = rule.apply(stats, thr)
+    else:
+        thr, thr_p, table = rule_v2.load()
+        ep = corrected(batch, cells, table)
+        stats = scored(ep).merge(period.star_features(ep), on="source_id", how="left").join(cells, on="source_id")
+        flags = rule_v2.apply(stats, thr, thr_p)
     stats.to_parquet(d / "stats.parquet", index=False)
-    flags = rule.apply(stats, thr)
     missing = sorted(set(cells.index) - set(flags["id"]))
     if missing:  # too few visits to score: recorded as not flagged
         flags = pd.concat([flags, pd.DataFrame({"id": missing, "gbin": cells.loc[missing, "gbin"].to_numpy(),
@@ -176,7 +204,7 @@ def commit(a):
     (arch / "flags.csv").write_bytes((d / "flags.csv").read_bytes())
     plan = json.loads((d / "plan.json").read_text())
     rec = {"batch": a.batch, "flags_sha256": _sha(arch / "flags.csv"), "plan": plan,
-           "code_commit": _git("rev-parse", "HEAD"), "rule": rule.NAME}
+           "code_commit": _git("rev-parse", "HEAD"), "rule": plan["rule"]}
     (arch / "commit.json").write_text(json.dumps(rec, indent=1))
     _git("add", str(arch / "flags.csv"), str(arch / "commit.json"))
     _git("commit", "-m", f"Archive {a.batch} flags before reveal")
@@ -202,7 +230,7 @@ def reveal(a):
     flags = pd.read_csv(d / "flags.csv")
     m = flags.merge(truth, on="id")
     m["snr"] = m["depth_g"] * np.sqrt(np.maximum(m["visits_in"].fillna(1), 1)) / m["host_sigma_visit"]
-    score = rule.score(m)
+    score = RULES[rec["rule"]].score(m)
     (d / "score.json").write_text(json.dumps(score, indent=1, default=str))
     m.drop(columns=["signal"]).to_parquet(d / "revealed.parquet")
     print(json.dumps(score["criteria"], indent=1, default=str))
@@ -213,6 +241,7 @@ def main():
     ap.add_argument("step", choices=["make", "run", "commit", "reveal"])
     ap.add_argument("--dir", required=True)
     ap.add_argument("--batch", default="slow-blind-1")
+    ap.add_argument("--rule", default=rule.NAME, choices=sorted(RULES), help="make only; later steps read the plan")
     ap.add_argument("--run")
     ap.add_argument("--aux", default="/mnt/project-files/data/gaia-dr3-epoch/aux/aux_gaia_source.parquet")
     ap.add_argument("--n-nat", type=int, default=5000)

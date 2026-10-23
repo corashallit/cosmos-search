@@ -83,13 +83,14 @@ def test_held_out_families_refused_unless_confirmatory_and_out_of_calibration():
             assert np.all(np.isfinite(k)) and np.all(k > 0) and np.all(k <= 1)
             json.dumps(lc.truth(sig))
     # Held out means no calibration or tuning code draws them.
-    used = set(lc.FAMILIES) | set(lc.SLOW_FAMILIES)
+    used = set(lc.FAMILIES) | set(lc.SLOW_FAMILIES) | set(lc.PERIODIC_FAMILIES) | set(lc.SPENT_SLOW)
     for mod, names in (("cosmos_search.dayone.recurrence_cal", ("FAMILIES",)),
                        ("cosmos_search.ebfilter.cal", ("TARGET_FAMILIES", "OTHER_FAMILIES", "HOST_FAMILIES")),
                        ("cosmos_search.dayone.decoys", ("COUNTS", "COUNTS4", "TRAINS")),
                        ("cosmos_search.dayone.single_cal", ("FAMILIES", "SINGLE_FAMILIES", "TARGET_FAMILIES")),
                        ("cosmos_search.inject.classes.dimming", ("FAMILIES",)),
-                       ("scripts.slow_detect_check", ("FAMILIES",))):
+                       ("scripts.slow_detect_check", ("FAMILIES",)),
+                       ("cosmos_search.slow.period", ("FAMILIES",))):
         try:
             m = importlib.import_module(mod)
         except ImportError:
@@ -97,3 +98,26 @@ def test_held_out_families_refused_unless_confirmatory_and_out_of_calibration():
         for n in names:
             used |= set(getattr(m, n, ()))
     assert not used & set(lc.HELD_OUT_FAMILIES + lc.HELD_OUT_FAMILIES_V2 + lc.HELD_OUT_SLOW)
+
+
+def test_spent_and_periodic_slow_families_draw_freely():
+    from cosmos_search.inject import lightcurve as lc
+
+    rng = np.random.default_rng(5)
+    t = np.linspace(0.0, 1000.0, 3000)
+    for fam in lc.SPENT_SLOW + lc.PERIODIC_FAMILIES:
+        for _ in range(20):
+            k = lc.sample(rng, fam, 0.0, 1000.0).factor(t, "G")
+            assert np.all(np.isfinite(k)) and np.all(k > 0) and np.all(k <= 1) and k.min() < 1
+
+
+def test_cycle_period_drift():
+    from cosmos_search.inject.lightcurve import Cycle
+
+    t = np.linspace(0.0, 1000.0, 100001)
+    for dpdt in (0.0, 3e-4, -3e-4):
+        k = Cycle(t0=0.0, period=100.0, amplitude=0.1, dpdt=dpdt).factor(t, "G")
+        minima = t[1:-1][(k[1:-1] < k[:-2]) & (k[1:-1] < k[2:])]
+        gaps = np.diff(minima)
+        assert np.isclose(gaps[0], 100.0 * (1 + dpdt * minima[1] / 2 + dpdt * minima[0] / 2), rtol=0.02)
+        assert (gaps[-1] > gaps[0]) == (dpdt > 0) or dpdt == 0
