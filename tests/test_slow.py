@@ -142,6 +142,53 @@ def test_long_dip_found_with_colour():
     assert f["abbe"] < 0.3
 
 
+def test_time_order_reads_late_brightening_as_rise():
+    # Brighter for good from t = 400 (60% of visits bright): against the median the first 40% look like a dimming
+    # episode; read in time order the star rose, so it scores in s_rise and not s_fade.
+    rng = np.random.default_rng(6)
+    t = gaia_times(rng)
+    g = rng.normal(0, 1e-3, t.size) + 0.01 * (t > 400)
+    f = detect.star_features(epochs_frame(t, g)).iloc[0]
+    assert f["s_dim"] > 20
+    assert f["s_rise"] > 20 and f["s_fade"] < 5
+
+
+def test_time_order_finds_early_drop_as_fade():
+    # Fainter for good from t = 400: the bright early visits are the minority, so the median sits at the faint
+    # level and s_dim sees only a brightening. In time order it is a fade ("drop"), with its window after the drop.
+    rng = np.random.default_rng(7)
+    t = gaia_times(rng)
+    g = rng.normal(0, 1e-3, t.size) - 0.01 * (t > 400)
+    f = detect.star_features(epochs_frame(t, g, 1.5 * g, 0.7 * g)).iloc[0]
+    assert f["s_dim"] < 5 and f["s_fade"] > 20 and f["s_rise"] < 5
+    tv, _ = detect.visits(t, t)
+    assert f["fade_kind"] == "drop" and f["dim_t0"] == pytest.approx(tv[tv > 400][0])
+    assert f["dim_depth"] == pytest.approx(0.01, rel=0.2)
+    assert f["depth_bp"] > f["depth_rp"] > 0
+
+
+def test_time_order_keeps_closed_dip_and_late_fade():
+    rng = np.random.default_rng(8)
+    t = gaia_times(rng)
+    noise = rng.normal(0, 1e-3, t.size)
+    dip = detect.star_features(epochs_frame(t, noise - 0.01 * ((t > 400) & (t < 600)))).iloc[0]
+    late = detect.star_features(epochs_frame(t, noise - 0.01 * (t > 700))).iloc[0]
+    assert dip["fade_kind"] == "dip" and dip["s_fade"] == pytest.approx(dip["s_dim"])
+    assert late["fade_kind"] == "fade" and late["s_fade"] > 20 and late["s_rise"] < 5
+
+
+def test_time_order_is_a_mirror_on_noise():
+    rng = np.random.default_rng(10)
+    f = pd.concat([detect.star_features(epochs_frame(t, rng.normal(0, 1e-3, t.size), sid=i))
+                   for i in range(300) for t in [gaia_times(rng)]], ignore_index=True)
+    assert abs(f["s_fade"].median() - f["s_rise"].median()) < 0.3
+    t = gaia_times(rng)
+    y = rng.normal(0, 1e-3, t.size) + 0.004 * (t > 600)
+    a = detect.star_features(epochs_frame(t, y)).iloc[0]
+    b = detect.star_features(epochs_frame(t, -y)).iloc[0]
+    assert a["s_fade"] == pytest.approx(b["s_rise"]) and a["s_rise"] == pytest.approx(b["s_fade"])
+
+
 def test_short_dip_does_not_count_as_episode():
     # One deep visit is a short dip, not a long episode: runs need MIN_EPISODE_VISITS and MIN_EPISODE_DAYS.
     rng = np.random.default_rng(5)

@@ -32,10 +32,10 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from cosmos_search.inject import lightcurve as inj
-from cosmos_search.slow import detect, drift, select
+from cosmos_search.slow import detect, drift, select, sky
 from cosmos_search.slow import known as known_mod
 
-FAMILIES = inj.SLOW_FAMILIES
+FAMILIES = inj.SLOW_FAMILIES + ("ramp_brighten",)  # the brightening mirror of ramp_fade: is it read as a fade?
 BAND_NAMES = ("G", "BP", "RP")
 FALSE_ALARM = (0.01, 0.001)
 SEED = 20261023
@@ -64,11 +64,21 @@ def scored(ep):
     return f
 
 
+def signal(rng, family, t_min, t_max):
+    """inj.sample, plus ramp_brighten: a ramp_fade with the sign of its change reversed."""
+    if family == "ramp_brighten":
+        sig = inj.sample(rng, "ramp_fade", t_min, t_max)
+        sig.fraction = -sig.fraction
+        return sig
+    return inj.sample(rng, family, t_min, t_max)
+
+
 def depth_g(sig, tv):
-    """Largest fractional G deficit the signal reaches, and how many G visits sit below half of it."""
-    k = sig.factor(tv, "G")
-    d = float(1 - k.min())
-    return d, int(np.sum(1 - k > d / 2)) if d > 0 else 0
+    """Largest fractional G change the signal reaches (a deficit, or an excess for brightenings), and how many G
+    visits sit beyond half of it."""
+    k = np.abs(1 - sig.factor(tv, "G"))
+    d = float(k.max())
+    return d, int(np.sum(k > d / 2)) if d > 0 else 0
 
 
 def injected(lc, hosts, file_index):
@@ -85,7 +95,7 @@ def injected(lc, hosts, file_index):
         tv, _ = detect.visits(tg, tg)
         for k, fam in enumerate(FAMILIES):
             rng = np.random.default_rng([SEED, int(sid) & 0xFFFFFFFF, int(sid) >> 32, k])
-            sig = inj.sample(rng, fam, float(tg.min()), float(tg.max()))
+            sig = signal(rng, fam, float(tg.min()), float(tg.max()))
             flux, err = d["flux"].to_numpy().copy(), d["err"].to_numpy().copy()
             for b in BAND_NAMES:
                 m = (d["band"] == b).to_numpy()
@@ -96,7 +106,7 @@ def injected(lc, hosts, file_index):
             row = {"source_id": fid, "host": int(sid), "family": fam, "depth_g": dep, "visits_in": nin}
             if fam == "long_dip":
                 row.update(duration=sig.ingress + sig.flat + sig.egress, dust=bool(np.isfinite(sig.tau_ref)))
-            elif fam == "ramp_fade":
+            elif fam in ("ramp_fade", "ramp_brighten"):
                 row.update(duration=sig.duration, rate_per_year=sig.fraction / sig.duration * 365.25)
             else:
                 row.update(duration=float(tg.max() - tg.min()), rate_per_year=sig.rate_per_year)
@@ -108,6 +118,26 @@ def injected(lc, hosts, file_index):
     return fake, pd.DataFrame(truth)
 
 
+def sky_corrected(ep, fep, truth, level, quiet):
+    """Subtract the sky offsets (slow.sky) from real and fake epochs: each star from the quiet stars of the other
+    half in its HEALPix pixel at `level`; fakes as their hosts (half B, so from half A)."""
+    parts = [ep] if fep is None else [ep, fep]
+    allep = pd.concat(parts, ignore_index=True)
+    sid = allep["source_id"].unique()
+    real = sid[sid >= 0]
+    half = pd.Series(drift.half(real), index=real)
+    pix = pd.Series(drift.sky_pixel(real, level), index=real)
+    if fep is not None:
+        host = truth.set_index("source_id")["host"]
+        half = pd.concat([half, pd.Series(1, index=host.index)])
+        pix = pd.concat([pix, pd.Series(drift.sky_pixel(host.to_numpy(), level), index=host.index)])
+    refs = real if quiet is None else np.intersect1d(real, quiet)
+    off, tables = sky.correct_by_halves(allep, refs, level, half=half, pix=pix)
+    allep["frac_corr"] = allep["frac_corr"] - off
+    n = len(ep)
+    return allep.iloc[:n], (allep.iloc[n:] if fep is not None else None), tables
+
+
 def one_file(job):
     file_index, name = job
     run, parts = _STATE["run"], _STATE["parts"]
@@ -116,13 +146,19 @@ def one_file(job):
         return pd.read_parquet(done[0]), pd.read_parquet(done[1])
     cells, table, hosts = _STATE["cells"], _STATE["table"], _STATE["hosts"]
     lc = pq.read_table(Path(run) / "lightcurves" / name)
-    feat = scored(corrected(lc, cells, table))
+    ep = corrected(lc, cells, table)
     fake, truth = injected(lc, hosts, file_index)
+    fep = None
     if fake is not None:
         fcells = cells.reindex(truth["host"].to_numpy())
         fcells.index = pd.Index(truth["source_id"].to_numpy(), name="source_id")
-        ff = scored(corrected(fake, pd.concat([cells, fcells]), table))
-        truth = truth.merge(ff, on="source_id", how="left")
+        fep = corrected(fake, pd.concat([cells, fcells]), table)
+    if _STATE.get("sky") is not None:
+        ep, fep, tables = sky_corrected(ep, fep, truth, _STATE["sky"], _STATE["quiet"])
+        pd.concat([t.assign(ref_half=h) for h, t in tables.items()]).to_parquet(parts / f"sky_{name}", index=False)
+    feat = scored(ep)
+    if fep is not None:
+        truth = truth.merge(scored(fep), on="source_id", how="left")
     feat.to_parquet(done[0], index=False)
     truth.to_parquet(done[1], index=False)
     return feat, truth
@@ -198,6 +234,10 @@ def main(argv=None):
     ap.add_argument("--out", required=True)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     ap.add_argument("--limit", type=int, default=0, help="first N bulk files only (smoke test)")
+    ap.add_argument("--sky", type=int, help="also subtract sky offsets (slow.sky) in HEALPix pixels at this level")
+    ap.add_argument("--sky-refs", choices=("quiet", "all"), default="quiet",
+                    help="comparison stars for the sky offsets: quiet stars only, or every star (weighted by its "
+                         "own scatter)")
     a = ap.parse_args(argv)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -215,7 +255,8 @@ def main(argv=None):
     cells = drift.star_cells(aux)
     table = pd.read_parquet(a.drift)
 
-    _STATE["run"], _STATE["parts"] = a.run, out / "parts"
+    _STATE["run"], _STATE["parts"], _STATE["sky"], _STATE["quiet"] = (
+        a.run, out / "parts", a.sky, ref if a.sky_refs == "quiet" else None)
     _STATE["parts"].mkdir(exist_ok=True)
     with Pool(a.workers, initializer=_init, initargs=(cells, table, set(map(int, hosts)))) as pool:
         res = pool.map(one_file, list(enumerate(names)), chunksize=1)
