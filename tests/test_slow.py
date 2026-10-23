@@ -166,3 +166,22 @@ def test_alert_lightcurve_and_epochs():
     assert len(ep) == 2  # 2021 is after DR4's span
     assert ep["frac_corr"].min() < 0 < ep["frac_corr"].max() or 0 in list(ep["frac_corr"])
     assert (ep["band"] == 0).all()
+
+
+@pytest.mark.parametrize("span", [27.0, 1000.0, 2000.0])
+def test_slow_families_sample_and_fade(span):
+    from cosmos_search.inject import lightcurve as lc
+
+    rng = np.random.default_rng(9)
+    t = np.linspace(0.0, span, 500)
+    assert not set(lc.SLOW_FAMILIES) - {"secular_fade"} & set(lc.FAMILIES)
+    for fam in lc.SLOW_FAMILIES:
+        for _ in range(20):
+            sig = lc.sample(rng, fam, 0.0, span)
+            for band in ("G", "BP", "RP"):
+                k = sig.factor(t, band)
+                assert np.all(np.isfinite(k)) and np.all(k > 0)
+                # A steady fade is centred on the span (brighter before the middle); the others only dim.
+                assert fam == "secular_fade" or np.all(k <= 1 + 1e-12)
+            if fam == "secular_fade":
+                assert sig.factor(t[-1], "G") < sig.factor(t[0], "G")

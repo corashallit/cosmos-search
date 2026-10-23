@@ -35,7 +35,7 @@ from cosmos_search.inject import lightcurve as inj
 from cosmos_search.slow import detect, drift
 from cosmos_search.slow import known as known_mod
 
-FAMILIES = ("long_dip", "ramp_fade", "secular_fade")
+FAMILIES = inj.SLOW_FAMILIES
 BAND_NAMES = ("G", "BP", "RP")
 FALSE_ALARM = (0.01, 0.001)
 SEED = 20261023

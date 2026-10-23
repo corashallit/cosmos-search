@@ -288,8 +288,8 @@ def sample(rng, family, t_min, t_max, t_ext=None, allow_held_out=False):
                    ingress=dur * rng.uniform(0.1, 0.5), egress=dur * rng.uniform(0.1, 0.5), flat=dur * rng.uniform(0, 0.5),
                    shape=str(rng.choice(["trapezoid", "gaussian", "tail"])))
     if family == "ramp_fade":
-        dur = _loguniform(rng, 30.0, span)
-        return Ramp(t_start=rng.uniform(t_min - dur / 2, t_max - 30.0), duration=dur,
+        dur = _loguniform(rng, min(30.0, span / 2), span)
+        return Ramp(t_start=rng.uniform(t_min - dur / 2, t_max - min(30.0, span / 4)), duration=dur,
                     fraction=-_loguniform(rng, 0.001, 0.1), beta=float(rng.choice([0.0, rng.uniform(1, 3)])))
     if family == "step":
         return Step(t_step=rng.uniform(t_min, t_max), fraction=float(rng.choice([-1, 1]) * _loguniform(rng, 0.002, 0.1)))
@@ -313,8 +313,11 @@ def sample(rng, family, t_min, t_max, t_ext=None, allow_held_out=False):
 FAMILIES = (
     "grey_dip", "dust_dip", "blue_dip",
     "dip_train_poisson", "dip_train_periodic", "dip_train_primes", "dip_train_geometric",
-    "secular_fade", "step", "chromatic_flip", "flare", "long_dip", "ramp_fade",
+    "secular_fade", "step", "chromatic_flip", "flare",
 )
+# Slow changes (docs/arms/slow-changes.md). Kept out of FAMILIES so the frozen searches that draw from FAMILIES
+# (TESS bake-off, dimming classes) draw exactly what they did before.
+SLOW_FAMILIES = ("long_dip", "ramp_fade", "secular_fade")
 
 # Families no detector, flag or rule was calibrated or tuned on. They exist to measure recall on structure the
 # rules were not designed around (docs/plan.md, principle 3; review findings R5, R20), so sample() refuses them
