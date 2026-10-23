@@ -446,8 +446,56 @@ narrows a little but stays. Sawtooth dips with more than five cycles in the span
 What follows, as written above: the three dip shapes' recall is stated as a weakness, and whether a fix is worth
 a third blind test is Cora's call (asked 2026-10-23).
 
+**Attempts to improve it after the blind test** (2026-10-23, Cora: worth improving a little). Tuned only on
+shard 0 and on shapes already spent (the four of slow-blind-1 and slow-blind-2). Every variant is compared at the
+same false-alarm rate: its threshold is the 0.1% point of repeated brightenings among all 12,040 quiet stars at
+G < 19 (both halves; thresholds from half B alone, about 6,000 stars, rest on 6 stars and move by ±1 between
+runs, enough to reorder variants). Recall is at signal-to-noise ≥ 20, G < 19, fakes in a quarter of shard 0's
+files (142-529 per shape).
+
+| Variant | Quiet stars flagged | All stars flagged | Repeating long dip | Paired | Sawtooth | Uneven | Slow cycle |
+|---|---|---|---|---|---|---|---|
+| Current (slow-v2) | 0.12% | 2.6% | 66% | 58% | 56% | 50% | 18% |
+| Plus weaker folds whose BP and RP visits are ≥ 5σ faint too | 0.12% (0.13% brightening) | 3.9% | 70% | 59% | 59% | 54% | 22% |
+| Same, BP and RP ≥ 3σ | 0.13% (0.21% brightening) | 4.6% | 73% | 64% | 66% | 61% | 28% |
+| Noise from the lower quartile of visit differences | 0.11% | 1.2% | 49% | 28% | 30% | 25% | 3% |
+| Each window scored with the noise of the visits outside it ¹ | 0.12% | 1.2% | 47% | 32% | 37% | 27% | 1% |
+| Plus two separate dimming episodes, no period ¹ | 0.22% (0.15% brightening) | 3.0% | 66% | 56% | 54% | 51% | 23% |
+
+¹ Thresholds from half B only (6,039 stars); same fakes otherwise.
+
+Earlier the same day six other changes to the fold score were tried (noise from the scatter about the fitted
+dip, BP and RP averaged into G, a per-scan sky offset from neighbouring stars, the repeat conditions applied to
+brightenings too, the baseline from visits outside the window, the whole window without leaving out its deepest
+visit). None beat the current score at the same false-alarm rate.
+
+What was learned:
+
+- **Why strong repeating dips are missed.** A dip that repeats every few visits puts a large step into a third or
+  more of the differences between consecutive visits, and the visit noise (from those differences) rises with
+  it: shard-0 fakes with 1-9% dips went from 0.1-0.7% noise to 0.4-7%, and some were missed at a signal-to-noise
+  of 80. The two fixes in the table that estimate the noise differently both lose more than they gain. Quiet
+  stars' brightest windows profit from the same freedom, so the threshold rises 2-3 times. With DR3's 15-25
+  visits per star there is no noise estimate that ignores a repeating dip without also ignoring chance runs.
+  DR4's roughly doubled number of visits narrows this.
+- **BP and RP agreement** is the one change that raises recall on every shape at the same quiet-star rate: 3-4
+  points at ≥ 5σ, 7-10 points at ≥ 3σ. Its cost is the share of all stars flagged, 2.6% → 3.9-4.6%: real
+  variable stars, which dim in all three bands at once. That is 50-80% more stars for the checks (S5) and for
+  people to look at, for a few points of recall. Recommended not to adopt (Cora's call, asked 2026-10-23). `period.star_scores` reports the BP and RP
+  agreement of the chosen window (`rep_band_z`) for use when checking a candidate.
+- **The gap between strict and irregular repeats** stays at 8-16 points in every variant. The three shapes that
+  failed slow-blind-2 sit 8-16 points below the repeating long dip on shard 0 too, against a margin of 15, so the
+  blind test was close to a coin toss for uneven dips. A fold gathers repeats that keep their period, depth and
+  shape, and the irregular shapes give some of that up by construction.
+
+Recommendation: no variant is worth a third blind test; slow-v2 stays as frozen, with the recall of slow-blind-2 stated as its
+weakness on irregular repeats.
+
 ## Log
 
+- **2026-10-23.** Ten ways to improve the slow period search (above): none worth a third blind test. BP and RP
+  agreement adds 3-10 points of recall but 50-80% more flagged stars; dips that repeat every few visits inflate
+  the noise estimate, and no estimate tried avoids that without raising the threshold as much. slow-v2 stays.
 - **2026-10-23.** Slow period search blind test (above): false alarms 0.10% (pass); calibrated shapes 65% and
   19% (pass); new repeating dip shapes 40-49% against a bar of 50% (fail). The period search still doubles or
   triples what the detector finds on every repeating shape.

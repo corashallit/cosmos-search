@@ -92,8 +92,11 @@ def _scan(tv, dev, sigma, freqs, kmax):
     bright = np.where(valid, (s - hi) / norm, -np.inf)
     flat = dim.reshape(kmax, len(freqs), n).transpose(1, 0, 2).reshape(len(freqs), -1)
     best = np.argmax(flat, axis=1)
-    return {"dim": flat[np.arange(len(freqs)), best], "length": best // n + 1, "start": best % n, "order": order,
-            "bright": bright.max(axis=(0, 2))}
+    bflat = bright.reshape(kmax, len(freqs), n).transpose(1, 0, 2).reshape(len(freqs), -1)
+    bbest = np.argmax(bflat, axis=1)
+    rows = np.arange(len(freqs))
+    return {"dim": flat[rows, best], "length": best // n + 1, "start": best % n, "order": order,
+            "bright": bflat[rows, bbest], "b_length": bbest // n + 1, "b_start": bbest % n}
 
 
 def events(order_row, start, length, tv, dev, sigma):
@@ -122,20 +125,38 @@ def events(order_row, start, length, tv, dev, sigma):
     return n_ev, z_between, z_rest
 
 
+def _window(order_row, start, length):
+    return order_row[(start + np.arange(length)) % len(order_row)]
+
+
+def band_z(t_window, bands, sign=1.0):
+    """Deficit (sign=1) or excess (sign=-1) of the BP and RP visits at the window's G visit times, against each
+    band's median, in units of its error: (z_bp + z_rp) / sqrt(2), or the one band available. The window is fixed
+    by G, so this is a second, independent measurement of the same event with no search of its own."""
+    zs = []
+    for tb, yb, sb in bands:
+        j = np.clip(np.searchsorted(tb, t_window), 1, len(tb) - 1)
+        j = np.where(np.abs(tb[j - 1] - t_window) < np.abs(tb[j] - t_window), j - 1, j)
+        j = np.unique(j[np.abs(tb[j] - t_window) < detect.VISIT_GAP_DAYS])
+        if len(j):
+            zs.append(sign * (np.median(yb) - yb[j].mean()) * np.sqrt(len(j)) / sb)
+    return float(np.sum(zs) / np.sqrt(len(zs))) if zs else np.nan
+
+
 def _detrend(tv, yv):
     x = tv - tv.mean()
     sxx = np.sum(x * x)
     return yv - yv.mean() - (np.sum(x * (yv - yv.mean())) / sxx * x if sxx > 0 else 0.0)
 
 
-def star_scores(tv, yv, sigma, top=TOP_PERIODS):
+def star_scores(tv, yv, sigma, top=TOP_PERIODS, bands=()):
     """s_rep (best window among the top periods that passes the repeat conditions of `events`), its period, depth,
-    length and events, and
-    s_rep_bright (best repeated brightening, no event condition: the false-alarm estimate is deliberately
-    conservative)."""
+    length and events, and s_rep_bright (best repeated brightening, no event condition: the false-alarm estimate is
+    deliberately conservative). rep_band_z and rep_bright_band_z: the BP and RP visits at the times of the chosen
+    windows (`band_z`), reported for checking a candidate; no rule uses them (see the doc, "Colour agreement")."""
     out = {"s_rep": np.nan, "rep_period": np.nan, "rep_depth": np.nan, "rep_visits": 0, "rep_events": 0,
            "rep_between_z": np.nan, "rep_rest_z": np.nan,
-           "s_rep_any": np.nan, "s_rep_bright": np.nan}
+           "s_rep_any": np.nan, "s_rep_bright": np.nan, "rep_band_z": np.nan, "rep_bright_band_z": np.nan}
     span = tv[-1] - tv[0]
     freqs = freq_grid(span)
     y = _detrend(tv, yv)
@@ -144,30 +165,43 @@ def star_scores(tv, yv, sigma, top=TOP_PERIODS):
         return out
     out["s_rep_any"], out["s_rep_bright"] = float(r["dim"].max()), float(r["bright"].max())
     dev = y - np.median(y)
+    bands = [(tb, _detrend(tb, yb), sb) for tb, yb, sb in bands]
+    if bands:
+        i = int(np.argmax(r["bright"]))
+        out["rep_bright_band_z"] = band_z(tv[_window(r["order"][i], r["b_start"][i], r["b_length"][i])], bands, -1.0)
     for i in np.argsort(r["dim"])[::-1][:top]:
         if not np.isfinite(r["dim"][i]):
             break
         ne, z, zr = events(r["order"][i], r["start"][i], r["length"][i], tv, dev, sigma)
         if ne >= 2 and z > -BETWEEN_Z and zr >= REST_Z:
-            idx = r["order"][i][(r["start"][i] + np.arange(r["length"][i])) % len(tv)]
+            idx = _window(r["order"][i], r["start"][i], r["length"][i])
             out.update(s_rep=float(r["dim"][i]), rep_period=float(1 / freqs[i]), rep_visits=int(r["length"][i]),
                        rep_events=ne, rep_between_z=z, rep_rest_z=zr, rep_depth=float(-dev[idx].mean()))
+            if bands:
+                out["rep_band_z"] = band_z(tv[idx], bands)
             break
     return out
 
 
 def star_features(epochs, col="frac_corr"):
     """One row per star with the period-search scores (G visits, as `detect.star_features`)."""
-    e = epochs[epochs["band"] == 0].sort_values(["source_id", "t"], kind="stable")
-    sid, t, y = e["source_id"].to_numpy(), e["t"].to_numpy(), e[col].to_numpy()
+    e = epochs.sort_values(["source_id", "band", "t"], kind="stable")
+    sid, band, t, y = e["source_id"].to_numpy(), e["band"].to_numpy(), e["t"].to_numpy(), e[col].to_numpy()
     starts = np.flatnonzero(np.r_[True, sid[1:] != sid[:-1]])
     ends = np.r_[starts[1:], len(sid)]
     rows = []
     for a, b in zip(starts, ends):
-        if b - a < detect.MIN_VISITS:
+        per = {}
+        for code in (0, 1, 2):
+            m = np.flatnonzero(band[a:b] == code) + a
+            if len(m) < detect.MIN_VISITS:
+                continue
+            tv, yv = detect.visits(t[m], y[m])
+            if len(tv) >= detect.MIN_VISITS:
+                per[code] = (tv, yv, detect.visit_sigma(yv))
+        if 0 not in per:
             continue
-        tv, yv = detect.visits(t[a:b], y[a:b])
-        if len(tv) < detect.MIN_VISITS:
-            continue
-        rows.append({"source_id": int(sid[a]), **star_scores(tv, yv, detect.visit_sigma(yv))})
+        tv, yv, sg = per[0]
+        rows.append({"source_id": int(sid[a]),
+                     **star_scores(tv, yv, sg, bands=[per[c] for c in (1, 2) if c in per])})
     return pd.DataFrame(rows)

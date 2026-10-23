@@ -334,3 +334,16 @@ def test_rule_slow_v2_adds_repeated_dimming():
     f = rule_v2.apply(stats, thr, thr_p)
     assert f["flagged"].tolist() == [True, True, False]
     assert f["by"].tolist() == ["episode+repeat", "repeat", ""]
+
+
+def test_band_z_measures_bp_rp_at_the_window_times():
+    from cosmos_search.slow import period
+
+    tb = np.arange(0.0, 400.0, 20.0)
+    yb = np.zeros(len(tb))
+    yb[[3, 4, 12, 13]] = -0.01  # faint at the window's visits
+    bands = [(tb, yb, 0.002), (tb + 0.5, yb, 0.002)]
+    z = period.band_z(tb[[3, 4, 12, 13]] + 0.2, bands)
+    assert z > 10
+    assert period.band_z(tb[[3, 4, 12, 13]] + 0.2, bands, -1.0) == -z
+    assert np.isnan(period.band_z(np.array([1000.0]), bands))  # no BP or RP visit within a visit gap
