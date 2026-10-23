@@ -110,6 +110,26 @@ class SecularTrend:
 
 
 @dataclass
+class Ramp:
+    """Fractional flux change that starts at t_start, grows linearly over `duration` to `fraction`, then holds.
+
+    A fade that begins partway through the span (fraction < 0), such as a screen or swarm that starts to
+    build, rather than one already under way like SecularTrend.
+    """
+
+    t_start: float
+    duration: float
+    fraction: float
+    beta: float = 0.0
+    kind: str = field(default="ramp", init=False)
+
+    def factor(self, t, band):
+        scale = (wavelength(band) / REF_UM) ** -self.beta
+        x = np.clip((np.asarray(t, dtype=float) - self.t_start) / max(self.duration, 1e-9), 0.0, 1.0)
+        return 1.0 + self.fraction * scale * x
+
+
+@dataclass
 class Step:
     """Abrupt fractional flux change at t_step."""
 
@@ -259,6 +279,18 @@ def sample(rng, family, t_min, t_max, t_ext=None, allow_held_out=False):
     if family == "secular_fade":
         return SecularTrend(rate_per_year=-_loguniform(rng, 1e-3, 5e-2), t_ref=(t_min + t_max) / 2,
                             beta=float(rng.choice([0.0, rng.uniform(1, 3)])))
+    if family == "long_dip":
+        # Weeks to years: disc eclipses, long dust episodes, a large slow occulter. Grey or dust-reddened.
+        dur = _loguniform(rng, 20.0, min(1500.0, span))
+        dust = rng.random() < 0.5
+        return Dip(t0=rng.uniform(t_min - dur / 2, t_max - dur / 2), covering=_loguniform(rng, 0.002, 0.3),
+                   tau_ref=_loguniform(rng, 0.1, 2.0) if dust else np.inf, beta=rng.uniform(1.0, 4.0) if dust else 0.0,
+                   ingress=dur * rng.uniform(0.1, 0.5), egress=dur * rng.uniform(0.1, 0.5), flat=dur * rng.uniform(0, 0.5),
+                   shape=str(rng.choice(["trapezoid", "gaussian", "tail"])))
+    if family == "ramp_fade":
+        dur = _loguniform(rng, min(30.0, span / 2), span)
+        return Ramp(t_start=rng.uniform(t_min - dur / 2, t_max - min(30.0, span / 4)), duration=dur,
+                    fraction=-_loguniform(rng, 0.001, 0.1), beta=float(rng.choice([0.0, rng.uniform(1, 3)])))
     if family == "step":
         return Step(t_step=rng.uniform(t_min, t_max), fraction=float(rng.choice([-1, 1]) * _loguniform(rng, 0.002, 0.1)))
     if family == "chromatic_flip":
@@ -283,6 +315,9 @@ FAMILIES = (
     "dip_train_poisson", "dip_train_periodic", "dip_train_primes", "dip_train_geometric",
     "secular_fade", "step", "chromatic_flip", "flare",
 )
+# Slow changes (docs/arms/slow-changes.md). Kept out of FAMILIES so the frozen searches that draw from FAMILIES
+# (TESS bake-off, dimming classes) draw exactly what they did before.
+SLOW_FAMILIES = ("long_dip", "ramp_fade", "secular_fade")
 
 # Families no detector, flag or rule was calibrated or tuned on. They exist to measure recall on structure the
 # rules were not designed around (docs/plan.md, principle 3; review findings R5, R20), so sample() refuses them

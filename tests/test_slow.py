@@ -1,9 +1,10 @@
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pytest
 
 from cosmos_search.gaia import epoch
-from cosmos_search.slow import drift, known
+from cosmos_search.slow import detect, drift, known
 
 YEAR = 365.25
 
@@ -93,3 +94,94 @@ def test_sky_pixel_and_offsets():
                        "slope_err": 0.005})
     off = drift.sky_offsets(tr, level=5, min_stars=5)
     assert list(off["pix"]) == [5] and off["offset_z"].iloc[0] == 2.0
+
+
+def epochs_frame(t, g, bp=None, rp=None, sid=1):
+    parts = [pd.DataFrame({"source_id": sid, "band": np.int8(0), "t": t, "frac_corr": g})]
+    for code, y in ((1, bp), (2, rp)):
+        if y is not None:
+            parts.append(pd.DataFrame({"source_id": sid, "band": np.int8(code), "t": t, "frac_corr": y}))
+    return pd.concat(parts, ignore_index=True)
+
+
+def gaia_times(rng, n_visits=40, span=1000.0):
+    """Visits of two epochs ~0.07 d apart (the two fields of view) at random times."""
+    tv = np.sort(rng.uniform(0, span, n_visits))
+    return np.sort(np.r_[tv, tv + 0.074])
+
+
+def test_visits_group_epochs():
+    t = np.array([0.0, 0.07, 0.3, 10.0, 10.07, 30.0])
+    tv, yv = detect.visits(t, np.array([1.0, 3.0, 2.0, 5.0, 7.0, 4.0]))
+    assert np.allclose(yv, [2.0, 6.0, 4.0]) and len(tv) == 3
+
+
+def test_noise_has_abbe_near_one_and_symmetric_episodes():
+    rng = np.random.default_rng(3)
+    rows = [detect.star_features(epochs_frame(t, rng.normal(0, 1e-3, t.size), sid=i))
+            for i in range(300) for t in [gaia_times(rng)]]
+    f = pd.concat(rows, ignore_index=True)
+    assert 0.85 < f["abbe"].median() < 1.15
+    assert abs(f["s_dim"].median() - f["s_bright"].median()) < 0.3
+    assert f["sigma_visit"].median() == pytest.approx(1e-3 / np.sqrt(2), rel=0.15)
+
+
+def test_long_dip_found_with_colour():
+    rng = np.random.default_rng(4)
+    t = gaia_times(rng)
+    sig = 1e-3
+    inside = (t > 400) & (t < 600)
+    g = rng.normal(0, sig, t.size) - 0.01 * inside
+    bp = rng.normal(0, sig, t.size) - 0.015 * inside
+    rp = rng.normal(0, sig, t.size) - 0.007 * inside
+    f = detect.star_features(epochs_frame(t, g, bp, rp)).iloc[0]
+    assert f["s_dim"] > 20 and f["s_bright"] < 5
+    assert 380 <= f["dim_t0"] and f["dim_t1"] <= 620
+    assert f["dim_depth"] == pytest.approx(0.01, rel=0.2)
+    assert f["depth_bp"] > f["depth_rp"] > 0
+    assert f["abbe"] < 0.3
+
+
+def test_short_dip_does_not_count_as_episode():
+    # One deep visit is a short dip, not a long episode: runs need MIN_EPISODE_VISITS and MIN_EPISODE_DAYS.
+    rng = np.random.default_rng(5)
+    t = gaia_times(rng)
+    g = rng.normal(0, 1e-3, t.size)
+    g[20:22] -= 0.05
+    f = detect.star_features(epochs_frame(t, g)).iloc[0]
+    # Counted with the deep visit, the best run would score ~40 sigma.
+    assert f["s_dim"] < 6
+
+
+def test_alert_lightcurve_and_epochs():
+    text = ("Gaia16zzz\n#Date,JD(TCB),averagemag\n"
+            "2014-09-02 14:50:24,2456903.11833,untrusted\n"
+            "2015-01-01 00:00:00,2457023.5,15.00\n"
+            "2016-01-01 00:00:00,2457388.5,15.75\n"
+            "2021-01-01 00:00:00,2459215.5,16.00\n")
+    lc = known.alert_lightcurve(text, "Gaia16zzz")
+    assert list(lc["mag"]) == [15.0, 15.75, 16.0]
+    assert lc["t"].iloc[0] == pytest.approx(2457023.5 - known.GAIA_T0_JD)
+    ep = known.alert_epochs(lc)
+    assert len(ep) == 2  # 2021 is after DR4's span
+    assert ep["frac_corr"].min() < 0 < ep["frac_corr"].max() or 0 in list(ep["frac_corr"])
+    assert (ep["band"] == 0).all()
+
+
+@pytest.mark.parametrize("span", [27.0, 1000.0, 2000.0])
+def test_slow_families_sample_and_fade(span):
+    from cosmos_search.inject import lightcurve as lc
+
+    rng = np.random.default_rng(9)
+    t = np.linspace(0.0, span, 500)
+    assert not set(lc.SLOW_FAMILIES) - {"secular_fade"} & set(lc.FAMILIES)
+    for fam in lc.SLOW_FAMILIES:
+        for _ in range(20):
+            sig = lc.sample(rng, fam, 0.0, span)
+            for band in ("G", "BP", "RP"):
+                k = sig.factor(t, band)
+                assert np.all(np.isfinite(k)) and np.all(k > 0)
+                # A steady fade is centred on the span (brighter before the middle); the others only dim.
+                assert fam == "secular_fade" or np.all(k <= 1 + 1e-12)
+            if fam == "secular_fade":
+                assert sig.factor(t[-1], "G") < sig.factor(t[0], "G")

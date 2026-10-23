@@ -55,7 +55,7 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 |---|---|---|---|
 | S1 | Known answers matched to Gaia, DR4 columns checked | — | Done 2026-10-23 (below) |
 | S2 | Drift correction from neighbours (`drift`), tested on stars it was not fitted on | — | Magnitude/colour drift done 2026-10-23; sky term open (below) |
-| S3 | Trend, curvature and long-episode detector; fake slow fades and long dips for recall; brightenings as the false-alarm estimate | S2 | |
+| S3 | Trend, curvature and long-episode detector; fake slow fades and long dips for recall; brightenings as the false-alarm estimate | S2 | First version done 2026-10-23 (below) |
 | S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | |
 | S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | |
 | S6 | Pre-registered blind test: new fakes; controls from active stars, giants, young stars, known eclipsing binaries | S4, S5 | |
@@ -118,8 +118,73 @@ What this shows:
   significant DR3 trend: R CrB and UX Ori fades come in episodes, and at least 320 of the 376 fading alerts in
   DR4's span were raised after DR3's data end (2017-05-28), 229 of them in 2019. The detector (S3) needs a long-episode statistic beside the trend.
 
+## Detector (S3)
+
+`slow/detect.py`, checked with `scripts/slow_detect_check.py` on 2026-10-23 on the same 10% of DR3 (1,000,069
+stars with at least 8 visits), after the drift correction fitted on half A.
+
+Epochs closer than 2 days are averaged into one visit (the two fields of view and consecutive scans). Each star's
+noise is the scatter of one visit measured from differences between consecutive visits, so it includes any
+variability faster than the weeks between visits and every statistic below asks whether the slow part stands out
+above the star's own fast scatter. Per star, in G:
+
+- `slope_z`: the linear trend over the visits, in units of its error.
+- `s_dim`: the strongest dimming episode, over every run of at least 3 consecutive visits spanning at least 20
+  days and at most 60% of the visits: the run's mean deficit below the star's median, times the square root of
+  the number of visits, over the noise. The run's deepest visit is left out, so one deep visit (a short dip)
+  never makes an episode. `s_bright` is the same for brightenings and is the false-alarm estimate.
+- `abbe`: about 1 for noise and near 0 for a smooth change; DR4 publishes the same statistic for nearly every star.
+- `depth_bp`, `depth_rp`: the BP and RP deficits over the G episode's dates, for the colour of the change.
+
+A star passes if `s_dim` or `-slope_z` exceeds a threshold set so that 0.1% of quiet stars pass by brightening.
+
+**False alarms.** In quiet stars of half B (never used for the drift) dimming and brightening are equally common
+(beyond 8: 22 dimming episodes against 24 brightening; 30 fading trends against 23 brightening). Faint stars need
+their own thresholds: at G ≥ 19 the quiet stars' tails reach more than twice as far in both directions, and the
+stars there are mostly blue and slowly wandering, as quasars are. Thresholds at 0.1%:
+
+| G | Quiet stars | `s_dim` | `-slope_z` |
+|---|---|---|---|
+| < 19 | 6,023 | 7.4 | 6.9 |
+| ≥ 19 | 1,228 | 17.1 | 17.9 |
+
+DR3 only has light curves for stars it classed as variable, so even these quiet stars are not typical; DR4's
+thresholds have to come from DR4's own brightenings, at the far smaller false-alarm rates a billion stars need.
+Among all DR3 light curves at G < 19, 30,703 pass against 26,369 brightening: a 16% excess of dimming among
+DR3 variables, which this sample cannot attribute.
+
+**Recall.** One fake of each family per quiet half-B star (21,762 fakes), injected into the raw light curve
+before normalising and drift correction. Signal-to-noise below is the deepest G deficit times the square root of
+the visits below half of it, over the host's noise. Share found at G < 19:
+
+| Signal-to-noise | Steady fade | Fade that starts partway | Long dip (20-1,500 days) |
+|---|---|---|---|
+| < 5 | 3% | 0.4% | 0.2% |
+| 5-10 | 66% | 5% | 2% |
+| 10-20 | 99% | 48% | 28% |
+| 20-40 | 100% | 80% | 75% |
+| > 40 | 100% | 95% | 93% |
+
+The steady fade is found close to the ideal (`slope_z` does nearly all of it). Long dips need about twice the
+signal-to-noise: the search over every possible run costs some, leaving out the deepest visit costs some more,
+and the measure above uses peak depth while rounded and tailed shapes spend most of their time shallower. On
+DR3's 2.8 years a G 15-16 quiet star (noise per visit ~0.2%) has a 1% dip lasting a year at signal-to-noise ~15;
+DR4 doubles the span and the visits. At G ≥ 19 almost nothing is found at the 0.1% thresholds.
+
+**Known answers.** DR3 ends on 2017-05-28, before most fading alerts, so the 22 known answers with DR3 light
+curves mostly show nothing (5 pass). The alerts' own Gaia light curves, one point per transit over DR4's span
+(`python -m cosmos_search.slow alert-lcs`, 358 with enough visits), are a better check: 211 pass. Of the 241
+whose light curves are smooth (Abbe < 0.5) 190 pass (79%); of the 117 that change faster than Gaia's visits
+(one-day dips, erratic young stars) 21 pass, which is the intended behaviour, since the short-dip search covers
+those. R CrB stars whose median state is the faint one show their recoveries as brightenings.
+
+Open: the sky term from S2; thresholds per colour; families held out of all calibration for the blind test (S6).
+
 ## Log
 
+- **2026-10-23.** Detector first version (S3, above): fades found near the ideal, long dips need about twice the
+  signal-to-noise; faint stars (G ≥ 19, mostly quasars) need their own thresholds; 79% of smooth fading alerts
+  pass at DR4's sampling.
 - **2026-10-23.** Made the main search after a step-back review (Cora's decision, 2026-10-23). DR3 numbers behind
   it: trend error 0.03% per year at G 13-14 and 0.05 at G 15-16 for the quietest DR3 stars over 2.6 years, with
   star-to-star spread only 1.2-1.3× the error; median trend of quiet stars +0.02 to +0.1% per year at G < 17
