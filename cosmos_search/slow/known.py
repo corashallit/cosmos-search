@@ -64,8 +64,10 @@ def vsx_slow(hats=VSX_HATS):
     """VSX stars typed R CrB, UX Ori or DY Per (uncertain types included)."""
     import lsdb
 
-    df = lsdb.read_hats(hats, columns=["OID", "Name", "Type", "RAdeg", "DEdeg", "MagMax", "MagMin",
-                                       "MaxPassband"]).compute()
+    from cosmos_search.xmatch import mirror
+
+    cols = ["OID", "Name", "Type", "RAdeg", "DEdeg", "MagMax", "MagMin", "MaxPassband"]
+    df = lsdb.read_hats(mirror.resolve(hats, cols), columns=cols).compute()
     df = df[df["Type"].astype(str).str.contains("RCB|UXOR|DYP", case=False)]
     kind = df["Type"].astype(str).map(vsx_kind)
     df = df[kind.notna()]
