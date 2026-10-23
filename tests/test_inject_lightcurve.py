@@ -83,7 +83,8 @@ def test_held_out_families_refused_unless_confirmatory_and_out_of_calibration():
             assert np.all(np.isfinite(k)) and np.all(k > 0) and np.all(k <= 1)
             json.dumps(lc.truth(sig))
     # Held out means no calibration or tuning code draws them.
-    used = set(lc.FAMILIES) | set(lc.SLOW_FAMILIES) | set(lc.PERIODIC_FAMILIES) | set(lc.SPENT_SLOW)
+    used = set(lc.FAMILIES) | set(lc.SLOW_FAMILIES) | set(lc.PERIODIC_FAMILIES) | set(lc.SPENT_SLOW) \
+        | set(lc.SPENT_PERIODIC)
     for mod, names in (("cosmos_search.dayone.recurrence_cal", ("FAMILIES",)),
                        ("cosmos_search.ebfilter.cal", ("TARGET_FAMILIES", "OTHER_FAMILIES", "HOST_FAMILIES")),
                        ("cosmos_search.dayone.decoys", ("COUNTS", "COUNTS4", "TRAINS")),
@@ -105,7 +106,7 @@ def test_spent_and_periodic_slow_families_draw_freely():
 
     rng = np.random.default_rng(5)
     t = np.linspace(0.0, 1000.0, 3000)
-    for fam in lc.SPENT_SLOW + lc.PERIODIC_FAMILIES:
+    for fam in lc.SPENT_SLOW + lc.SPENT_PERIODIC + lc.PERIODIC_FAMILIES:
         for _ in range(20):
             k = lc.sample(rng, fam, 0.0, 1000.0).factor(t, "G")
             assert np.all(np.isfinite(k)) and np.all(k > 0) and np.all(k <= 1) and k.min() < 1

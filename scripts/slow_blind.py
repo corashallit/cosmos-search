@@ -82,6 +82,9 @@ def _families(a):
     if a.rule == rule.NAME:  # slow-blind-1: its new shapes are spent since (inject.lightcurve.SPENT_SLOW)
         return [(f, "held_out", a.n_held_out) for f in inj.SPENT_SLOW] + \
             [(f, "known", a.n_known) for f in inj.SLOW_FAMILIES] + [("ramp_brighten", "brightening", a.n_bright)]
+    if a.rule == rule_v2.NAME:  # slow-blind-2: its new shapes are spent since (inject.lightcurve.SPENT_PERIODIC)
+        return [(f, "held_out", a.n_held_out) for f in inj.SPENT_PERIODIC] + \
+            [(f, "known", a.n_known) for f in inj.PERIODIC_FAMILIES] + [("repeat_brighten", "brightening", a.n_bright)]
     return [(f, "held_out", a.n_held_out) for f in inj.HELD_OUT_SLOW] + \
         [(f, "known", a.n_known) for f in inj.PERIODIC_FAMILIES] + [("repeat_brighten", "brightening", a.n_bright)]
 
