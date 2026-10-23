@@ -481,21 +481,22 @@ What was learned:
 - **BP and RP agreement** is the one change that raises recall on every shape at the same quiet-star rate: 3-4
   points at ≥ 5σ, 7-10 points at ≥ 3σ. Its cost is the share of all stars flagged, 2.6% → 3.9-4.6%: real
   variable stars, which dim in all three bands at once. That is 50-80% more stars for the checks (S5) and for
-  people to look at, for a few points of recall. Recommended not to adopt (Cora's call, asked 2026-10-23). `period.star_scores` reports the BP and RP
+  people to look at, for a few points of recall. Not adopted (Cora, 2026-10-23). `period.star_scores` reports the BP and RP
   agreement of the chosen window (`rep_band_z`) for use when checking a candidate.
 - **The gap between strict and irregular repeats** stays at 8-16 points in every variant. The three shapes that
   failed slow-blind-2 sit 8-16 points below the repeating long dip on shard 0 too, against a margin of 15, so the
   blind test was close to a coin toss for uneven dips. A fold gathers repeats that keep their period, depth and
   shape, and the irregular shapes give some of that up by construction.
 
-Recommendation: no variant is worth a third blind test; slow-v2 stays as frozen, with the recall of slow-blind-2 stated as its
+No variant is worth a third blind test, and Cora chose to keep slow-v2 as frozen (2026-10-23), with the recall of slow-blind-2 stated as its
 weakness on irregular repeats.
 
 ## Log
 
 - **2026-10-23.** Ten ways to improve the slow period search (above): none worth a third blind test. BP and RP
   agreement adds 3-10 points of recall but 50-80% more flagged stars; dips that repeat every few visits inflate
-  the noise estimate, and no estimate tried avoids that without raising the threshold as much. slow-v2 stays.
+  the noise estimate, and no estimate tried avoids that without raising the threshold as much. slow-v2 stays
+  frozen for DR4 (Cora's choice).
 - **2026-10-23.** Slow period search blind test (above): false alarms 0.10% (pass); calibrated shapes 65% and
   19% (pass); new repeating dip shapes 40-49% against a bar of 50% (fail). The period search still doubles or
   triples what the detector finds on every repeating shape.
