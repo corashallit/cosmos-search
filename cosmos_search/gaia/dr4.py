@@ -45,8 +45,16 @@ CCD_SCHEMA = pa.schema([
 ])
 
 
+def _names(table):
+    """Column names of an astropy Table or a pyarrow Table (bulk Parquet files are read as the latter)."""
+    return table.colnames if hasattr(table, "colnames") else table.column_names
+
+
 def _col(table, name, dtype=np.float64):
     col = table[name]
+    if isinstance(col, pa.ChunkedArray):
+        fill = np.nan if np.dtype(dtype).kind == "f" else 0
+        return np.asarray(col.fill_null(fill) if col.null_count else col, dtype=dtype)
     if hasattr(col, "filled"):  # astropy masked column
         return np.asarray(col.filled(np.nan if np.dtype(dtype).kind == "f" else 0), dtype=dtype)
     return np.asarray(col, dtype=dtype)
@@ -56,7 +64,7 @@ def transit_flags(table):
     """Per-transit flag bits (before band-specific ones) from DR4 transit_proc_flags and phot flags."""
     n = len(table)
     flags = np.zeros(n, np.int32)
-    if "transit_proc_flags" in table.colnames:
+    if "transit_proc_flags" in _names(table):
         proc = _col(table, "transit_proc_flags", np.int64) & 0xFFFF
         ipd = proc & 0xF
         flags |= np.where((ipd >= 1) & (ipd <= 3), FLAG_MULTI_SOURCE, 0)
@@ -70,15 +78,19 @@ def transit_flags(table):
 
 
 def _phot_flags(table):
-    if "phot_ccd_proc_flags" not in table.colnames:
+    if "phot_ccd_proc_flags" not in _names(table):
         return None
     raw = table["phot_ccd_proc_flags"]
+    if isinstance(raw, pa.ChunkedArray) and not raw.null_count:
+        flat = pa.chunked_array([c.flatten() for c in raw.chunks], raw.type.value_type) if raw.num_chunks else None
+        if flat is not None and len(flat) == 12 * len(raw):  # vectorised path for Parquet list columns
+            return np.asarray(flat, dtype=np.int64).reshape(len(raw), 12) & 0xFFFF
     arr = np.array([np.asarray(v, dtype=np.int64) if v is not None else np.zeros(12, np.int64) for v in raw])
     return arr.reshape(len(table), 12) & 0xFFFF
 
 
 def epoch_photometry_to_lc(table, vari_rejected=None):
-    """DR4 epoch_photometry rows (astropy Table, one per transit) -> light-curve table (epoch.SCHEMA).
+    """DR4 epoch_photometry rows (astropy or pyarrow Table, one per transit) -> light-curve table (epoch.SCHEMA).
 
     vari_rejected: optional dict {(transit_id, band): True} from vari_epoch_flags.
     """
@@ -87,7 +99,7 @@ def epoch_photometry_to_lc(table, vari_rejected=None):
     _, fov, row, _ = decode_transit_id(tid)
     base = transit_flags(table)
     phot = _phot_flags(table)
-    n_obs = _col(table, "g_n_obs", np.int64).astype(np.int8) if "g_n_obs" in table.colnames else np.zeros(len(table), np.int8)
+    n_obs = _col(table, "g_n_obs", np.int64).astype(np.int8) if "g_n_obs" in _names(table) else np.zeros(len(table), np.int8)
     parts = []
     for code, band in enumerate(BANDS):
         tcol, fcol, ecol = COLUMNS[band]
