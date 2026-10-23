@@ -108,7 +108,7 @@ measures well is the version that survived.
 | name | source | epoch | notes |
 |---|---|---|---|
 | `2mass` | HATS `two_mass` | per row (JD) | parallax exact; FWHM 2.5″ |
-| `allwise` | HATS `allwise` | 2010.55 ± 0.6 fixed | **HATS copy column-shifted from `use_src` on**, see data-sources.md; only columns before it are read |
+| `allwise` | HATS `allwise` | 2010.55 ± 0.6 fixed | positions are at a per-source epoch, 2010.51 ± 0.12 for 39 stars faster than 1.5″/yr (2026-10-23); `w1mjdmean` follows it only roughly (correlation 0.6, off by 0.2–0.3 yr where the W1 dates span one visit), so it is not used. HATS copy re-imported 2026-10-23 and checked against IRSA, see data-sources.md |
 | `catwise2020` | IRSA TAP `catwise_2020` | `ra_pm/dec_pm` at 2015.4 | WISE beam 6.1″; positions from CatWISE's own motion fit |
 | `unwise` | IRSA TAP | 2010–2017 coadds | crowded-field forced photometry; `fracflux` is unWISE's own blending measure |
 | `neowise` | HATS | per detection (MJD) | one match per frame (`FRAME_NUM`, `SCAN_ID` groups): an IR light curve per star |
@@ -228,9 +228,9 @@ default) so a target list costs one fetch per pixel. TAP surveys use the shared 
   as good as that model. The plain half is model-free.
 - ZTF groups use `objectid // 10⁷` (field, readout channel, filter), from the documented id layout; not
   yet checked against the HATS columns.
-- AllWISE through HATS gives positions and profile-fit magnitudes only (the copy is column-shifted from
-  `use_src` on, data-sources.md). Fluxes and other columns need IRSA TAP.
 - ASAS-SN variables mix epochs (mean epoch 2001.5 ± 4 assumed); its own Gaia DR3 ids are a cross-check.
 - Not done: Pan-STARRS/SkyMapper (for the optical SED), DECaLS, Spitzer, GALEX. The survey spec is a
   dataclass in `surveys.py`; adding one is a few lines plus a validation field.
-- Upstream: the AllWISE HATS column shift is reported as [astronomy-commons/lsdb#1660](https://github.com/astronomy-commons/lsdb/issues/1660). When it is fixed, recheck and drop the column restriction in `surveys.py`.
+- The AllWISE HATS copy was column-shifted from `use_src` on until LSDB re-imported it on 2026-10-23
+  ([astronomy-commons/lsdb#1660](https://github.com/astronomy-commons/lsdb/issues/1660)); the matcher never
+  read the shifted columns. The new copy agrees with IRSA in every column (data-sources.md).

@@ -155,12 +155,11 @@ SURVEYS = {s.name: s for s in [
               "w1snr", "w3snr", "w4snr", "cc_flags", "ext_flg", "ph_qual", "nb", "na", "w3rchi2", "w4rchi2"),
         hats=f"{HATS}/wise/allwise",
         notes="Coadd of 2010.0-2011.1. W3/W4 for energy-budget tests; W3/W4 detections near bright stars "
-              "are often spurious, so keep cc_flags and the rchi2 columns. The data.lsdb.io copy is shifted by "
-              "one column from use_src onward: its schema has a use_src column the data lack, so use_src, "
-              "best_use_cntr, ngrp, w?flux, aperture mags, w?mjd*, the 2MASS columns and x/y/z each hold the "
-              "next column's values (all 187 such columns checked against IRSA 2026-10-21). Use only columns "
-              "before use_src "
-              "from it, and a fixed epoch rather than w1mjdmean.",
+              "are often spurious, so keep cc_flags and the rchi2 columns. Positions sit at a per-source epoch "
+              "(39 stars faster than 1.5 arcsec/yr: 2010.51 +- 0.12); w1mjdmean tracks it only roughly (off by "
+              "0.2-0.3 yr where the W1 dates span one visit), so a fixed epoch is kept. The data.lsdb.io copy "
+              "was column-shifted from use_src on until its 2026-10-23 re-import (astronomy-commons/lsdb#1660); "
+              "the new one agrees with IRSA in every column.",
     ),
     Survey(
         "catwise2020", ra="ra_pm", dec="dec_pm", id="source_name",

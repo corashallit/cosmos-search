@@ -1,8 +1,7 @@
 """Reference photometry for the photosphere model and the calibration: Gaia DR3 joined to 2MASS and AllWISE.
 
 Everything comes from the Gaia archive in one ADQL join (DPAC's best-neighbour tables and the copies of the 2MASS
-PSC and AllWISE catalogues it hosts), so no HATS copy is involved: the data.lsdb.io AllWISE copy is shifted by one
-column from `use_src` on (docs/infra/xmatch.md), which is harmless for the w?mpro columns but not worth the risk.
+PSC and AllWISE catalogues it hosts), so no HATS copy is involved.
 
     python -m cosmos_search.energy reference --out ref/      # general.parquet, bright.parquet, yso.parquet, ecl.parquet
 
