@@ -58,7 +58,7 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 | S3 | Trend, curvature and long-episode detector; fake slow fades and long dips for recall; brightenings as the false-alarm estimate | S2 | First version done 2026-10-23 (below) |
 | S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | Done 2026-10-23 (below); DataLink download rate open |
 | S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | First version done 2026-10-23 (below); position needs DR4 epoch astrometry |
-| S6 | Pre-registered blind test: new fakes; controls from active stars, giants, young stars, known eclipsing binaries | S4, S5 | |
+| S6 | Pre-registered blind test of the detector: new fake shapes, fresh stars; known variable classes measured openly | S4, S5 | Written down 2026-10-23 (below); batch not yet drawn |
 | S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | |
 | S8 | Verify top candidates: one new brightness measurement each; per-visit spectra for the best | S7 | |
 
@@ -254,8 +254,76 @@ was expected; the point was to see the checks work:
 
 Output: `checks.csv` (one row per star) and the NEOWISE and ZTF epochs.
 
+## Blind test (S6)
+
+Written down and pushed before the batch is drawn. Nothing below changes after the draw.
+
+**What is tested.** The detector of S3 with its settings frozen as `slow-v1` (`cosmos_search/slow/rule.py`): a
+star is flagged when its dimming-episode score or its fading trend passes the threshold for its magnitude range
+(G < 19: s_dim > 7.41 or slope_z < −3.94; G ≥ 19: s_dim > 17.1 or slope_z < −7.91), after correcting its epochs
+with the drift table. Thresholds and drift table come from shard 0/10 of DR3 and are frozen in
+`prereg/rules/slow-v1/` (sha256 of each file goes into the batch plan).
+
+**Stars.** Shard 1/10 of DR3's epoch photometry (1,042,022 sources, none shared with shard 0). Quiet stars by the
+same definition as in S2 (`drift.reference_mask`): 16,711, of which 14,060 at G < 19.
+
+**Batch** (`scripts/slow_blind.py`, seed from the operating system, answers sealed with age to Cora's key and
+the reveal key):
+
+| Group | Stars | What it measures |
+|---|---|---|
+| Quiet stars as they are, G < 19 | 5,000 | false alarms |
+| Quiet stars as they are, G ≥ 19 | 2,000 | false alarms |
+| New shapes, 600 each, G < 19 | 2,400 | recall on shapes the detector was not designed or calibrated on |
+| Calibrated shapes (long dip, late-starting fade, steady fade), 300 each, G < 19 | 900 | whether S3's recall holds on fresh stars |
+| Late-starting brightenings, G < 19 | 300 | reported only: how often a brightening is flagged as a fade |
+
+Each fake goes into its own quiet star, which never also appears as a natural star. Ids are anonymous and the
+order is shuffled.
+
+The four new shapes (`inject.lightcurve.HELD_OUT_SLOW`) were defined for this test and have not been run through
+the detector. `sample()` refuses them unless a confirmatory batch asks, and a test checks that no calibration
+code lists them:
+
+- **Staircase fade:** 2-5 abrupt drops of 0.2-3% each that stay down.
+- **Slow cycle:** repeated fades and full recoveries, period 150-1,000 days, depth 0.2-10%.
+- **Accelerating fade:** a fade that starts slowly and speeds up (depth × x^p, p = 2-4), 0.2-10%.
+- **Fade with dips:** a gradual fade of 0.2-5% with a few to ~20 short dips (1-20 days, 0.5-10%) after it starts.
+
+Half of each are grey, half reddened (as for the calibrated shapes).
+
+**Signal-to-noise** of a fake, as in S3: its deepest G deficit at the visits × √(visits below half that depth) ÷
+the host star's own visit-to-visit noise.
+
+**Pass criteria** (all three must hold):
+
+| | Criterion | Expected from shard 0 |
+|---|---|---|
+| P1 | Natural stars flagged: at most 0.5% in each magnitude range | 0.23% (G < 19), 0.33% (G ≥ 19) |
+| P2 | New shapes at G < 19 and signal-to-noise ≥ 20: pooled recall at least 70% with 95% lower bound at least 60%, and each shape at least 50% | no expectation (unseen shapes); the calibrated shapes give 83-100% |
+| P3 | Calibrated shapes at signal-to-noise ≥ 20: each within 10 points of S3 | long dip 83%, late-starting fade 84%, steady fade 100% |
+
+**What each outcome leads to.**
+
+- All pass: the detector is frozen for DR4 as it stands (S7), and the recall quoted for DR4 is this batch's.
+- P1 fails: the thresholds do not carry over between sets of stars; set them from both shards before DR4 (on DR4
+  they come from DR4's own stars in any case) and say so.
+- P2 fails for a shape: the detector misses that kind of change. Add a score aimed at it if one is simple; the
+  shape is then spent, and its recall after the change is stated as not blind-tested.
+- P3 fails: S3's recall figures were optimistic; find out why before freezing.
+
+**Known variable classes** (active and spotted stars, giants and long-period variables, young stars, eclipsing
+binaries) are measured openly on shard 1, after the reveal, from DPAC's classes. They need no blinding: the
+question is how many such stars pass, which sets the workload for the checks per candidate (S5).
+
+**Procedure** (as for the astrometry blind test): `make` draws the batch and seals the answers; `run` writes
+`flags.csv`; `commit` archives the flags in `prereg/verdicts/slow-blind-1/` and refuses a dirty tree; the archive
+commit is pushed; `reveal` refuses unless that commit is on origin and the hashes match.
+
 ## Log
 
+- **2026-10-23.** Blind test written down (S6, above) before drawing the batch: four new fake shapes, fresh
+  stars from shard 1/10, frozen thresholds and drift table, pass criteria P1-P3.
 - **2026-10-23.** Checks per candidate (S5, above): colour, NEOWISE change or slope against what grey, dust and
   re-emission predict, ZTF after 2020. On DR3's 40 strongest candidates all are known variable classes; spotted
   stars' fades are neither grey nor dusty in W1, as a change in the star predicts.

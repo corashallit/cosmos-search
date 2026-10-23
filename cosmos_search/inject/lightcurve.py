@@ -121,12 +121,30 @@ class Ramp:
     duration: float
     fraction: float
     beta: float = 0.0
+    power: float = 1.0
     kind: str = field(default="ramp", init=False)
 
     def factor(self, t, band):
         scale = (wavelength(band) / REF_UM) ** -self.beta
         x = np.clip((np.asarray(t, dtype=float) - self.t_start) / max(self.duration, 1e-9), 0.0, 1.0)
-        return 1.0 + self.fraction * scale * x
+        return 1.0 + self.fraction * scale * x ** self.power
+
+
+@dataclass
+class Cycle:
+    """Dimming-only cosine: the flux falls by `amplitude` at t0 + period/2 (mod period) and recovers fully in
+    between, like an occulter on a long orbit or a slow pulsation seen only as fades."""
+
+    t0: float
+    period: float
+    amplitude: float
+    beta: float = 0.0
+    kind: str = field(default="cycle", init=False)
+
+    def factor(self, t, band):
+        scale = (wavelength(band) / REF_UM) ** -self.beta
+        phase = 2 * np.pi * (np.asarray(t, dtype=float) - self.t0) / self.period
+        return 1.0 - self.amplitude * scale * (1 - np.cos(phase)) / 2
 
 
 @dataclass
@@ -271,10 +289,12 @@ def sample(rng, family, t_min, t_max, t_ext=None, allow_held_out=False):
         dips = [Dip(t0=float(t0), covering=depth, ingress=dur / 4, egress=dur / 4, flat=dur / 2)
                 for t0 in event_times(rng, kind, t_min, t_end, **kw)]
         return Composite(dips)
-    if family in HELD_OUT_FAMILIES + HELD_OUT_FAMILIES_V2:
+    if family in HELD_OUT_FAMILIES + HELD_OUT_FAMILIES_V2 + HELD_OUT_SLOW:
         if not allow_held_out:
             raise HeldOutError(f"{family!r} is held out for the confirmatory batch; calibration and tuning may not "
                                "draw it (docs/dayone.md, review fixes)")
+        if family in HELD_OUT_SLOW:
+            return _held_out_slow(rng, family, t_min, t_max, span)
         return _held_out(rng, family, t_min, t_end, span)
     if family == "secular_fade":
         return SecularTrend(rate_per_year=-_loguniform(rng, 1e-3, 5e-2), t_ref=(t_min + t_max) / 2,
@@ -329,6 +349,44 @@ HELD_OUT_FAMILIES = ("dip_train_clustered", "dip_train_drifting", "dip_swarm", "
 # that tests rule v6 (docs/dayone.md, "Rule v6"), under the same conditions: no calibration, flag or rule has used
 # them, and nobody looks at how a flag responds to them before that batch is revealed.
 HELD_OUT_FAMILIES_V2 = ("dip_intermittent", "dip_depth_trend", "dip_chromatic_train", "dip_doublets")
+# Slow changes the slow-change detector was not designed or calibrated on, for its blind test
+# (docs/arms/slow-changes.md, "Blind test (S6)"). Same conditions as above.
+HELD_OUT_SLOW = ("staircase_fade", "slow_cycle", "accelerating_fade", "fade_with_dips")
+
+
+def _chromatic(rng):
+    return float(rng.choice([0.0, rng.uniform(1, 3)]))
+
+
+def _held_out_slow(rng, family, t_min, t_max, span):
+    """Slow changes with a shape other than the calibrated long dip, linear ramp and steady fade."""
+    if family == "staircase_fade":
+        # A few abrupt drops that stay down: pieces added one at a time, or a screen that thickens in jumps.
+        n = int(rng.integers(2, 6))
+        beta = _chromatic(rng)
+        return Composite([Step(t_step=float(t), fraction=-_loguniform(rng, 0.002, 0.03), beta=beta)
+                          for t in np.sort(rng.uniform(t_min + 0.05 * span, t_max - 0.05 * span, n))])
+    if family == "slow_cycle":
+        # Repeated slow fades and full recoveries, a few cycles to under one per span.
+        return Cycle(t0=float(rng.uniform(t_min, t_max)), period=_loguniform(rng, 150.0, 1000.0),
+                     amplitude=_loguniform(rng, 0.002, 0.1), beta=_chromatic(rng))
+    if family == "accelerating_fade":
+        # A fade that starts slowly and speeds up (fraction * x**p), still going or levelled off by the end.
+        dur = _loguniform(rng, min(100.0, span / 2), 2 * span)
+        return Ramp(t_start=float(rng.uniform(t_min - dur / 2, t_max - min(60.0, span / 4))), duration=dur,
+                    fraction=-_loguniform(rng, 0.002, 0.1), beta=_chromatic(rng), power=float(rng.uniform(2.0, 4.0)))
+    if family == "fade_with_dips":
+        # A gradual fade with short dips scattered after it starts: debris or structures building up.
+        dur = _loguniform(rng, span / 2, 2 * span)
+        t_start = float(rng.uniform(t_min - span / 2, t_min + span / 2))
+        parts = [Ramp(t_start=t_start, duration=dur, fraction=-_loguniform(rng, 0.002, 0.05), beta=_chromatic(rng))]
+        lo = max(t_start, t_min)
+        for t0 in rng.uniform(lo, t_max, int(rng.poisson(_loguniform(rng, 3.0, 20.0)))):
+            d = _loguniform(rng, 1.0, 20.0)
+            parts.append(Dip(t0=float(t0), covering=_loguniform(rng, 0.005, 0.1), ingress=d / 4, egress=d / 4,
+                             flat=d / 2))
+        return Composite(parts)
+    raise ValueError(f"unknown family {family!r}")
 
 
 def _held_out(rng, family, t_min, t_end, span):
