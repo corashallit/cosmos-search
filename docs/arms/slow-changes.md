@@ -422,8 +422,35 @@ long dip is called repeating in 6% of cases. DR4 has about twice the visits and 
   quiet stars, as for slow-v1. P2 fails for a shape: its recall is stated as a weakness, and whether a fix is
   worth a third blind test is Cora's call. P3 fails: find out why before freezing.
 
+**Result** (batch `slow-blind-2`, 10,300 light curves; flags archived in `prereg/verdicts/slow-blind-2/` and
+pushed before the reveal). The test fails on P2:
+
+| | Result | Pass? |
+|---|---|---|
+| P1 | 5 of 5,000 natural stars flagged at G < 19 (0.10%); 1 of 2,000 at G ≥ 19 (0.05%) | yes |
+| P2 | Paired dips 49% (46/93), sawtooth dips 40% (33/83), uneven dips 40% (19/47), each against the repeating long dip's 65% minus 15 points; drifting cycle 11% (19/180) against the slow cycle's 19% | **no** (the three dip shapes) |
+| P3 | Repeating long dip 65% (28/43), slow cycle 19% (18/93) | yes |
+
+The detector alone finds, at signal-to-noise ≥ 20: 35% of repeating long dips, 24% of paired dips, 16% of
+sawtooth dips, 15% of uneven dips, 11% of slow cycles and 4% of drifting cycles. With the period search added,
+the same shapes are found 65%, 49%, 40%, 40%, 19% and 11% of the time. 6% of repeated brightenings were flagged
+(reported only).
+
+Why the misses (after the reveal): every miss at signal-to-noise ≥ 20 has a fold score below the threshold. None
+was a strong fold turned away by the repeat conditions. Part of the gap is the signal-to-noise measure, which
+credits signal that one window in phase cannot gather (the second dip of a pair, the shallow cycles of uneven
+dips, the long tail of a sawtooth). Measured instead by the ideal (matched-filter) signal-to-noise, √Σ(deficit /
+σ)² over the visits, the recalls at ≥ 20 are 53%, 43% and 46% against 67% for the repeating long dip: the gap
+narrows a little but stays. Sawtooth dips with more than five cycles in the span are found 22% of the time.
+
+What follows, as written above: the three dip shapes' recall is stated as a weakness, and whether a fix is worth
+a third blind test is Cora's call (asked 2026-10-23).
+
 ## Log
 
+- **2026-10-23.** Slow period search blind test (above): false alarms 0.10% (pass); calibrated shapes 65% and
+  19% (pass); new repeating dip shapes 40-49% against a bar of 50% (fail). The period search still doubles or
+  triples what the detector finds on every repeating shape.
 - **2026-10-23.** Slow period search (above): repeating long dips at signal-to-noise 20-40 found 57% of
   the time instead of 14%; slow cycles stay weak (17%). Its blind test written down before the draw.
 - **2026-10-23.** Blind test (S6, above). False alarms 0.16% (pass), calibrated shapes 85-100% (pass), new shapes
