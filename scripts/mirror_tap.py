@@ -10,6 +10,7 @@ already fetched (they sit in the persistent TAP cache) and rebuilds the catalogu
 """
 
 import argparse
+import io
 import json
 import shutil
 import sys
@@ -26,7 +27,7 @@ ROOT = (data_dir() or Path.home() / "cosmos-data") / "mirror" / "hats"
 # name -> (chunk column, chunk edges or None for one query)
 CHUNKS = {
     "asassn_vars": (None, None),
-    "simbad": ("oid", 2_000_000),
+    "simbad": ("oid", 1_000_000),
 }
 
 
@@ -52,10 +53,17 @@ def fetch(name):
         parts, a = [], lo
         while a <= hi:
             b = a + step
-            t = tap.query(f"SELECT {cols} FROM {table} WHERE {key} >= {a} AND {key} < {b}", maxrec=5_000_000)
+            # CSV over sync: SIMBAD's binary VOTable carries a few non-ASCII bytes in char columns that astropy
+            # refuses to parse.
+            r = tap.client.post(f"{url}/sync", data={"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv",
+                                                     "MAXREC": "5000000", "QUERY": f"SELECT {cols} FROM {table} "
+                                                     f"WHERE {key} >= {a} AND {key} < {b}"},
+                                cache=True, timeout=3600)
+            r.raise_for_status()
+            t = pd.read_csv(io.BytesIO(r.content), encoding="utf-8", encoding_errors="replace", low_memory=False)
             if len(t) >= 5_000_000:
                 raise RuntimeError(f"{name}: chunk {a}-{b} hit maxrec; use a smaller step")
-            parts.append(t.to_pandas())
+            parts.append(t)
             print(f"  {key} < {b}: {sum(map(len, parts)):,} rows", flush=True)
             a = b
     df = pd.concat(parts, ignore_index=True)
@@ -78,7 +86,7 @@ def build(name):
     shutil.rmtree(tmp, ignore_errors=True)
     cat = lsdb.from_dataframe(df, ra_column=s.ra, dec_column=s.dec, catalog_name=name)
     cat.write_catalog(tmp)
-    files = sorted((tmp / "dataset").glob("Norder=*/Dir=*/Npix=*.parquet"))
+    files = sorted((tmp / name / "dataset").glob("Norder=*/Dir=*/Npix=*.parquet"))  # a collection: catalogue + margin
     schema = pq.read_schema(files[0])
     manifest = {"name": name, "source": f"{s.tap[0]} {s.tap[1]}", "url": None, "columns": schema.names,
                 "rows": len(df), "partitions": len(files), "bytes": sum(f.stat().st_size for f in files),
