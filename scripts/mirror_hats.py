@@ -3,6 +3,7 @@
     cd ~/cosmos-data/cosmos-search
     .venv/bin/python -I scripts/mirror_hats.py gaia_dr3 [--partitions 8 --streams 4]
     .venv/bin/python -I scripts/mirror_hats.py --list
+    .venv/bin/python -I scripts/mirror_hats.py --verify gaia_dr3 [--cones 8]
 
 Each partition is fetched as byte ranges: the Parquet footer, then only the column chunks we keep, written at
 their own offsets into a sparse temp file, so pyarrow reads it as if it were the whole file. The kept columns
@@ -27,6 +28,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -240,6 +242,47 @@ def run(name, partitions_at_once, streams, limit=None):
     return 0
 
 
+def verify(name, n_cones=8, radius_deg=0.05, seed=None):
+    """Row count against the source's properties, then random cones read locally and remotely, row for row."""
+    import random
+
+    import pandas as pd
+
+    from cosmos_search.xmatch import mirror
+    from cosmos_search.xmatch.sources import HatsSource
+    from cosmos_search.xmatch.surveys import SURVEYS
+
+    base, alias, _ = CATALOGS[name]
+    m = json.loads((ROOT / name / "mirror.json").read_text())
+    props = dict(line.split("=", 1) for line in (ROOT / name / "hats.properties").read_text().splitlines()
+                 if "=" in line and not line.startswith("#"))
+    want_rows = int(props.get("hats_nrows", props.get("total_rows", -1)))
+    ok = m["rows"] == want_rows
+    print(f"{name}: {m['rows']:,} rows mirrored, source properties say {want_rows:,}: {'ok' if ok else 'MISMATCH'}")
+    survey = GAIA_DR3 if name == "gaia_dr3" else SURVEYS[name]
+    local, remote = HatsSource(), HatsSource(urls={name: base})
+    assert local.location(survey) == str(ROOT / name), mirror.manifests().keys()
+    rng = random.Random(seed)
+    parts = partitions(get_client(), base)
+    for _ in range(n_cones):
+        o, p = rng.choice(parts)
+        import cdshealpix
+
+        lon, lat = cdshealpix.nested.healpix_to_lonlat(np.array([p], dtype=np.uint64), o)
+        ra, dec = lon.deg[0], lat.deg[0]
+        a = local.fetch(survey, float(ra), float(dec), radius_deg)
+        b = remote.fetch(survey, float(ra), float(dec), radius_deg)
+        cols = [c for c in survey.columns if c in a.columns]
+        a = a[cols].sort_values(survey.id).reset_index(drop=True)
+        b = b[cols].sort_values(survey.id).reset_index(drop=True)
+        same = len(a) == len(b) and all(a[c].equals(b[c]) or pd.Series(a[c]).fillna(-9e99).equals(
+            pd.Series(b[c]).fillna(-9e99)) for c in cols)
+        ok &= same
+        print(f"  cone ({float(ra):.3f}, {float(dec):.3f}) r={radius_deg} deg: {len(a)} local, {len(b)} remote, "
+              f"{'identical' if same else 'DIFFERENT'}", flush=True)
+    return 0 if ok else 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*")
@@ -247,7 +290,11 @@ def main(argv=None):
     ap.add_argument("--streams", type=int, default=4, help="range requests at once per partition")
     ap.add_argument("--limit", type=int, help="fetch only this many partitions (testing)")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--verify", action="store_true", help="compare the named mirrors with their sources")
+    ap.add_argument("--cones", type=int, default=8)
     a = ap.parse_args(argv)
+    if a.verify:
+        return max((verify(n, a.cones) for n in a.names), default=0)
     if a.list or not a.names:
         for n, (src, alias, cols) in CATALOGS.items():
             m = ROOT / n / "mirror.json"
