@@ -44,6 +44,9 @@ h3 { font-size: 1rem; margin: 2rem 0 0.5rem; }
   line-height: 1.6; }
 .prose code { font-family: inherit; font-size: 0.85em; background: var(--hl); padding: 0 0.25em; }
 .prose p { margin: 0 0 1.1em; }
+.prose dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.3em 1em; margin: 0 0 1.1em; font-size: 0.9375rem; }
+.prose dt { font-family: "Berkeley Mono", ui-monospace, Menlo, monospace; font-weight: 700; }
+.prose dd { margin: 0; }
 a { color: inherit; }
 a:hover { background: var(--accent); color: var(--accent-fg); text-decoration: none; }
 .theme-toggle { display: flex; width: fit-content; margin: 0 0 1.5rem; background: var(--box-head); font-weight: 700; }
@@ -68,6 +71,8 @@ figcaption .dl { font-family: "Berkeley Mono", ui-monospace, Menlo, monospace; w
 .viz-hover use:hover, .viz-hover path:hover { stroke: var(--accent) !important; stroke-width: 2.5px !important; }
 .star-head { margin-top: 3rem; }
 @media (max-width: 40rem) {
+  .prose dl { grid-template-columns: 1fr; gap: 0; }
+  .prose dd { margin: 0 0 0.5em; }
   .site { padding-block: 2rem 4rem; }
   figure.viz .frame { overflow-x: auto; }   /* keep figure text readable on phones: pan instead of shrink */
   figure.viz svg { min-width: 36rem; }
@@ -146,6 +151,12 @@ def figure_html(entry, n, png_links=False, base=None):
             cap += ' <span class="dl">(' + " · ".join(links) + ")</span>"
     parts.append(f"<figcaption>{cap}</figcaption></figure>")
     return "\n".join(parts)
+
+
+def terms(items, heading="Terms"):
+    """A definition list of (term, definition) pairs for a page's intro."""
+    rows = "".join(f"<dt>{t}</dt><dd>{d}</dd>" for t, d in items)
+    return f"<h3>{heading}</h3><dl>{rows}</dl>"
 
 
 def page(title, sections, out_path, intro="", meta="", png_links=False, fragment=False):

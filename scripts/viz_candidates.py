@@ -1,7 +1,8 @@
 """Release-day figures for candidates, and the DR3 gallery that shows what each figure looks like.
 
-    # once per run: the comparison sample with DPAC classes, and a reference sample for the HR diagram (TAP)
-    python scripts/viz_candidates.py reference --run RUN --out REF [--release dr4]
+    # once per run (TAP): the comparison sample with DPAC classes, a reference sample for the HR diagram, and the
+    # strongest fades with astrometry and DPAC class
+    python scripts/viz_candidates.py reference --run RUN --out REF [--release dr4] [--parts pop hr top]
 
     # figures and a page for chosen stars of a run (light curves from --lightcurves, else the AIP mirror for DR3)
     python scripts/viz_candidates.py figures --run RUN --ref REF --ids 123 456 --out OUT
@@ -53,36 +54,54 @@ def tap_upload(tap, ids, adql, chunk=50000):
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
+def dpac_classes(tap, ids, schema):
+    """best_class_name from vari_classifier_result for the ids that have one."""
+    cls = tap_upload(tap, ids, "SELECT u.source_id, c.best_class_name FROM TAP_UPLOAD.ids AS u "
+                     f"JOIN {schema}.vari_classifier_result AS c ON c.source_id = u.source_id")
+    cls["best_class_name"] = cls["best_class_name"].astype(str)
+    return cls
+
+
 def cmd_reference(a):
     from cosmos_search.gaia import archive
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     schema = TABLES[a.release]
     rd = rule_dir(a.run)
-    stats = pd.read_parquet(rd / "stats.parquet")
-    stats = stats[[c for c in POP_COLUMNS if c in stats]]
-    stats = stats.sample(min(a.sample, len(stats)), random_state=a.seed).reset_index(drop=True)
     tap = archive.tap()
-    src = tap_upload(tap, stats["source_id"], "SELECT u.source_id, s.phot_g_mean_mag, s.bp_rp FROM TAP_UPLOAD.ids AS u "
-                     f"JOIN {schema}.gaia_source AS s ON s.source_id = u.source_id")
-    cls = tap_upload(tap, stats["source_id"], "SELECT u.source_id, c.best_class_name FROM TAP_UPLOAD.ids AS u "
-                     f"JOIN {schema}.vari_classifier_result AS c ON c.source_id = u.source_id")
-    cls["best_class_name"] = cls["best_class_name"].astype(str)
-    pop = stats.merge(src, on="source_id", how="left").merge(cls, on="source_id", how="left")
-    pop = pd.concat([pop, data.strengths(pop, data.thresholds(rd / "release.json"))], axis=1)
-    pop.to_parquet(out / "pop.parquet")
-    print(f"comparison sample: {len(pop):,} stars, {pop['best_class_name'].notna().sum():,} with a DPAC class")
-    hr = tap.query("SELECT TOP 400000 source_id, phot_g_mean_mag, bp_rp, parallax, parallax_error "
-                   f"FROM {schema}.gaia_source WHERE random_index < 40000000 AND parallax_over_error > 10 "
-                   "AND bp_rp IS NOT NULL").to_pandas()
-    hr.to_parquet(out / "hr.parquet")
-    print(f"HR reference: {len(hr):,} stars")
+    if "pop" in a.parts:
+        stats = pd.read_parquet(rd / "stats.parquet")
+        stats = stats[[c for c in POP_COLUMNS if c in stats]]
+        stats = stats.sample(min(a.sample, len(stats)), random_state=a.seed).reset_index(drop=True)
+        src = tap_upload(tap, stats["source_id"], "SELECT u.source_id, s.phot_g_mean_mag, s.bp_rp FROM TAP_UPLOAD.ids "
+                         f"AS u JOIN {schema}.gaia_source AS s ON s.source_id = u.source_id")
+        cls = dpac_classes(tap, stats["source_id"], schema)
+        pop = stats.merge(src, on="source_id", how="left").merge(cls, on="source_id", how="left")
+        pop = pd.concat([pop, data.strengths(pop, data.thresholds(rd / "release.json"))], axis=1)
+        pop.to_parquet(out / "pop.parquet")
+        print(f"comparison sample: {len(pop):,} stars, {pop['best_class_name'].notna().sum():,} with a DPAC class")
+    if "hr" in a.parts:
+        hr = tap.query("SELECT TOP 400000 source_id, phot_g_mean_mag, bp_rp, parallax, parallax_error "
+                       f"FROM {schema}.gaia_source WHERE random_index < 40000000 AND parallax_over_error > 10 "
+                       "AND bp_rp IS NOT NULL").to_pandas()
+        hr.to_parquet(out / "hr.parquet")
+        print(f"HR reference: {len(hr):,} stars")
+    if "top" in a.parts:
+        top = pd.read_parquet(Path(a.run) / "lists" / "fading.parquet").nlargest(a.top, "strength")
+        ast = tap_upload(tap, top["id"], "SELECT u.source_id AS id, s.parallax, s.parallax_error, s.pmra, "
+                         "s.pmra_error, s.pmdec, s.pmdec_error FROM TAP_UPLOAD.ids AS u "
+                         f"JOIN {schema}.gaia_source AS s ON s.source_id = u.source_id")
+        cls = dpac_classes(tap, top["id"], schema).rename(columns={"source_id": "id"})
+        top = top.merge(ast, on="id", how="left").merge(cls, on="id", how="left")
+        top.to_parquet(out / "top.parquet")
+        print(f"strongest fades: {len(top):,}, {top['best_class_name'].notna().sum():,} with a DPAC class")
 
 
 def load_context(run, ref, release):
     pop = pd.read_parquet(Path(ref) / "pop.parquet")
-    hr_path = Path(ref) / "hr.parquet"
+    hr_path, top_path = Path(ref) / "hr.parquet", Path(ref) / "top.parquet"
     hr = pd.read_parquet(hr_path) if hr_path.exists() else None
+    top = pd.read_parquet(top_path) if top_path.exists() else None
     lists = {}
     run = Path(run)
     summary = json.loads((run / "lists" / "summary.json").read_text())
@@ -92,7 +111,7 @@ def load_context(run, ref, release):
         f = fad.loc[data.group(fad["phot_g_mean_mag"]) == grp, "strength"].to_numpy()
         r = ris.loc[data.group(ris["phot_g_mean_mag"]) == grp, "rise_strength"].to_numpy()
         lists[grp] = (f, r, int(d["scored"]))
-    return sheet.Context(pop=pop, lists=lists, hr=hr, release=RELEASE_END[release], label=release.upper())
+    return sheet.Context(pop=pop, lists=lists, hr=hr, top=top, release=RELEASE_END[release], label=release.upper())
 
 
 def list_rows(run, ids):
@@ -142,16 +161,14 @@ def star_inputs(run, rows, lc):
 
 
 def context_rows(ids, release):
-    """gaia_source parallax and DPAC class for a few stars (TAP)."""
+    """gaia_source parallax, proper motion and DPAC class for a few stars (TAP)."""
     from cosmos_search.gaia import archive
     schema = TABLES[release]
     tap = archive.tap()
-    src = tap_upload(tap, ids, "SELECT u.source_id, s.parallax, s.parallax_error, s.ruwe FROM TAP_UPLOAD.ids AS u "
-                     f"JOIN {schema}.gaia_source AS s ON s.source_id = u.source_id")
-    cls = tap_upload(tap, ids, "SELECT u.source_id, c.best_class_name FROM TAP_UPLOAD.ids AS u "
-                     f"JOIN {schema}.vari_classifier_result AS c ON c.source_id = u.source_id")
-    cls["best_class_name"] = cls["best_class_name"].astype(str)
-    return src.merge(cls, on="source_id", how="left").set_index("source_id")
+    src = tap_upload(tap, ids, "SELECT u.source_id, s.parallax, s.parallax_error, s.pmra, s.pmra_error, s.pmdec, "
+                     f"s.pmdec_error, s.ruwe FROM TAP_UPLOAD.ids AS u JOIN {schema}.gaia_source AS s "
+                     "ON s.source_id = u.source_id")
+    return src.merge(dpac_classes(tap, ids, schema), on="source_id", how="left").set_index("source_id")
 
 
 def star_section(ctx, sid, row, inp, ctxrow, out, heading=None, text="", name=None, label="candidate"):
@@ -177,7 +194,7 @@ def cmd_figures(a):
                              a.out) for sid in rows]
     for name, fragment in (("index.html", False), ("artifact.html", True)) if a.artifact else (("index.html", False),):
         p = html.page(a.title, sections, Path(a.out) / name, meta=f"Gaia {a.release.upper()} slow-change search",
-                      png_links=not fragment, fragment=fragment)
+                      intro=html.terms(sheet.TERMS), png_links=not fragment, fragment=fragment)
         print(p)
 
 
@@ -199,7 +216,10 @@ GALLERY = [  # (source id, heading, text): DR3 stars of known type from the DR3 
     (424592431008600704, "Long-period variable",
      "Pulsating giant: periods of hundreds of days, amplitudes of magnitudes, a few dozen Gaia visits."),
     (1807455283392608768, "R CrB star",
-     "Carbon dust formation causes declines of several magnitudes lasting months; W1/W2 show the warm dust."),
+     "Carbon dust formation causes declines of several magnitudes lasting months; W1/W2 show the warm dust. Most "
+     "DR3 visits fall in declines, so the median is the faint level and the detected episode is only 0.17 mag "
+     "deep. On those numbers the nearest strong fades are spotted stars and long-period variables, and none are "
+     "R CrB stars (17 of the 20,000)."),
 ]
 
 FAKES = [  # (key, heading, text, signal factory(t_mid, t_lo, t_hi), host G range)
@@ -289,7 +309,7 @@ def cmd_gallery(a):
              "stars.</p>"
              "<p>Two injected signals show the target signal types. Hover over points for values. "
              "Code: <code>cosmos_search/viz</code>; this page: <code>scripts/viz_candidates.py gallery</code>; "
-             "release-day use: <code>docs/viz.md</code>.</p>")
+             "release-day use: <code>docs/viz.md</code>.</p>" + html.terms(sheet.TERMS))
     for name, fragment in (("index.html", False), ("artifact.html", True)) if a.artifact else (("index.html", False),):
         p = html.page(TITLE, sections, out / name, intro=intro, meta="Gaia DR3 examples · 2026-10-30",
                       png_links=a.png_links and not fragment, fragment=fragment)
@@ -362,6 +382,8 @@ def main(argv=None):
     r.add_argument("--release", default="dr3", choices=sorted(TABLES))
     r.add_argument("--sample", type=int, default=300000)
     r.add_argument("--seed", type=int, default=1)
+    r.add_argument("--parts", nargs="+", default=["pop", "hr", "top"], choices=["pop", "hr", "top"])
+    r.add_argument("--top", type=int, default=20000, help="how many of the strongest fades to compare against")
     f = sub.add_parser("figures")
     f.add_argument("--run", required=True)
     f.add_argument("--ref", required=True)

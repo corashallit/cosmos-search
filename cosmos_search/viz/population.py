@@ -1,7 +1,7 @@
 """A candidate against the comparison sample and the DPAC variability classes.
 
     strength_hist(fade, rise, strength, n, bulk)         # mirrored histogram: fading up, brightening down
-    known_classes(pop, cand, x="abbe", y="dim_depth")     # small multiples: one known class per panel
+    similar_classes(top, cand)                            # DPAC classes of the most similar strong fades
     hr_diagram(ref, cand)                                 # colour against absolute brightness
     dip_depth(pop, cand)                                  # deepest single epoch against brightness (short dips)
 
@@ -15,7 +15,7 @@ import pandas as pd
 from cosmos_search.viz import data, style
 from cosmos_search.viz.style import c, px
 
-DEFAULT_CLASSES = ("ECL", "AGN", "LPV", "RS", "BE|GCAS|SDOR|WR", "YSO")
+SIMILAR_CLASSES = ("ECL", "AGN", "LPV", "RS", "BE|GCAS|SDOR|WR", "YSO", "CV", "RCB")
 
 
 def _get(cand, key, default=np.nan):
@@ -107,71 +107,111 @@ def strength_hist(fade, rise, strength, n_stars=None, bulk=None, label="candidat
     return fig
 
 
-def known_classes(pop, cand, x="abbe", y="dim_depth", classes=DEFAULT_CLASSES, class_col="best_class_name",
-                  x_label="Abbe value, G (0: smooth; 1: uncorrelated)",
-                  y_label="episode depth (%)", log_x=False, log_y=True, y_scale=100.0, ncols=3,
-                  max_dots=600, width=style.WIDTH, heading=None, seed=0):
-    """Small multiples: every comparison star in the ramp, one known class per panel as ink dots, the candidate in
-    orange in every panel. Shows which known kind of variable, if any, behaves like the candidate on two numbers.
-    y_scale multiplies the y column (100 for fractions shown in percent)."""
-    rng = np.random.default_rng(seed)
-    xs = pop[x].to_numpy(float)
-    ys = pop[y].to_numpy(float) * y_scale
-    cx, cy = float(_get(cand, x)), float(_get(cand, y)) * y_scale
-    ok = np.isfinite(xs) & np.isfinite(ys)
-    if log_x:
-        ok &= xs > 0
-    if log_y:
-        ok &= ys > 0
+def _pct(v):
+    """A share in percent, to two significant figures below 10%."""
+    if v <= 0:
+        return "0"
+    return f"{v:.0f}%" if v >= 9.5 else f"{v:.2g}%"
 
-    def lims(v, log, extra):
-        lo, hi = np.percentile(v, (0.5, 99.5))
-        if np.isfinite(extra) and (extra > 0 or not log):
-            lo, hi = min(lo, extra), max(hi, extra)
-        if log:
-            return 10 ** (np.log10(lo) - 0.08), 10 ** (np.log10(hi) + 0.08)
-        pad = 0.04 * (hi - lo)
-        return lo - pad, hi + pad
 
-    xl, yl = lims(xs[ok], log_x, cx), lims(ys[ok], log_y, cy)
-    bx = np.linspace(*(np.log10(xl) if log_x else xl), 60)
-    by = np.linspace(*(np.log10(yl) if log_y else yl), 46)
-    classes = [k for k in classes if (pop[class_col] == k).any()] if class_col in pop else []
-    nrows = int(np.ceil(len(classes) / ncols)) or 1
-    left, right, gap = 70, 16, 14
-    pw = (width - left - right - gap * (ncols - 1)) / ncols
-    ph = pw * 0.75
-    top, rowgap = 76, 36
-    height = int(top + nrows * (ph + rowgap) + 50)
+def similar_classes(top, cand, k=100, classes=SIMILAR_CLASSES, class_col="best_class_name", exclude=None,
+                    label="candidate", where="", width=style.WIDTH, heading=None):
+    """DPAC classes among the k comparison stars nearest the candidate, against each class's share among all
+    comparison stars: one row per class, shares on a log scale, an open dot for all and an orange dot for the
+    nearest, with both shares in a table at the right.
+
+    top: the comparison stars (the strongest fades of the run, data module) with the class in class_col; cand: the
+    candidate's data.SIMILAR_COLUMNS; exclude: the candidate's source id, if it is among the comparison stars.
+    Distance is Euclidean over data.similarity_features, each scaled by its spread (1.4826 MAD) over the
+    comparison stars; features the candidate lacks are left out. A class whose share among the nearest is far
+    above its share among all is the known type the candidate is closest to. The footnote compares the median
+    distance to the candidate's k nearest with the same for every comparison star."""
+    from scipy.spatial import cKDTree
+
+    ft = data.similarity_features(top)
+    fc = data.similarity_features(pd.DataFrame([{k_: _get(cand, k_) for k_ in data.SIMILAR_COLUMNS}])).iloc[0]
+    use = [f for f in ft.columns if np.isfinite(fc[f])]
+    ok = np.isfinite(ft[use].to_numpy(float)).all(axis=1)
+    ids = top["id"] if "id" in top else top.get("source_id")
+    if exclude is not None and ids is not None:
+        ok &= ids.to_numpy() != int(exclude)
+    z = ft.loc[ok, use].to_numpy(float)
+    mid = np.median(z, axis=0)
+    spread = 1.4826 * np.median(np.abs(z - mid), axis=0)
+    spread = np.where(spread > 0, spread, z.std(axis=0) + 1e-12)
+    z = (z - mid) / spread
+    zc = (fc[use].to_numpy(float) - mid) / spread
+    k = min(k, len(z) - 1)
+    tree = cKDTree(z)
+    dc, ic = tree.query(zc, k)
+    typical = np.median(tree.query(z, k + 1)[0][:, 1:], axis=1)
+    farther = float(np.mean(typical < np.median(dc)))
+
+    raw = top.loc[ok, class_col] if class_col in top else pd.Series(np.nan, index=top.index[ok])
+    missing = (raw.isna() | raw.astype(object).isin(["nan", "None", ""])).to_numpy()
+    raw = raw.astype(object).to_numpy()
+    lab = np.where(missing, "none", np.where(np.isin(raw, classes), raw, "other"))
+    rows = [k_ for k_ in (*classes, "other", "none") if (lab == k_).any()]
+    names = {**{k_: data.CLASS_SHORT.get(k_, data.CLASS_NAMES.get(k_, k_)) for k_ in classes},
+             "other": "other DPAC classes", "none": "no DPAC class"}
+    n_all = {k_: int(np.sum(lab == k_)) for k_ in rows}
+    n_near = {k_: int(np.sum(lab[ic] == k_)) for k_ in rows}
+    s_all = {k_: 100 * n_all[k_] / len(lab) for k_ in rows}
+    s_near = {k_: 100 * n_near[k_] / k for k_ in rows}
+
+    row_h, top_px, bottom = 30, 104, 104
+    left, table = 196, 176
+    height = int(top_px + row_h * len(rows) + bottom)
     fig = style.figure(width, height)
-    style.title(fig, heading or "Abbe value vs episode depth, by DPAC class",
-                sub="density: comparison sample · dots: DPAC class · orange: candidate")
-    for i, k in enumerate(classes):
-        r, col = divmod(i, ncols)
-        x0 = (left + col * (pw + gap)) / width
-        y0 = 1 - (top + rowgap + r * (ph + rowgap) + ph) / height
-        ax = fig.add_axes([x0, y0, pw / width, ph / height])
-        style.density(ax, xs[ok], ys[ok], (bx, by), log_x=log_x, log_y=log_y)
-        m = ok & (pop[class_col] == k).to_numpy()
-        idx = np.flatnonzero(m)
-        if len(idx) > max_dots:
-            idx = rng.choice(idx, max_dots, replace=False)
-        ax.scatter(xs[idx], ys[idx], s=px(2.6) ** 2 * 1.6, c=c("fg"), edgecolors="none", alpha=0.7, zorder=5,
-                   rasterized=True)
-        if np.isfinite(cx) and np.isfinite(cy):
-            style.candidate_marker(ax, cx, cy, size=8)
-        ax.set_xlim(*xl)
-        ax.set_ylim(*yl)
-        style.panel_label(ax, data.CLASS_SHORT.get(k, data.CLASS_NAMES.get(k, k)))
-        style.note(ax, 0.98, 0.96, f"{int(m.sum()):,}", ha="right", va="top")
-        if col:
-            ax.tick_params(labelleft=False)
-        if i + ncols < len(classes):
-            ax.tick_params(labelbottom=False)
-    fig.text(left / width, 8 / height, x_label, color=c("muted"), fontsize=px(style.FONT_PX), ha="left",
-             va="bottom")
-    fig.text(12 / width, 1 - (top + rowgap + (nrows * (ph + rowgap) - rowgap) / 2) / height, y_label,
-             color=c("muted"), fontsize=px(style.FONT_PX), rotation=90, ha="left", va="center")
+    ax = fig.add_axes([left / width, bottom / height, 1 - (left + table) / width, row_h * len(rows) / height])
+    style.title(fig, heading or "DPAC classes of the most similar stars",
+                sub=f"{k} nearest of {len(lab):,} comparison stars: the strongest fades{', ' + where if where else ''}")
+    y = np.arange(len(rows))[::-1].astype(float)
+    lo = 10 ** np.floor(np.log10(min(v for v in s_all.values() if v > 0)) - 0.3)
+    for yi, k_ in zip(y, rows):
+        ax.axhline(yi, color=c("rule"), lw=px(1), zorder=1)
+        a, b = s_all[k_], s_near[k_]
+        if b > 0:
+            ax.plot([a, b], [yi, yi], color=c("muted"), lw=px(2), zorder=2, solid_capstyle="butt")
+        dot = ax.scatter([a], [yi], s=px(9) ** 2, facecolors=c("box"), edgecolors=c("muted"), linewidths=px(2),
+                         zorder=4)
+        style.hover(dot, [f"{names[k_]}: {n_all[k_]:,} of {len(lab):,} comparison stars ({_pct(a)})"])
+        if b > 0:
+            dot = style.candidate_marker(ax, b, yi, size=9)
+            style.hover(dot, [f"{names[k_]}: {n_near[k_]} of the {k} nearest ({_pct(b)})"])
+    ax.set_xscale("log")
+    ax.set_xlim(lo, 130)
+    ax.set_ylim(-0.6, len(rows) - 0.4)
+    style.plain_log(ax.xaxis)
+    ax.set_xticks([v for v in 10.0 ** np.arange(-4, 3) if lo <= v <= 100])
+    ax.set_xticklabels([f"{style._plain_number(v)}%" for v in ax.get_xticks()])
+    ax.set_yticks(y)
+    ax.set_yticklabels([names[k_] for k_ in rows], color=c("fg"))
+    ax.tick_params(axis="y", length=0)
+    ax.spines["left"].set_visible(False)
+    ax.set_xlabel("share of stars", labelpad=2)
+    # the shares as a table at the right
+    xa, xb = 1 - (table - 70) / width, 1 - 14 / width
+    for x_, head in ((xa, f"{k} nearest"), (xb, "all")):
+        fig.text(x_, (bottom + row_h * len(rows) + 16) / height, head, ha="right", va="center",
+                 fontsize=px(style.FONT_PX), color=c("muted"))
+    for yi, k_ in zip(y, rows):
+        yy = (bottom + row_h * (yi + 0.5)) / height
+        fig.text(xa, yy, _pct(s_near[k_]), ha="right", va="center", fontsize=px(style.FONT_PX), color=c("fg"),
+                 fontweight="bold" if s_near[k_] > 0 else "normal")
+        fig.text(xb, yy, _pct(s_all[k_]), ha="right", va="center", fontsize=px(style.FONT_PX), color=c("muted"))
+    from matplotlib.lines import Line2D
+    handles = [Line2D([], [], ls="none", marker="o", ms=px(9), mfc=c("orange"), mec=c("box"), mew=px(2),
+                      label=f"{label}: {k} nearest"),
+               Line2D([], [], ls="none", marker="o", ms=px(8), mfc=c("box"), mec=c("muted"), mew=px(2),
+                      label="all comparison stars")]
+    ax.legend(handles=handles, loc="lower left", bbox_to_anchor=(-left / (width - left - table), 1.0),
+              ncol=2, borderaxespad=0.6, handletextpad=0.3, columnspacing=1.6)
+    for i, line in enumerate((f"nearest in {data.SIMILAR_BY},", "each scaled by its spread over the comparison stars",
+                              f"median distance to the {k} nearest: larger than for {farther:.0%} of comparison "
+                              "stars")):
+        fig.text(14 / width, (10 + 18 * (2 - i)) / height, line, color=c("muted"), fontsize=px(style.FONT_PX),
+                 ha="left", va="bottom")
     return fig
 
 
@@ -213,8 +253,8 @@ def hr_diagram(ref, cand, width=style.WIDTH, heading=None, regions=REGIONS, labe
                  ha="left", va="top", fontsize=px(style.FONT_PX), color=c("fg"))
         ax.axvline(col, color=c("orange"), lw=px(2), zorder=17)
         style.chip(ax, col, 0.97, f"{label} BP − RP", transform=ax.get_xaxis_transform(), ha="center", va="top")
-    ax.set_xlabel("BP − RP (mag)")
-    ax.set_ylabel("M_G (mag)")
+    ax.set_xlabel("BP − RP: blue minus red magnitude (larger is redder)")
+    ax.set_ylabel("M_G, absolute G (mag)")
     return fig
 
 
