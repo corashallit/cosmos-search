@@ -437,3 +437,19 @@ def test_search_flags_fades_and_mirrors_rises():
     s = search.summary(f)
     assert s["G<19"]["fading"] == 1 and s["G<19"]["rising"] == 2 and s["G>=19"]["fading"] == 0
     assert search.keep_mask(stats, *search.rule_v3.load()[:2]).tolist() == [True, True, True, False]
+
+
+def test_period_search_ignores_one_extreme_bright_visit():
+    from cosmos_search.slow import detect, period
+
+    rng = np.random.default_rng(5)
+    tv = np.sort(rng.uniform(0, 1000, 20))
+    y = rng.normal(0, 0.005, 20)
+    y[-2] = 9.0  # one visit at 10x the star's flux, near the end
+    sig = detect.visit_sigma(y)
+    assert period.star_scores(tv, y, sig, clip=None)["s_rep"] > 50  # the unclipped line fit makes it "repeat"
+    assert not period.star_scores(tv, y, sig)["s_rep"] > 5
+    quiet = rng.normal(0, 0.005, 20)  # nothing beyond the clip: the same numbers as without it
+    a, b = period.star_scores(tv, quiet, detect.visit_sigma(quiet)), period.star_scores(
+        tv, quiet, detect.visit_sigma(quiet), clip=None)
+    assert all(a[k] == b[k] or (np.isnan(a[k]) and np.isnan(b[k])) for k in a)

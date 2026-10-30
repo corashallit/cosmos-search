@@ -39,6 +39,7 @@ PHASE_DRIFT = 0.02        # frequency step: a window drifts by at most this phas
 TOP_PERIODS = 20          # best periods checked for separate events
 BETWEEN_Z = 3.0           # visits between events may not be fainter than this (in sigma of their mean)
 REST_Z = 3.0              # the window without its strongest event must still be this faint
+DETREND_CLIP = 20.0       # visits this many sigma from the median are left out of the straight-line fit
 FAMILIES = ("repeat_long_dip", "slow_cycle")  # what calibration injects (inject.lightcurve.PERIODIC_FAMILIES)
 
 
@@ -295,23 +296,38 @@ def band_z(t_window, bands, sign=1.0):
     return float(np.sum(zs) / np.sqrt(len(zs))) if zs else np.nan
 
 
-def _detrend(tv, yv):
-    x = tv - tv.mean()
+def _detrend(tv, yv, sigma=None, clip=None):
+    """yv minus its straight-line fit. With `clip`, visits more than clip * sigma from the median are left out of
+    the fit (and only of the fit)."""
+    keep = np.abs(yv - np.median(yv)) <= clip * sigma if clip is not None else None
+    if keep is None or keep.all() or keep.sum() < 3:
+        x = tv - tv.mean()
+        sxx = np.sum(x * x)
+        return yv - yv.mean() - (np.sum(x * (yv - yv.mean())) / sxx * x if sxx > 0 else 0.0)
+    tk, yk = tv[keep], yv[keep]
+    x = tk - tk.mean()
     sxx = np.sum(x * x)
-    return yv - yv.mean() - (np.sum(x * (yv - yv.mean())) / sxx * x if sxx > 0 else 0.0)
+    slope = np.sum(x * (yk - yk.mean())) / sxx if sxx > 0 else 0.0
+    return yv - yk.mean() - slope * (tv - tk.mean())
 
 
-def star_scores(tv, yv, sigma, top=TOP_PERIODS, bands=()):
+def star_scores(tv, yv, sigma, top=TOP_PERIODS, bands=(), clip=DETREND_CLIP):
     """s_rep (best window among the top periods that passes the repeat conditions of `events`), its period, depth,
     length and events, and s_rep_bright (best repeated brightening, no event condition: the false-alarm estimate is
     deliberately conservative). rep_band_z and rep_bright_band_z: the BP and RP visits at the times of the chosen
-    windows (`band_z`), reported for checking a candidate; no rule uses them (see the doc, "Colour agreement")."""
+    windows (`band_z`), reported for checking a candidate; no rule uses them (see the doc, "Colour agreement").
+
+    The visits are first detrended with a straight line fitted to those within `clip` sigma of the median. On the
+    DR3 trial run (2026-10-30) a single visit far above the rest (a flare, an outburst or a bad measurement, up to
+    10x the star's flux) tilted an unclipped line enough to turn every other visit into a "repeated dimming" of
+    hundreds of sigma; flux cannot fall below zero, so the brightening mirror has no counterpart and does not
+    catch it."""
     out = {"s_rep": np.nan, "rep_period": np.nan, "rep_depth": np.nan, "rep_visits": 0, "rep_events": 0,
            "rep_between_z": np.nan, "rep_rest_z": np.nan,
            "s_rep_any": np.nan, "s_rep_bright": np.nan, "rep_band_z": np.nan, "rep_bright_band_z": np.nan}
     span = tv[-1] - tv[0]
     freqs = freq_grid(span)
-    y = _detrend(tv, yv)
+    y = _detrend(tv, yv, sigma, clip)
     r = scan(tv, y, sigma, freqs)
     if r is None:
         return out
