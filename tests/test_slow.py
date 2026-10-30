@@ -434,8 +434,11 @@ def test_search_flags_fades_and_mirrors_rises():
     assert f["early"].tolist() == [False, True, False, False]
     assert f["rising"].tolist() == [False, True, True, False]
     assert f["strength"].iloc[0] == pytest.approx(9.0 / 6.04, rel=0.01)
+    assert f["rise_strength"].iloc[1] == pytest.approx(9.0 / 6.04, rel=0.01)
     s = search.summary(f)
     assert s["G<19"]["fading"] == 1 and s["G<19"]["rising"] == 2 and s["G>=19"]["fading"] == 0
+    assert s["G<19"]["above_strength"]["1.25"] == {"fading": 1, "rising": 2}  # star 12 rises at 5 / 3.94
+    assert s["G<19"]["above_strength"]["1.5"] == {"fading": 0, "rising": 0}
     assert search.keep_mask(stats, *search.rule_v3.load()[:2]).tolist() == [True, True, True, False]
 
 

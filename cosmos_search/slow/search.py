@@ -71,7 +71,8 @@ def keep_mask(stats, thr, thr_p, fraction=KEEP_FRACTION):
 def flag(stats, rule_dir=rule_v3.RULE_DIR, shared_flags=None):
     """rule_v3.apply on every scored star, plus the mirror: `rising` (getting brighter by the episode score, its
     change date not shared, or by the trend), `rising_rep` (repeated brightening, which has no repeat conditions
-    and so over-counts), and `strength`.
+    and so over-counts), `strength` (largest of each fading score over its threshold) and `rise_strength` (the same
+    for getting brighter, repeated brightening included).
 
     stats: `score` output for whole sky patches (every scored star of a level-6 HEALPix pixel at once), joined
     with the cells (gbin)."""
@@ -83,9 +84,10 @@ def flag(stats, rule_dir=rule_v3.RULE_DIR, shared_flags=None):
     out["shared_rise"] = sh["shared_rise"].to_numpy()
     out["rising"] = ((s_rise > s_th) & ~out["shared_rise"].to_numpy()) | (slope_z > z_th)
     out["rising_rep"] = stats["s_rep_bright"].to_numpy() > rep_th if "s_rep_bright" in stats else False
-    with np.errstate(invalid="ignore", divide="ignore"):
-        parts = np.vstack([stats["s_fade"].to_numpy() / s_th, -slope_z / z_th, stats["s_rep"].to_numpy() / rep_th])
-    out["strength"] = np.nanmax(np.where(np.isfinite(parts), parts, -np.inf), axis=0)
+    s_rise_ns = np.where(out["shared_rise"].to_numpy(), np.nan, s_rise)
+    rep_b = stats["s_rep_bright"].to_numpy() if "s_rep_bright" in stats else np.full(len(stats), np.nan)
+    out["strength"] = _strength(stats["s_fade"].to_numpy() / s_th, -slope_z / z_th, stats["s_rep"].to_numpy() / rep_th)
+    out["rise_strength"] = _strength(s_rise_ns / s_th, slope_z / z_th, rep_b / rep_th)
     for c in ("slow_z", "slope", "dim_depth", "dim_t0", "dim_t1", "dim_visits", "depth_bp", "depth_bp_err",
               "depth_rp", "depth_rp_err", "rep_period", "rep_depth", "rep_band_z", "t_first", "t_last"):
         if c in stats:
@@ -93,9 +95,31 @@ def flag(stats, rule_dir=rule_v3.RULE_DIR, shared_flags=None):
     return out
 
 
+def _strength(*ratios):
+    with np.errstate(invalid="ignore", divide="ignore"):
+        parts = np.vstack(ratios)
+    return np.max(np.where(np.isfinite(parts), parts, -np.inf), axis=0)
+
+
+STRENGTH_STEPS = (1.0, 1.25, 1.5, 2.0, 3.0, 5.0, 10.0)
+
+
+def tail(flags, steps=STRENGTH_STEPS):
+    """Stars getting fainter and, as the false-alarm estimate, getting brighter, above each multiple of the
+    thresholds (strength), per magnitude range. The thresholds are 0.1% points of quiet stars, so over 10^9
+    stars the lists at strength 1 hold millions of chance passes; where the fading count stands clear of the
+    rising one is where a list is worth reading."""
+    out = {}
+    for grp, d in flags.groupby(mag_group(flags["gbin"])):
+        f, r = d["strength"].to_numpy(), d["rise_strength"].to_numpy()
+        out[grp] = {str(x): {"fading": int(np.sum(f > x)), "rising": int(np.sum(r > x))} for x in steps}
+    return out
+
+
 def summary(flags):
     """Per magnitude range: stars scored, the fading list by score, the `early` list, and the rising mirror."""
     out = {}
+    tails = tail(flags) if "rise_strength" in flags else {}
     for grp, d in flags.groupby(mag_group(flags["gbin"])):
         by = d.loc[d["flagged"], "by"]
         out[grp] = {
@@ -109,5 +133,6 @@ def summary(flags):
             "rising_rep": int(np.sum(d["rising_rep"])),
             "shared_fade_set_aside": int(d["shared_fade"].sum()),
             "shared_rise_set_aside": int(d["shared_rise"].sum()),
+            "above_strength": tails.get(grp, {}),
         }
     return out

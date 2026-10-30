@@ -270,7 +270,7 @@ def flag(a):
         flags.loc[m, cols].sort_values("strength" if name == "fading" else "id", ascending=name != "fading") \
             .to_parquet(out / f"{name}.parquet", index=False)
     flags[["id", "gbin", "flagged", "early", "rising", "rising_rep", "shared_fade", "shared_rise", "by",
-           "strength"]].to_parquet(out / "flags.parquet", index=False)
+           "strength", "rise_strength"]].to_parquet(out / "flags.parquet", index=False)
     summ = {"rule": str(a.rule), "stars": int(len(flags)), "by_magnitude": search.summary(flags)}
     (out / "summary.json").write_text(json.dumps(summ, indent=1))
     print(json.dumps(summ, indent=1))
