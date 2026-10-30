@@ -46,6 +46,7 @@ These apply to every arm and every thread.
 | I3 | Versioned target queries with a freeze manifest | I1 | Archive thread |
 | I4 | Durable store | Cora | Cora |
 | I5 | Proper-motion-aware cross-match ✓ (`xmatch/`; docs/infra/xmatch.md): 2MASS, AllWISE, CatWISE2020, unWISE, NEOWISE epochs, TIC, eROSITA DR2, ZTF DR22, VSX, ASAS-SN, SIMBAD. Calibrated per batch, Gaia neighbours compete for survey sources, false-match rate measured on the shifted sky per run, `p_cal` and `p_chance_0.9` per source | I1 | Cross-match thread |
+| I6 | Release-day figures and a page in cora.earth's style, light and dark ✓ (`viz/`, docs/viz.md): light curves, rarity against the brightening mirror, DPAC classes, HR diagram, colour and infrared of the change, short dips, astrometry | I1 | Figures thread |
 | **Slow changes (main since 2026-10-23)** | | | |
 | S1–S8 | Known answers, drift correction, trend and long-episode detector, whole-sky TAP selection, per-candidate checks, blind test, freeze, verification (docs/arms/slow-changes.md) | I1, I5 | Strategy review thread |
 | **Short dips (built; runs on DR4 as is, no further tuning since 2026-10-23)** | | | |
