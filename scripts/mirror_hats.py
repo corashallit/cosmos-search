@@ -254,7 +254,8 @@ def verify(name, n_cones=8, radius_deg=0.05, seed=None):
 
     base, alias, _ = CATALOGS[name]
     m = json.loads((ROOT / name / "mirror.json").read_text())
-    props = dict(line.split("=", 1) for line in (ROOT / name / "hats.properties").read_text().splitlines()
+    pfile = next(p for p in (ROOT / name / "hats.properties", ROOT / name / "properties") if p.exists())  # older HATS
+    props = dict(line.split("=", 1) for line in pfile.read_text().splitlines()
                  if "=" in line and not line.startswith("#"))
     want_rows = int(props.get("hats_nrows", props.get("total_rows", -1)))
     ok = m["rows"] == want_rows
