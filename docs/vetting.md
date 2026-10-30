@@ -488,6 +488,13 @@ a sampling frame of 120 of the 350 files (chosen with OS randomness before scori
 the quiet stars of all 350. Natural stars are drawn from the frame. Stars in
 `rehearsal-inputs/exclude/all_used_ids.txt` are left out.
 
+*Amendment (2026-10-30 02:20 UTC, after scoring the shard and before any draw).* One bulk file of the shard,
+`EpochPhotometry_041938-042766` (294,954 sources around M31, RA 11.8° Dec 39.8°), is DR3's Andromeda field, where
+DPAC published light curves for every source whatever its variability. It holds 176,545 of the shard's 192,627
+quiet stars, so drawn as written the fakes and chance passes would nearly all sit in one crowded patch of sky. It
+is left out of both (it is not in the frame, so the natural stars are unaffected); its flagged share of quiet
+stars (95 of 176,545) is reported for comparison. Outside it: 42 chance passes and 8,082 eligible hosts.
+
 **Batch (about 410).**
 
 | Group | Objects | Label for scoring | Measures |
@@ -532,7 +539,7 @@ because VSX carries Gaia DR3's own classes.
 | | Criterion | Passes a good rule | Passes a bad one |
 |---|---|---|---|
 | R1 | Grey, dust and re-emitting fakes at signal-to-noise ≥ 20 shortlisted: lower bound ≥ 50% (≥ 32 of 50) | 0.86 at recall 0.7 | 0.03 at 0.5 |
-| R2 | Natural and chance-pass stars shortlisted, pooled: upper bound ≤ 10% (≤ 21 of 300) | 0.95 at 0.05 | 0.05 at 0.10 |
+| R2 | Natural and chance-pass stars shortlisted, pooled: upper bound ≤ 10% (≤ 21 of 300; ≤ 23 of the 322 after the amendment) | 0.95 at 0.05 | 0.05 at 0.10 |
 | C1 | Colour of the change on fakes: (BP/RP ratio − injected ratio) within 2 stated errors for ≥ 85% | | |
 | C2 | NEOWISE change on fakes with a visit inside the change: (W1 change − injected) within 2 stated errors for ≥ 85% | | |
 

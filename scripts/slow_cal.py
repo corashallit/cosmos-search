@@ -45,6 +45,9 @@ ROOT = Path(__file__).resolve().parents[1]
 RECIPIENTS = [ROOT / "keys" / "cora.age.pub", ROOT / "keys" / "reveal.age.pub"]
 AUX = "/mnt/project-files/data/gaia-dr3-epoch/aux/aux_gaia_source.parquet"
 EXCLUDE = "/mnt/project-files/dayone/rehearsal-inputs/exclude/all_used_ids.txt"
+# DR3's Andromeda field (light curves for every source there): left out of chance passes and hosts
+# (docs/vetting.md §14, amendment).
+GAPS_FILE = "EpochPhotometry_041938-042766.parquet"
 BAND_NAMES = ("G", "BP", "RP")
 N_NATURAL = 280
 FLOOR = 10
@@ -268,6 +271,10 @@ def cmd_draw(a):
     print(strata)
 
     # Chance passes: every flagged quiet star in the shard.
+    gaps = stats["file"] == GAPS_FILE
+    print("Andromeda field: quiet", int((stats["quiet"] & gaps).sum()), "flagged quiet",
+          int((stats["quiet"] & stats["flagged"] & gaps).sum()))
+    stats = stats[~gaps]
     chance = stats[stats["flagged"] & stats["quiet"]][["source_id"]].assign(stratum="quiet")
     print(len(chance), "chance passes")
 
