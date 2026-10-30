@@ -479,3 +479,49 @@ def test_motion_marks_only_stars_without_measurable_motion_as_still():
     assert np.isnan(m["chi2_motion"].iloc[3])
     # Parallax and pmra 3 sigma each, but 0.95 correlated: together barely beyond the errors (chi2 ~9.2, not 18).
     assert 8 < m["chi2_motion"].iloc[4] < 10
+
+
+def test_band_agreement_passes_any_mix_and_flags_g_alone():
+    from cosmos_search.slow import checks
+
+    one = np.full(6, 0.001)
+    # grey, dust (BP deeper), a cooler star with RP up, G alone, BP/RP alone, BP missing
+    d_g = np.array([0.05, 0.05, 0.02, 0.05, 0.0, 0.05])
+    d_bp = np.array([0.05, 0.07, 0.04, 0.0, 0.05, np.nan])
+    d_rp = np.array([0.05, 0.04, -0.01, 0.0, 0.05, 0.05])
+    z = checks.band_agreement(d_g, one, d_bp, one, d_rp, one)
+    assert z[:3].tolist() == [0.0, 0.0, 0.0]
+    assert z[3] > 30 and z[4] < -30 and np.isnan(z[5])
+    rows = pd.DataFrame({"strength_by": ["episode", "trend", "trend", "repeat"],
+                         "dim_depth": [0.05, np.nan, np.nan, np.nan], "dim_depth_err": [0.001] * 4,
+                         "depth_bp": [0.0] * 4, "depth_bp_err": [0.001] * 4, "depth_rp": [0.0] * 4,
+                         "depth_rp_err": [0.001] * 4,
+                         "slope": [np.nan, -0.02, -0.02, np.nan], "slope_z": [np.nan, -20.0, -20.0, np.nan],
+                         "slope_bp": [np.nan, 0.0, -0.02, np.nan], "slope_bp_err": [0.001] * 4,
+                         "slope_rp": [np.nan, 0.0, -0.02, np.nan], "slope_rp_err": [0.001] * 4,
+                         "rep_depth": [np.nan, np.nan, np.nan, 0.0], "rep_depth_err": [0.001] * 4,
+                         "rep_depth_bp": [np.nan, np.nan, np.nan, 0.03], "rep_depth_bp_err": [0.001] * 4,
+                         "rep_depth_rp": [np.nan, np.nan, np.nan, 0.03], "rep_depth_rp_err": [0.001] * 4})
+    v = checks.band_check(rows, blend=[0.0, 0.5, 0.0, 0.0])["band_verdict"].tolist()
+    # G alone on an unblended star; the same on a blended one is untested (dilution); a grey trend; BP/RP alone
+    assert v == ["g_only", "untested", "agree", "bp_rp_only"]
+
+
+def test_detector_measures_band_slopes_and_repeat_band_depths():
+    from cosmos_search.slow import detect, period
+
+    rng = np.random.default_rng(3)
+    t = np.sort(rng.uniform(0, 1000, 60))
+    rows = []
+    for code, slope in ((0, -0.02), (1, 0.0), (2, -0.02)):
+        y = slope * (t - t.mean()) / 365.25 + rng.normal(0, 0.001, len(t))
+        rows.append(pd.DataFrame({"source_id": 7, "band": code, "t": t, "frac_corr": y}))
+    f = detect.star_features(pd.concat(rows, ignore_index=True)).iloc[0]
+    assert f["slope_bp"] == pytest.approx(0.0, abs=0.002) and f["slope_rp"] == pytest.approx(-0.02, abs=0.002)
+    assert 0 < f["slope_bp_err"] < 0.002
+    tv = np.arange(0, 1000, 20.0)
+    yv = np.where((tv % 100) < 25, -0.05, 0.0) + rng.normal(0, 0.002, len(tv))   # two visits in five, every 100 d
+    bands = [(tv, yv * 0.5, 0.002), (tv, yv, 0.002)]
+    out = period.star_scores(tv, yv, 0.002, bands=bands, band_names=["bp", "rp"])
+    assert out["rep_depth"] == pytest.approx(0.05, abs=0.01)
+    assert out["rep_depth_bp"] == pytest.approx(0.025, abs=0.005) and out["rep_depth_rp"] == pytest.approx(0.05, abs=0.01)

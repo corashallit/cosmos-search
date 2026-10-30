@@ -1,7 +1,7 @@
 """Run the per-candidate checks (cosmos_search.slow.checks) on the strongest stars of a search's fading list.
 
     python scripts/slow_checks.py --fading R/fading.parquet --out R/checks [--n 100] [--schema gaiadr4] [--max-g 17]
-        [--skip-class ECL] [--skip-still] [--workers 6]
+        [--skip-class ECL] [--skip-still] [--skip-band] [--workers 6]
 
 --fading is the list `scripts/slow_search.py flag` writes (ordered by strength). For each of the first --n stars
 (optionally only those brighter than --max-g): gaia_source astrometry and quality columns and DPAC's variability
@@ -116,7 +116,9 @@ def main(argv=None):
     ap.add_argument("--skip-class", action="append", default=[],
                     help="leave out stars DPAC gives this best class (repeatable), before taking the first --n")
     ap.add_argument("--skip-still", action="store_true",
-                    help="leave out stars `slow_search.py motion` marked still (no measurable parallax or motion)")
+                    help="leave out stars `slow_search.py cuts` marked still (no measurable parallax or motion)")
+    ap.add_argument("--skip-band", action="store_true",
+                    help="leave out fades whose G change disagrees with BP and RP (`slow_search.py cuts`)")
     ap.add_argument("--workers", type=int, default=6, help="stars checked at once (IRSA and ZTF fetches)")
     a = ap.parse_args(argv)
     out = Path(a.out)
@@ -124,6 +126,8 @@ def main(argv=None):
     fading = pd.read_parquet(a.fading)
     if a.skip_still:
         fading = fading[~fading["still"]]
+    if a.skip_band:
+        fading = fading[~fading["band_verdict"].isin(["g_only", "bp_rp_only"])]
     pool = a.n * (5 if a.skip_class else 1)
     while True:
         cand = candidates(fading, pool, a.max_g)

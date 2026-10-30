@@ -650,13 +650,14 @@ sits on 3 stars beyond the 0.1% point. That is the case for ~25,000 quiet stars 
    (fading or brightening).
 6. Lists: `slow_search.py flag --run R --aux SEL/selection.parquet --rule RULE --out L`: the shared-date test, then
    the fading list, the `early` list and the rising list, each ordered by strength, one sky region at a time.
-7. Motion: `slow_search.py motion --run L` looks up parallax and proper motion for every star above strength 1
-   either way and marks those consistent with zero as `still` (quasars, galaxies, stars in other galaxies), which are
-   read as a list of their own. `L/motion_summary.json` has the fading and rising counts above each strength
-   without them.
+7. Cuts: `slow_search.py cuts --run L` looks up parallax, proper motion and BP/RP blend counts for every star
+   above strength 1 either way, marks those with no measurable motion as `still` (quasars, galaxies, stars in other
+   galaxies), which are read as a list of their own, and adds whether each fade's G change agrees with BP and RP
+   (`band_verdict`, "G against BP and RP" below). `L/cuts_summary.json` has the fading and rising counts above each
+   strength without the still stars, and the fading list's band verdicts.
 8. Reading: from the top of the fading list down to where it stops standing clear of the rising list. Eclipsing
    binaries come out first (DR4's classes, then the eclipsing-binary filter for stars flagged by the repeat score),
-   then the checks: `slow_checks.py --fading L/fading.parquet --out L/checks --skip-still --skip-class ECL --n 1000`.
+   then the checks: `slow_checks.py --fading L/fading.parquet --out L/checks --skip-still --skip-band --skip-class ECL --n 1000`.
 
 ### Trial on all of DR3 (2026-10-30)
 
@@ -748,6 +749,66 @@ stars 6 of 8, R CrB stars 17 of 41 (18 more on the rising list, recovering from 
 
 **Still to do before DR4.** A check of G's change against BP's and RP's (docs/vetting.md §14). The
 eclipsing-binary filter run in bulk on stars flagged by the repeat score. Neither blocks the run order above.
+Both are under way (below).
+
+## G against BP and RP (written 2026-10-30, before any fake is drawn)
+
+**Why.** The calibration run (docs/vetting.md §14) found the blind review reads a change seen in G alone as
+unexplained: 13 of 25 G-only fakes were shortlisted, 12 as unexplained. Nothing told it whether G's change agrees
+with BP's and RP's. An exploratory cut found there (G's depth outside the BP and RP depths by more than 3 combined
+errors) marked 14 of those 25 and none of 85 other fakes, and needs fresh fakes before use.
+
+**The check** (`checks.band_agreement`, `checks.band_check`). G's passband covers BP's and RP's, so any change in
+the source's own light changes G by d_G = w d_BP + (1 − w) d_RP, with w, BP's share of the G signal, between 0.1
+and 0.9 from M dwarfs to A stars (as Stage 0, docs/vetting.md §12). That holds for grey, dusty and chromatic
+changes alike. The check measures how far d_G lies outside that range, in combined errors (z), using the score
+that gave the star its strength: the episode's depths in G, BP and RP over the same dates; the G, BP and RP trends
+(each band's own straight line); or, for a repeated dip, the BP and RP visits at the times of G's window. The
+detector and period search now record what that needs (`dim_depth_err`, `slope_bp`, `slope_rp`, `rep_depth_bp`,
+`rep_depth_rp` and their errors). Verdicts, at |z| > 3:
+
+- `g_only`: G changed more than any mix of BP and RP allows, on a star whose BP and RP transits are unblended
+  (under 5% blended): an instrument fault in G.
+- `bp_rp_only`: G changed less than both: the change is mostly in BP and RP's 3.5 × 2.1 arcsec window and outside
+  G's 0.7 × 2.1, so a neighbour.
+- `untested`: a band missing, or G deeper on a blended star (a constant neighbour in BP and RP's window dilutes
+  their changes, which reads the same way), or no blend count.
+- `agree` otherwise.
+
+On release day `slow_search.py cuts` (formerly `motion`) adds `band_verdict` to the fading list, and
+`slow_checks.py --skip-band` leaves out `g_only` and `bp_rp_only` stars. The rising list is not cut, so its count
+stays slightly high, which errs towards reading less of the fading list.
+
+**Test on fresh fakes.** Hosts are quiet stars at G < 19 from the 1,000 random sky patches of the DR3 trial (never
+used as fakes before; stars in `rehearsal-inputs/exclude/all_used_ids.txt` left out), half from the M31 field and
+half from elsewhere, each host used once. Shapes drawn uniformly from the six of the calibration run (long dip,
+late-starting fade, steady fade, staircase fade, accelerating fade, repeating long dip), injected into the raw G, BP
+and RP epochs, then the trial's drift table, detector and period search. A fake is kept only if the trial
+thresholds flag it (with its host's real neighbours in the shared-date test) at the slot's signal-to-noise (S3's
+definition, in G).
+
+| Group | Fakes | Hosts | S/N | Should be |
+|---|---|---|---|---|
+| Grey, dust, re-emitting dust, a cooling star | 75 each | any | ≥ 20 | not cut |
+| Grey | 100 | any | 6-20 | not cut (reported) |
+| G alone (BP and RP unchanged) | 100 | unblended | ≥ 20 | `g_only` |
+| G alone | 50 | blended | ≥ 20 | reported (`untested` by design) |
+| A neighbour: BP and RP change, G sees a fraction 0.1-0.6 of it | 50 | any | ≥ 20 in G | reported (`bp_rp_only`) |
+
+**Pass marks** (one-sided 95% Clopper-Pearson):
+
+- **B1** (keeps real changes): of the 300 real-light fakes at S/N ≥ 20, those cut (`g_only` or `bp_rp_only`) have
+  an upper bound ≤ 2% (at most 1 of 300).
+- **B2** (catches G-only faults): of the 100 G-only fakes on unblended hosts, those marked `g_only` have a lower
+  bound ≥ 30% (at least 38 of 100).
+
+Reported whatever the outcome: each group by flavour, shape, score that set the strength, magnitude and region;
+`untested` shares; and on DR3's natural stars, the verdicts of 3,000 random fades from the trial's fading list
+and of the 2,000 strongest (no still stars), by DPAC class.
+
+**What each outcome leads to.** B1 and B2 pass: `--skip-band` is part of the release-day run before the review.
+B1 fails: the check is shown to reviewers as a number, never used as a cut, and the misses are read. B2 fails with
+B1 passing: the cut is still used (it costs nothing real), with its low recall stated.
 
 ## Log
 

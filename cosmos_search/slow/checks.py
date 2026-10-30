@@ -12,6 +12,15 @@ Each check turns one question into numbers that a natural explanation predicts d
   far less than G (Rayleigh-Jeans side).
 - `wise_slope`: for a steady fade, the W1/W2 trend over the same years, to compare with Gaia's slope.
 - `after`: ZTF from 2018 on, inside and past DR4's end (2020-01-20): did the change go on, stop or recover?
+- `band_agreement`, `band_check`: whether G's change agrees with BP's and RP's. G's passband spans both, so any
+  change in the source's own light changes G by a flux-weighted mix of the BP and RP changes,
+  d_G = w d_BP + (1 - w) d_RP with w (BP's share of the G signal) in [0.1, 0.9] from M dwarfs to A stars, whatever
+  the colour of the change (grey, dust, a cooler star, even BP down and RP up). G outside that range means the
+  change is not in the source's light: either G alone moved (an instrument fault; a neighbour inside G's narrow
+  window is inside BP and RP's too, so it cannot do this), or BP and RP moved and G did not (a neighbour inside BP
+  and RP's 3.5 x 2.1 arcsec window but outside G's 0.7 x 2.1). The one real case that puts G outside is dilution:
+  a constant neighbour in the BP/RP window shrinks their fractional changes, so G looks deeper. Stars with blended
+  BP/RP transits are therefore not judged on that side (as `vetting.stage0`, docs/vetting.md §12).
 
 Inputs are plain tables so each check can be fed from whichever archive answers on the day.
 """
@@ -38,6 +47,65 @@ def colour(depth_bp, err_bp, depth_rp, err_rp):
     e = abs(r) * np.hypot(err_bp / max(abs(depth_bp), 1e-12), err_rp / depth_rp)
     return {"ratio": float(r), "ratio_err": float(e), "z_grey": float((r - 1) / e) if e > 0 else np.nan,
             "z_dust": float((r - DUST_BP_RP) / e) if e > 0 else np.nan}
+
+
+W_RANGE = (0.1, 0.9)    # BP's share of the G signal, M dwarfs to A stars (vetting.stage0)
+BAND_K = 3.0            # errors outside the mixing range that make a verdict
+BLEND_MAX = 0.05        # BP/RP blended-transit fraction below which a star counts as unblended (vetting.stage0)
+
+
+def band_agreement(d_g, e_g, d_bp, e_bp, d_rp, e_rp, w_range=W_RANGE):
+    """How far G's change lies outside the range of w d_BP + (1 - w) d_RP for w in w_range, in units of the
+    combined error at the nearer end: positive when G changed more than any mix of BP and RP allows, negative when
+    less, 0 inside, NaN when an input is missing. Changes in any consistent unit (depths, or minus slopes)."""
+    d_g, e_g, d_bp, e_bp, d_rp, e_rp = (np.asarray(x, float) for x in (d_g, e_g, d_bp, e_bp, d_rp, e_rp))
+    w0, w1 = w_range
+    m0, m1 = w0 * d_bp + (1 - w0) * d_rp, w1 * d_bp + (1 - w1) * d_rp
+    s0 = np.sqrt(e_g ** 2 + (w0 * e_bp) ** 2 + ((1 - w0) * e_rp) ** 2)
+    s1 = np.sqrt(e_g ** 2 + (w1 * e_bp) ** 2 + ((1 - w1) * e_rp) ** 2)
+    hi, s_hi = np.where(m0 >= m1, m0, m1), np.where(m0 >= m1, s0, s1)
+    lo, s_lo = np.where(m0 >= m1, m1, m0), np.where(m0 >= m1, s1, s0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        z = np.where(d_g > hi, (d_g - hi) / s_hi, np.where(d_g < lo, (d_g - lo) / s_lo, 0.0))
+    bad = ~(np.isfinite(d_g) & np.isfinite(d_bp) & np.isfinite(d_rp) & (s0 > 0) & (s1 > 0))
+    return np.where(bad, np.nan, z)
+
+
+def band_inputs(rows):
+    """G, BP and RP changes and errors for each listed star, from the score that set its strength
+    (`strength_by`): the episode's depths, minus the trends' slopes, or the repeated dip's depths."""
+    by = rows["strength_by"].to_numpy()
+    col = lambda c: rows[c].to_numpy(float) if c in rows else np.full(len(rows), np.nan)  # noqa: E731
+    with np.errstate(invalid="ignore", divide="ignore"):
+        e_trend = np.abs(col("slope") / col("slope_z"))
+    pick = {
+        "episode": (col("dim_depth"), col("dim_depth_err"), col("depth_bp"), col("depth_bp_err"), col("depth_rp"),
+                    col("depth_rp_err")),
+        "trend": (-col("slope"), e_trend, -col("slope_bp"), col("slope_bp_err"), -col("slope_rp"),
+                  col("slope_rp_err")),
+        "repeat": (col("rep_depth"), col("rep_depth_err"), col("rep_depth_bp"), col("rep_depth_bp_err"),
+                   col("rep_depth_rp"), col("rep_depth_rp_err")),
+    }
+    out = [np.full(len(rows), np.nan) for _ in range(6)]
+    for k, arrays in pick.items():
+        m = by == k
+        for o, a in zip(out, arrays):
+            o[m] = a[m]
+    return out
+
+
+def band_check(rows, blend, k=BAND_K):
+    """Per listed star: band_z (`band_agreement` on `band_inputs`) and band_verdict: "agree"; "g_only" (G changed
+    more than BP and RP allow, on a star whose BP/RP transits are unblended: blend < BLEND_MAX); "bp_rp_only" (G
+    changed less: the change is in BP and RP's wider window, a neighbour); "untested" (a band missing, or G
+    deeper on a blended star or one with no blend count, where dilution can do that)."""
+    z = band_agreement(*band_inputs(rows))
+    blend = np.asarray(blend, float)
+    v = np.full(len(z), "untested", dtype=object)
+    v[np.abs(z) <= k] = "agree"
+    v[(z > k) & (blend < BLEND_MAX)] = "g_only"
+    v[z < -k] = "bp_rp_only"
+    return pd.DataFrame({"band_z": z, "band_verdict": v}, index=rows.index)
 
 
 def neowise_adql(ra, dec, radius_arcsec=NEOWISE_RADIUS_ARCSEC):
