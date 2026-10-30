@@ -68,6 +68,47 @@ def sample_adql(n, table="gaiadr4.all_source_photometry", min_n=20):
             f"WHERE random_index_as < {int(n)} AND phot_g_n_cal >= {min_n}")
 
 
+def slice_ranges(level=3):
+    """source_id ranges of every HEALPix pixel at `level` (nested), for running `adql` over the whole sky as many
+    jobs. On DR3's gaia_source (1.8 x 10^9 rows) a query of this shape took 4-5 s per level-3 slice (768 slices,
+    up to 5 x 10^6 rows each) and 2-4 s per level-5 slice, so job overhead dominates and level 3 suits."""
+    width = 2 ** 35 * 4 ** (12 - level)
+    return [(p * width, (p + 1) * width - 1) for p in range(12 * 4 ** level)]
+
+
+def run_selection(tap, cuts, ranges, table="gaiadr4.all_source_photometry", min_n=20, workers=5, log=print,
+                  query=None):
+    """`adql` over each source_id range, `workers` jobs at a time (ESA allows 5 per user). Returns the selection
+    (one row per star) and the ranges that failed after one retry, to run again. query(cuts, range) -> ADQL
+    replaces `adql` (for a trial on a table with other columns)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    query = query or (lambda c, r: adql(c, table=table, min_n=min_n, source_id_range=r))
+
+    def one(r):
+        for attempt in range(2):
+            try:
+                t = tap.query(query(cuts, r), cache=False).to_pandas()
+                t.columns = [c.lower() for c in t.columns]
+                return t
+            except Exception:  # noqa: BLE001
+                if attempt:
+                    raise
+
+    parts, failed = [], []
+    with ThreadPoolExecutor(workers) as pool:
+        futures = {pool.submit(one, r): r for r in ranges}
+        for k, fut in enumerate(as_completed(futures), 1):
+            try:
+                parts.append(fut.result())
+            except Exception as exc:  # noqa: BLE001
+                failed.append({"range": futures[fut], "error": repr(exc)[:300]})
+            if k % 50 == 0 or k == len(ranges):
+                log(f"[{k}/{len(ranges)}] {sum(len(p) for p in parts)} selected, {len(failed)} failed")
+    sel = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+    return sel, failed
+
+
 def adql(cuts, table="gaiadr4.all_source_photometry", min_n=20, source_id_range=None):
     """DR4 query selecting stars whose slow_z exceeds their G bin's threshold (`cuts` from `thresholds`, one row
     per G bin; stars in a bin missing from `cuts` are not selected).

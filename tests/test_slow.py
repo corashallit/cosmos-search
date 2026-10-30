@@ -394,3 +394,46 @@ def test_band_z_measures_bp_rp_at_the_window_times():
     assert z > 10
     assert period.band_z(tb[[3, 4, 12, 13]] + 0.2, bands, -1.0) == -z
     assert np.isnan(period.band_z(np.array([1000.0]), bands))  # no BP or RP visit within a visit gap
+
+
+def test_compiled_period_search_matches_numpy_exactly():
+    from cosmos_search.inject import lightcurve as inj
+    from cosmos_search.slow import detect, period
+
+    rng = np.random.default_rng(11)
+    for n, span in ((15, 1000.0), (40, 2000.0), (150, 2000.0)):  # DR3-, DR4-like and > 128 visits (pairwise split)
+        tv = np.sort(rng.uniform(0, span, n))
+        dips = inj.Composite(inj._periodic_dips(rng, 0, span, 230.0, 0.01, 50.0, 10.0, 10.0))
+        y = rng.normal(0, 0.002, n) + dips.factor(tv, "G") - 1
+        sig = detect.visit_sigma(y)
+        freqs = period.freq_grid(tv[-1] - tv[0])
+        a = period.scan(tv, y, sig, freqs)
+        b = period.scan(tv, y, sig, freqs, compiled=False)
+        for k in ("dim", "length", "start", "bright", "b_length", "b_start", "order"):
+            assert np.array_equal(a[k], b[k]), k
+        dev = y - np.median(y)
+        for i in np.argsort(a["dim"])[::-1][:20]:
+            e1 = period.events(a["order"][i], a["start"][i], a["length"][i], tv, dev, sig)
+            e2 = period.events(a["order"][i], a["start"][i], a["length"][i], tv, dev, sig, compiled=False)
+            assert e1[0] == e2[0] and np.array_equal(e1[1:], e2[1:], equal_nan=True)
+    x = rng.normal(size=300)
+    assert all(period._pairwise_sum(x[:m]) == np.sum(x[:m]) for m in range(300))
+
+
+def test_search_flags_fades_and_mirrors_rises():
+    from cosmos_search.slow import search
+
+    stats = pd.DataFrame({
+        "source_id": [10, 11, 12, 13], "gbin": [5, 5, 5, 9], "n_visits": 30, "sigma_visit": 0.01, "abbe": 0.5,
+        "s_fade": [9.0, 1.0, 1.0, 9.0], "s_rise": [1.0, 9.0, 1.0, 1.0], "fade_kind": "dip",
+        "rise_kind": ["bump", "jump", "bump", "bump"], "slope_z": [0.0, 0.0, 5.0, 0.0],
+        "s_rep": np.nan, "s_rep_bright": np.nan, "dim_t0": [100.0, np.nan, np.nan, 100.0],
+        "rise_t0": [np.nan, 200.0, np.nan, np.nan]})
+    f = search.flag(stats)
+    assert f["flagged"].tolist() == [True, False, False, False]  # 13 is fainter than 19, where s_fade needs > 17
+    assert f["early"].tolist() == [False, True, False, False]
+    assert f["rising"].tolist() == [False, True, True, False]
+    assert f["strength"].iloc[0] == pytest.approx(9.0 / 6.04, rel=0.01)
+    s = search.summary(f)
+    assert s["G<19"]["fading"] == 1 and s["G<19"]["rising"] == 2 and s["G>=19"]["fading"] == 0
+    assert search.keep_mask(stats, *search.rule_v3.load()[:2]).tolist() == [True, True, True, False]

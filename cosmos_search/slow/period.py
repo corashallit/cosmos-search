@@ -21,10 +21,17 @@ that condition. Periods start at P_MIN_DAYS because Gaia's visits come weeks apa
 faster change folds onto aliases; changes that fast are the domain of the eclipsing-binary filter (`ebfilter`).
 """
 
+import math
+
 import numpy as np
 import pandas as pd
 
 from cosmos_search.slow import detect
+
+try:
+    from numba import njit
+except ImportError:  # pragma: no cover - numba ships with lsdb/hats; the numpy scan below still works without it
+    njit = None
 
 P_MIN_DAYS = 20.0
 MIN_CYCLES = 1.5          # longest trial period: span / MIN_CYCLES
@@ -59,17 +66,78 @@ def _window_extremes(v, kmax):
     return s, lo, hi
 
 
-def scan(tv, yv, sigma, freqs, chunk=1000):
+def scan(tv, yv, sigma, freqs, chunk=1000, compiled=True):
     """Best dimming and brightening window per trial frequency.
 
     Returns a dict of arrays over freqs: dim, bright (scores), and for the dimming window its start (index into the
-    folded order), length and phase order, so the window's visits can be recovered."""
+    folded order), length and phase order, so the window's visits can be recovered.
+
+    compiled=True runs the window search in one compiled loop (`_scan_compiled`), which gives the same numbers as
+    the numpy version (`_scan`) without its (window length x frequency x visit) arrays: at DR4's ~30-40 visits over
+    5.5 years the numpy version takes ~0.2-0.3 s a star, too slow for millions of selected stars."""
     n = len(yv)
     kmax = int(np.floor(detect.MAX_EPISODE_FRACTION * n))
     if kmax < detect.MIN_EPISODE_VISITS or not len(freqs):
         return None
+    if compiled and njit is not None:
+        return _scan_compiled(tv, yv - np.median(yv), sigma, freqs, kmax)
     parts = [_scan(tv, yv - np.median(yv), sigma, freqs[i:i + chunk], kmax) for i in range(0, len(freqs), chunk)]
     return {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+
+
+def _scan_compiled(tv, dev, sigma, freqs, kmax):
+    ph = np.outer(freqs, tv) % 1.0
+    order = np.argsort(ph, axis=1)
+    v = np.ascontiguousarray(np.take(dev, order))
+    cyc = np.ascontiguousarray(np.floor(np.take(tv, order) * freqs[:, None]))
+    dim, best, bright, bbest = _windows(v, cyc, float(sigma), kmax, detect.MIN_EPISODE_VISITS)
+    n = len(dev)
+    return {"dim": dim, "length": best // n + 1, "start": best % n, "order": order,
+            "bright": bright, "b_length": bbest // n + 1, "b_start": bbest % n}
+
+
+def _windows_py(v, cyc, sigma, kmax, kmin):
+    """Per row of folded values v (and their cycle numbers cyc): the best dimming and brightening window over
+    lengths kmin..kmax and every start, wrapping past phase 1, as `_scan` scores them. The index of a window is
+    (length - 1) * n + start and ties go to the lowest index, as numpy's argmax over `_scan`'s flattened array."""
+    m, n = v.shape
+    dim = np.full(m, -np.inf)
+    bright = np.full(m, -np.inf)
+    best = np.zeros(m, np.int64)
+    bbest = np.zeros(m, np.int64)
+    norms = np.empty(kmax + 1)
+    for k in range(1, kmax + 1):
+        norms[k] = math.sqrt(max(k - 1, 1)) * sigma
+    for f in range(m):
+        bd, bdi, bb, bbi = -np.inf, 0, -np.inf, 0
+        for s in range(n):
+            acc, lo, hi, clo, chi = 0.0, 0.0, 0.0, 0.0, 0.0
+            for k in range(kmax):
+                j = s + k
+                if j < n:
+                    x, c = v[f, j], cyc[f, j]
+                else:  # after the wrap the visit belongs to the cycle before its own number
+                    x, c = v[f, j - n], cyc[f, j - n] - 1.0
+                if k == 0:
+                    acc, lo, hi, clo, chi = x, x, x, c, c
+                else:
+                    acc = acc + x
+                    lo, hi = min(lo, x), max(hi, x)
+                    clo, chi = min(clo, c), max(chi, c)
+                if k + 1 < kmin or not chi > clo:
+                    continue
+                idx = k * n + s
+                d = -(acc - lo) / norms[k + 1]
+                if d > bd or (d == bd and idx < bdi):
+                    bd, bdi = d, idx
+                b = (acc - hi) / norms[k + 1]
+                if b > bb or (b == bb and idx < bbi):
+                    bb, bbi = b, idx
+        dim[f], best[f], bright[f], bbest[f] = bd, bdi, bb, bbi
+    return dim, best, bright, bbest
+
+
+_windows = njit(cache=True)(_windows_py) if njit is not None else _windows_py
 
 
 def _scan(tv, dev, sigma, freqs, kmax):
@@ -99,14 +167,19 @@ def _scan(tv, dev, sigma, freqs, kmax):
             "bright": bflat[rows, bbest], "b_length": bbest // n + 1, "b_start": bbest % n}
 
 
-def events(order_row, start, length, tv, dev, sigma):
+def events(order_row, start, length, tv, dev, sigma, compiled=True):
     """For one window, in time order: the number of events (groups of window visits separated by visits outside
     the window); z_between, how faint the outside visits between the first and last event are, (mean deviation) *
     sqrt(n) / sigma; and z_rest, the deficit of the window's visits once the strongest event is taken out, -(mean
     deviation) * sqrt(n) / sigma. A repeating dimming returns to the baseline between events (z_between near 0 or
     above) and still shows with its strongest event removed (z_rest well above 0). One long episode fails one or
     the other: folded at a shorter period, the visits between are inside the episode; folded at a longer one, the
-    window's other "events" are baseline visits that happen to share its phase."""
+    window's other "events" are baseline visits that happen to share its phase.
+
+    compiled=True gives the same numbers from one compiled function (`_events_compiled`, numpy's summation order
+    included); the period search calls this up to TOP_PERIODS times a star."""
+    if compiled and njit is not None:
+        return _events_compiled(order_row, int(start), int(length), tv, dev, float(sigma))
     n = len(tv)
     inside = np.zeros(n, bool)
     inside[order_row[(start + np.arange(length)) % n]] = True
@@ -123,6 +196,85 @@ def events(order_row, start, length, tv, dev, sigma):
     rest = g != (np.argmin(sums) + 1)
     z_rest = float(-d[rest].sum() / (sigma * np.sqrt(rest.sum()))) if rest.any() else np.nan
     return n_ev, z_between, z_rest
+
+
+def _pairwise_sum(a):
+    """Sum as numpy's add.reduce computes it for a contiguous float64 array (pairwise, blocks of 8), so compiled
+    code reproduces numpy's results to the last bit."""
+    n = len(a)
+    if n < 8:
+        res = 0.0
+        for i in range(n):
+            res += a[i]
+        return res
+    if n <= 128:
+        r0, r1, r2, r3, r4, r5, r6, r7 = a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]
+        i = 8
+        while i < n - n % 8:
+            r0 += a[i]
+            r1 += a[i + 1]
+            r2 += a[i + 2]
+            r3 += a[i + 3]
+            r4 += a[i + 4]
+            r5 += a[i + 5]
+            r6 += a[i + 6]
+            r7 += a[i + 7]
+            i += 8
+        res = ((r0 + r1) + (r2 + r3)) + ((r4 + r5) + (r6 + r7))
+        while i < n:
+            res += a[i]
+            i += 1
+        return res
+    n2 = n // 2
+    n2 -= n2 % 8
+    return _pairwise_sum(a[:n2]) + _pairwise_sum(a[n2:])
+
+
+def _events_py(order_row, start, length, tv, dev, sigma):
+    """`events` written for compilation: the same steps, in the same order of floating-point operations."""
+    n = len(tv)
+    inside = np.zeros(n, np.bool_)
+    for k in range(length):
+        inside[order_row[(start + k) % n]] = True
+    by_time = np.argsort(tv)
+    ins = inside[by_time]
+    grp = np.zeros(n, np.int64)
+    g = 0
+    first, last = -1, -1
+    for k in range(n):
+        if ins[k]:
+            if k == 0 or not ins[k - 1]:
+                g += 1
+            if first < 0:
+                first = k
+            last = k
+        grp[k] = g
+    n_ev = g
+    between = np.empty(n, np.float64)
+    nb = 0
+    for k in range(first, last + 1):
+        if not ins[k]:
+            between[nb] = dev[by_time[k]]
+            nb += 1
+    z_between = _pairwise_sum(between[:nb]) / nb * math.sqrt(nb) / sigma if nb else np.nan
+    sums = np.zeros(n_ev + 1)
+    for k in range(n):
+        if ins[k]:
+            sums[grp[k]] += dev[by_time[k]]
+    strongest = int(np.argmin(sums[1:])) + 1
+    rest = np.empty(n, np.float64)
+    nr = 0
+    for k in range(n):
+        if ins[k] and grp[k] != strongest:
+            rest[nr] = dev[by_time[k]]
+            nr += 1
+    z_rest = -_pairwise_sum(rest[:nr]) / (sigma * math.sqrt(nr)) if nr else np.nan
+    return n_ev, z_between, z_rest
+
+
+if njit is not None:
+    _pairwise_sum = njit(cache=True)(_pairwise_sum)
+    _events_compiled = njit(cache=True)(_events_py)
 
 
 def _window(order_row, start, length):
