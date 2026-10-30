@@ -12,6 +12,10 @@ have kept. `flag` adds the rising mirror of each list: getting brighter by the s
 false-alarm estimate the thresholds were set from. `strength` (each score over its threshold, the largest)
 orders the lists; it is not a ranking by value.
 
+`still` marks stars whose parallax and proper motion are both consistent with zero: on the DR3 trial run nearly
+all were quasars (and DR3's AGN class nearly all still), which crowd the top of every list at G >= 19. They go to a
+list of their own, read separately, since stars in other galaxies are still too.
+
 `scripts/slow_search.py` runs the steps on DR4 (bulk files, a mirror or light-curve files) and on DR3 as a trial.
 """
 
@@ -22,6 +26,9 @@ from cosmos_search.slow import detect, drift, period, rule_v3, select
 from cosmos_search.slow.rule import mag_group
 
 KEEP_FRACTION = 0.8   # light curves are kept when a score reaches this fraction of its threshold, either direction
+STILL_P = 1e-3        # parallax and proper motion consistent with zero at this level: `still`
+MOTION_COLUMNS = ("parallax", "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error", "pmra_pmdec_corr",
+                  "parallax_pmra_corr", "parallax_pmdec_corr")
 
 
 def score(lc, cells, table, period_search=True):
@@ -136,3 +143,35 @@ def summary(flags):
             "above_strength": tails.get(grp, {}),
         }
     return out
+
+
+def motion(g):
+    """chi2 of (parallax, pmra, pmdec) against zero with their correlations, and `still` (its 3-degree-of-freedom
+    probability above STILL_P). g: gaia_source rows with MOTION_COLUMNS. Two-parameter solutions (no parallax or
+    proper motion) get NaN and are not still.
+
+    On the DR3 trial's 10,000 strongest fading stars at G >= 19, 9,665 of the 9,688 DPAC calls AGN were still and
+    20 of the other 312; at G < 19, 2,367 of 2,376 and 15 of 7,624."""
+    from scipy.stats import chi2
+
+    cols = ["parallax", "pmra", "pmdec"]
+    x = g[cols].to_numpy(float)
+    e = g[[f"{c}_error" for c in cols]].to_numpy(float)
+    r = {k: np.nan_to_num(g[k].to_numpy(float)) for k in ("parallax_pmra_corr", "parallax_pmdec_corr", "pmra_pmdec_corr")}
+    cov = np.empty((len(g), 3, 3))
+    for i in range(3):
+        cov[:, i, i] = e[:, i] ** 2
+    for (i, j), k in (((0, 1), "parallax_pmra_corr"), ((0, 2), "parallax_pmdec_corr"), ((1, 2), "pmra_pmdec_corr")):
+        cov[:, i, j] = cov[:, j, i] = r[k] * e[:, i] * e[:, j]
+    ok = np.isfinite(x).all(axis=1) & np.isfinite(e).all(axis=1)
+    c2 = np.full(len(g), np.nan)
+    if ok.any():
+        c2[ok] = np.einsum("ni,ni->n", x[ok], np.linalg.solve(cov[ok], x[ok][..., None])[..., 0])
+    with np.errstate(invalid="ignore"):
+        still = ok & (chi2.sf(np.where(ok, c2, np.inf), 3) > STILL_P)
+    return pd.DataFrame({"chi2_motion": c2, "still": still}, index=g.index)
+
+
+def tail_moving(flags, still_ids, steps=STRENGTH_STEPS):
+    """`tail` without the still stars."""
+    return tail(flags[~flags["id"].isin(still_ids)], steps)

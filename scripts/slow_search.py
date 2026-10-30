@@ -4,7 +4,9 @@
     python scripts/slow_release_thresholds.py --lightcurves S/lightcurves --aux S/aux.parquet --out RULE \\
         --check-against prereg/rules/slow-v3
     python scripts/slow_search.py score --lightcurves DIR --aux AUX --rule RULE --out R
-    python scripts/slow_search.py flag --run R --aux AUX --rule RULE
+    python scripts/slow_search.py flag --run R --aux AUX --rule RULE --out L
+    python scripts/slow_search.py motion --run L
+    python scripts/slow_checks.py --fading L/fading.parquet --out L/checks --skip-still --skip-class ECL
 
 `sample`: light curves of every star in random small sky patches (`release.patch_ranges`) from a mirror's
 epoch-photometry table, with each star's G and BP-RP, for the release-day thresholds. `score`: every star of a
@@ -12,7 +14,8 @@ directory of light-curve files (a `dr4_bulk pull`, mirror fetches or DataLink re
 `--dr3-bulk` every star of DR3's bulk files streamed from ESA's CDN (the trial run); writes scores per file and keeps
 the light curves of stars near a threshold, with done-markers so a second run resumes. `flag`: the shared-date test
 over the whole run, then the fading list, the `early` list and their rising mirrors (`search.flag`), each ordered
-by strength, and summary.json.
+by strength, and summary.json. `motion`: parallax and proper motion of the listed stars, setting aside those
+consistent with zero (quasars, galaxies, stars in other galaxies) as `still`.
 """
 
 import argparse
@@ -38,7 +41,7 @@ STATS_COLUMNS = {"source_id", "gbin", "n_visits", "sigma_visit", "abbe", "s_fade
                  "slope_z", "slope", "s_rep", "s_rep_bright", "rep_period", "rep_depth", "rep_band_z", "dim_t0",
                  "dim_t1", "dim_visits", "dim_depth", "depth_bp", "depth_bp_err", "depth_rp", "depth_rp_err",
                  "rise_t0", "slow_z", "t_first", "t_last"}
-LIST_COLUMNS = ["id", "phot_g_mean_mag", "bp_rp", "gbin", "by", "strength", "n_visits", "sigma_visit", "abbe",
+LIST_COLUMNS = ["id", "phot_g_mean_mag", "bp_rp", "gbin", "by", "strength", "rise_strength", "n_visits", "sigma_visit", "abbe",
                 "s_fade", "fade_kind", "slope_z", "slope", "s_rep", "rep_period", "s_rise", "rise_kind", "slow_z",
                 "dim_depth", "dim_t0", "dim_t1", "dim_visits", "depth_bp", "depth_bp_err", "depth_rp",
                 "depth_rp_err", "rep_depth", "rep_band_z", "t_first", "t_last"]
@@ -302,12 +305,61 @@ def flag(a):
     print(f"{n} stars scored in {len(files)} files, flagged in {time.time() - t0:.0f} s", flush=True)
     for name, parts in lists.items():
         d = pd.concat(parts, ignore_index=True)
-        d.sort_values("strength" if name == "fading" else "id", ascending=name != "fading") \
-            .to_parquet(out / f"{name}.parquet", index=False)
+        key = {"fading": "strength", "rising": "rise_strength"}.get(name)
+        (d.sort_values(key, ascending=False) if key else d.sort_values("id")).to_parquet(out / f"{name}.parquet",
+                                                                                          index=False)
     flags = pd.concat(small, ignore_index=True)
     flags.drop(columns="fade_kind").to_parquet(out / "flags.parquet", index=False)
     summ = {"rule": str(a.rule), "stars": int(len(flags)), "by_magnitude": search.summary(flags)}
     (out / "summary.json").write_text(json.dumps(summ, indent=1))
+    print(json.dumps(summ, indent=1))
+
+
+# -- motion -----------------------------------------------------------------------------------------------------
+
+def motion_cmd(a):
+    """Parallax and proper motion of every star above strength 1 either way (gaia_source, by uploaded source_id),
+    `still` for those consistent with zero (`search.motion`), added to the three lists; motion_summary.json gives
+    the fading and rising counts above each strength without the still stars, which is the comparison to read."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from astropy.table import Table
+
+    from cosmos_search.gaia.archive import tap
+
+    run = Path(a.run)
+    flags = pd.read_parquet(run / "flags.parquet", columns=["id", "gbin", "strength", "rise_strength"])
+    ids = flags.loc[(flags["strength"] > 1) | (flags["rise_strength"] > 1), "id"].to_numpy()
+    cols = ", ".join(f"g.{c}" for c in ("source_id", "astrometric_params_solved") + search.MOTION_COLUMNS)
+    t, t0 = tap(), time.time()
+
+    def fetch(chunk):
+        q = (f"SELECT {cols} FROM TAP_UPLOAD.ids AS u JOIN {a.schema}.gaia_source AS g "
+             f"ON g.source_id = u.source_id")
+        for attempt in (0, 1):
+            try:
+                d = t.query(q, uploads={"ids": Table({"source_id": chunk})}).to_pandas()
+                d.columns = [c.lower() for c in d.columns]
+                return d
+            except Exception:  # noqa: BLE001 (one retry, then the step fails loudly)
+                if attempt:
+                    raise
+
+    chunks = [ids[i:i + a.chunk] for i in range(0, len(ids), a.chunk)]
+    with ThreadPoolExecutor(a.workers) as ex:
+        g = pd.concat(list(ex.map(fetch, chunks)), ignore_index=True)
+    m = pd.concat([g[["source_id"]], search.motion(g)], axis=1).rename(columns={"source_id": "id"})
+    m.to_parquet(run / "motion.parquet", index=False)
+    print(f"{len(g)} of {len(ids)} stars' astrometry in {time.time() - t0:.0f} s ({len(chunks)} queries); "
+          f"still {int(m['still'].sum())}", flush=True)
+    for name in ("fading", "early", "rising"):
+        d = pd.read_parquet(run / f"{name}.parquet").drop(columns=["chi2_motion", "still"], errors="ignore")
+        d = d.merge(m, on="id", how="left")
+        d["still"] = d["still"].fillna(False).astype(bool)
+        d.to_parquet(run / f"{name}.parquet", index=False)
+    summ = {"still": int(m["still"].sum()), "looked_up": int(len(ids)), "found": int(len(g)),
+            "above_strength_moving": search.tail_moving(flags, m.loc[m["still"], "id"])}
+    (run / "motion_summary.json").write_text(json.dumps(summ, indent=1))
     print(json.dumps(summ, indent=1))
 
 
@@ -358,6 +410,12 @@ def main(argv=None):
     f.add_argument("--out")
     f.add_argument("--chunk-level", type=int, default=1, help="HEALPix level of the sky regions flagged one at a time")
     f.set_defaults(func=flag)
+    m = sub.add_parser("motion", help="parallax and proper motion of listed stars; set aside the still ones")
+    m.add_argument("--run", required=True, help="the flag step's output directory")
+    m.add_argument("--schema", default="gaiadr4")
+    m.add_argument("--chunk", type=int, default=50_000, help="source_ids per uploaded query")
+    m.add_argument("--workers", type=int, default=4)
+    m.set_defaults(func=motion_cmd)
     a = ap.parse_args(argv)
     if a.cmd == "score" and not (a.lightcurves or a.dr3_bulk):
         ap.error("score needs --lightcurves or --dr3-bulk")
