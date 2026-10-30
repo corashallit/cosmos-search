@@ -246,31 +246,66 @@ def score(a):
 
 # -- flag -------------------------------------------------------------------------------------------------------
 
+def _id_ranges(files):
+    """Smallest and largest source_id of each per-file stats table, from the Parquet footers."""
+    out = []
+    for f in files:
+        md = pq.read_metadata(f)
+        col = md.schema.to_arrow_schema().get_field_index("source_id")
+        st = [md.row_group(i).column(col).statistics for i in range(md.num_row_groups)]
+        out.append((min(s.min for s in st), max(s.max for s in st)))
+    return out
+
+
+def _read_stats(files, ranges, lo, hi):
+    """Scores of the stars with lo <= source_id < hi, read from the files whose source_id range overlaps it."""
+    import pyarrow.dataset as ds
+
+    use = [f for f, (a, b) in zip(files, ranges) if a < hi and b >= lo]
+    if not use:
+        return pd.DataFrame()
+    t = ds.dataset(use, format="parquet").to_table(
+        columns=sorted(STATS_COLUMNS), filter=(ds.field("source_id") >= lo) & (ds.field("source_id") < hi))
+    return t.to_pandas().astype({"fade_kind": "category", "rise_kind": "category"})
+
+
+FLAG_COLUMNS = ["id", "gbin", "flagged", "early", "rising", "rising_rep", "shared_fade", "shared_rise", "by",
+                "fade_kind", "strength", "rise_strength"]
+
+
 def flag(a):
+    """One sky region (HEALPix pixel at --chunk-level) at a time: the shared-date test only compares stars within a
+    level-6 pixel, which never crosses a region's edge, so the lists are the same as from one pass over the whole
+    sky, and memory follows the largest region (one pass over 11.6 M DR3 stars peaked at 10.8 GB)."""
     run = Path(a.run)
     out = Path(a.out or run)
-    parts = []
-    for p in sorted((run / "stats").glob("*.parquet")):
-        names = pq.read_schema(p).names
-        d = pd.read_parquet(p, columns=[c for c in names if c in STATS_COLUMNS])
-        if len(d):
-            parts.append(d.astype({c: "category" for c in ("fade_kind", "rise_kind") if c in d}))
-    stats = pd.concat(parts, ignore_index=True)
-    for c in ("fade_kind", "rise_kind"):  # categories differ between files; strings cost ~1 GB at 10^7 stars
-        stats[c] = stats[c].astype(str).astype("category")
-    aux = pd.read_parquet(a.aux, columns=["source_id", "phot_g_mean_mag", "bp_rp"])
-    print(f"{len(stats)} stars scored in {len(parts)} files", flush=True)
-    t0 = time.time()
-    flags = search.flag(stats, a.rule)
-    print(f"flagged in {time.time() - t0:.0f} s", flush=True)
-    flags = flags.merge(aux.rename(columns={"source_id": "id"}), on="id", how="left")
-    cols = [c for c in LIST_COLUMNS if c in flags]
-    lists = {"fading": flags["flagged"], "early": flags["early"], "rising": flags["rising"]}
-    for name, m in lists.items():
-        flags.loc[m, cols].sort_values("strength" if name == "fading" else "id", ascending=name != "fading") \
+    out.mkdir(parents=True, exist_ok=True)
+    files = [str(p) for p in sorted((run / "stats").glob("*.parquet")) if pq.read_metadata(p).num_rows]
+    ranges = _id_ranges(files)
+    # Indexed once: a merge against the whole-sky table per region cost ~9 s each (10^7 rows hashed every time).
+    aux = pd.read_parquet(a.aux, columns=["source_id", "phot_g_mean_mag", "bp_rp"]).set_index("source_id")
+    width = 2 ** 35 * 4 ** (12 - a.chunk_level)
+    small, lists = [], {"fading": [], "early": [], "rising": []}
+    t0, n = time.time(), 0
+    for k in range(12 * 4 ** a.chunk_level):
+        stats = _read_stats(files, ranges, k * width, (k + 1) * width)
+        if not len(stats):
+            continue
+        n += len(stats)
+        f = search.flag(stats, a.rule)
+        f[aux.columns] = aux.reindex(f["id"].to_numpy()).to_numpy()
+        cols = [c for c in LIST_COLUMNS if c in f]
+        lists["fading"].append(f.loc[f["flagged"], cols])
+        lists["early"].append(f.loc[f["early"], cols])
+        lists["rising"].append(f.loc[f["rising"], cols])
+        small.append(f[FLAG_COLUMNS])
+    print(f"{n} stars scored in {len(files)} files, flagged in {time.time() - t0:.0f} s", flush=True)
+    for name, parts in lists.items():
+        d = pd.concat(parts, ignore_index=True)
+        d.sort_values("strength" if name == "fading" else "id", ascending=name != "fading") \
             .to_parquet(out / f"{name}.parquet", index=False)
-    flags[["id", "gbin", "flagged", "early", "rising", "rising_rep", "shared_fade", "shared_rise", "by",
-           "strength", "rise_strength"]].to_parquet(out / "flags.parquet", index=False)
+    flags = pd.concat(small, ignore_index=True)
+    flags.drop(columns="fade_kind").to_parquet(out / "flags.parquet", index=False)
     summ = {"rule": str(a.rule), "stars": int(len(flags)), "by_magnitude": search.summary(flags)}
     (out / "summary.json").write_text(json.dumps(summ, indent=1))
     print(json.dumps(summ, indent=1))
@@ -321,6 +356,7 @@ def main(argv=None):
     f.add_argument("--aux", required=True)
     f.add_argument("--rule", default=str(rule_v3.RULE_DIR))
     f.add_argument("--out")
+    f.add_argument("--chunk-level", type=int, default=1, help="HEALPix level of the sky regions flagged one at a time")
     f.set_defaults(func=flag)
     a = ap.parse_args(argv)
     if a.cmd == "score" and not (a.lightcurves or a.dr3_bulk):
