@@ -1,11 +1,11 @@
-"""What the change looks like across wavelengths: the colour of a fade in Gaia's bands, and the infrared response.
+"""Wavelength dependence of a brightness change: BP/RP depth ratio, and the NEOWISE W1/W2 change.
 
     change_colour(pop, cand)     # BP depth / RP depth against G depth, with grey, dust and cooling lines
     infrared(cand)               # NEOWISE W1/W2 change during the episode against what each explanation predicts
 
-These are the questions the candidate checks ask (slow/checks.py): an opaque body blocks every band alike, dust in
-front dims blue more than red and barely touches the infrared, a dust shell that absorbs the light glows in the
-infrared, and a change in the star itself follows its temperature.
+The models are those of the candidate checks (slow/checks.py): an opaque occulter is grey; foreground dust dims BP
+more than RP and barely changes W1/W2; a dust shell re-emits the absorbed light in W1/W2; a temperature change follows
+the Planck function at the star's T_eff.
 """
 
 import numpy as np
@@ -43,13 +43,13 @@ def change_colour(pop, cand, min_z=5.0, width=style.WIDTH, heading=None, label="
     height = 460
     fig = style.figure(width, height)
     ax = fig.add_axes([74 / width, 74 / height, 1 - 300 / width, 1 - 168 / height])
-    style.title(fig, heading or "Is the change grey, dusty, or the star itself?",
-                sub=f"{ok.sum():,} comparison stars whose change is measured in both BP and RP")
+    style.title(fig, heading or "BP/RP depth ratio vs G depth",
+                sub=f"{ok.sum():,} comparison stars with BP and RP depths above {min_z:.0f}σ")
     style.density(ax, g[ok], ratio[ok], (np.linspace(-1.0, 2.0, 80), np.linspace(-0.2, 3.2, 70)), log_x=True)
     teff = vet.teff(float(_get(cand, "bp_rp", 1.0)))
-    lines = [(1.0, "grey: an opaque body"),
-             (band_ratio("dust"), "dust like the interstellar kind"),
-             (band_ratio("temperature", teff), f"the star cooling (from {teff:,.0f} K)")]
+    lines = [(1.0, "grey (opaque occulter)"),
+             (band_ratio("dust"), "dust, A ∝ λ^−1.5"),
+             (band_ratio("temperature", teff), f"temperature drop from {teff:,.0f} K")]
     for yv, text in lines:
         ax.axhline(yv, color=c("fg"), lw=px(1), ls=(0, (4, 3)), zorder=6)
         ax.text(1.02, yv, text, transform=ax.get_yaxis_transform(), color=c("muted"), va="center", ha="left",
@@ -64,17 +64,17 @@ def change_colour(pop, cand, min_z=5.0, width=style.WIDTH, heading=None, label="
         style.candidate_marker(ax, cg, cy)
         style.chip(ax, cg, cy, label, ha="left", dx=14)
     ax.set_ylim(-0.2, 3.2)
-    ax.set_xlabel("depth in G (%)")
-    ax.set_ylabel("BP depth ÷ RP depth")
-    fig.text(74 / width, 14 / height, "dust grains much larger than a micron block every band alike too",
+    ax.set_xlabel("G depth (%)")
+    ax.set_ylabel("BP depth / RP depth")
+    fig.text(74 / width, 14 / height, "grains much larger than 1 µm are also grey",
              color=c("muted"), fontsize=px(style.FONT_PX), ha="left", va="bottom")
     return fig
 
 
 ROWS = (("W1", "W1, 3.4 µm"), ("W2", "W2, 4.6 µm"))
-PREDICTIONS = (("pred_grey", "grey blocking"), ("pred_dust_in_front", "dust in front"),
-               ("pred_temperature", "the star cooling"), ("pred_dust_shell_300K", "dust shell glowing, 300 K"),
-               ("pred_dust_shell_1000K", "dust shell glowing, 1000 K"))
+PREDICTIONS = (("pred_grey", "grey occulter"), ("pred_dust_in_front", "foreground dust"),
+               ("pred_temperature", "temperature drop"), ("pred_dust_shell_300K", "dust re-emission, 300 K"),
+               ("pred_dust_shell_1000K", "dust re-emission, 1000 K"))
 
 
 def infrared(cand, width=style.WIDTH, heading=None, label="measured"):
@@ -91,8 +91,8 @@ def infrared(cand, width=style.WIDTH, heading=None, label="measured"):
     rows = [text for _, text in PREDICTIONS]
     height = 150 + 30 * len(rows)
     fig = style.figure(width, height)
-    style.title(fig, heading or "Does it glow in the infrared?",
-                sub="NEOWISE's change over the episode's dates (orange band, ±1σ) against each explanation (dots)")
+    style.title(fig, heading or "NEOWISE W1/W2 change vs model predictions",
+                sub="orange: measured over the episode dates, ±1σ · dots: predicted")
     left, gap = 190, 26
     pw = (width - left - 20 - gap * (len(have) - 1)) / len(have)
     for i, b in enumerate(have):
@@ -124,6 +124,6 @@ def infrared(cand, width=style.WIDTH, heading=None, label="measured"):
         ax.spines["left"].set_visible(False)
         style.plain_log(ax.xaxis)
         style.panel_label(ax, dict(ROWS)[b])
-    fig.text(left / width, 12 / height, "change during the episode (%; fainter is negative) · filled dots fit",
+    fig.text(left / width, 12 / height, "ΔF/F over the episode (%) · filled: within 1σ",
              color=c("muted"), fontsize=px(style.FONT_PX), ha="left", va="bottom")
     return fig

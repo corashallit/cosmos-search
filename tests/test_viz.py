@@ -89,7 +89,7 @@ def test_slow_change_renders_both_themes_with_hover_titles(tmp_path):
     for theme in style.THEMES:
         assert paths[theme]["png"].stat().st_size > 10_000
         svg = _svg_text(paths, theme)
-        assert "dimming episode" in svg and "fainter" in svg
+        assert "dip: " in svg and "depth 3%" in svg
         assert svg.count("<title>") > 20        # one hover title per plotted visit
     assert style.TOKENS["light"]["box"] in _svg_text(paths, "light")
     assert style.TOKENS["dark"]["box"] in _svg_text(paths, "dark")
@@ -101,8 +101,8 @@ def test_large_changes_switch_to_magnitudes_and_label_in_magnitudes(tmp_path):
     change = {"kind": "drop", "t0": 300.0, "t1": 1000.0, "depth": 0.17, "slope": np.nan}
     paths = style.render(lightcurve.slow_change, tmp_path / "big", ep, change, themes=("light",))
     svg = _svg_text(paths)
-    assert "change (mag)" in svg
-    m = re.search(r"by (\d+\.\d) mag", svg)
+    assert "Δmag" in svg
+    m = re.search(r"ΔG = (\d+\.\d) mag", svg)
     assert m and float(m.group(1)) > 2.5      # read off the visits (95% = 3.3 mag), not the 17% passed in
 
 
@@ -122,7 +122,7 @@ def test_slow_candidate_sheet_and_page(tmp_path):
               "W2_pred_dust_in_front": -0.001}
     figs = sheet.slow_candidate(ctx, row, _epochs(depth=0.03, t0=400, t1=650), tmp_path, checks=checks,
                                 astro={"parallax": 2.0, "parallax_error": 0.05}, sid=4321)
-    assert [f["key"] for f in figs] == ["lightcurve", "rare", "classes", "hr", "colour", "infrared"]
+    assert [f["key"] for f in figs] == ["lightcurve", "strength", "classes", "hr", "colour", "infrared"]
     assert all(f["caption"] and f["paths"]["dark"]["svg"].exists() for f in figs)
     out = html.page("Test page", [{"heading": "A star", "text": "<p>hello</p>", "figures": figs}],
                     tmp_path / "index.html", png_links=True)
@@ -132,7 +132,7 @@ def test_slow_candidate_sheet_and_page(tmp_path):
     assert "<?xml" not in doc
     ids = re.findall(r'\bid="([^"]+)"', doc)
     assert len(ids) == len(set(ids))            # every inlined SVG's ids are prefixed apart
-    assert "4321-rare-light.png" in doc
+    assert "4321-strength-light.png" in doc
 
 
 def test_infrared_needs_neowise():
@@ -146,7 +146,7 @@ def test_hr_diagram_with_an_uncertain_parallax(tmp_path):
     paths = style.render(population.hr_diagram, tmp_path / "hr", hr,
                          {"phot_g_mean_mag": 19.6, "bp_rp": 1.2, "parallax": -0.3, "parallax_error": 0.24},
                          themes=("light",))
-    assert "too uncertain to place it" in _svg_text(paths)
+    assert "(under 3σ); line marks BP − RP only" in _svg_text(paths)
 
 
 def test_short_dip_and_its_depth(tmp_path):
@@ -179,3 +179,15 @@ def test_artifact_fragment_has_no_skeleton_and_does_not_persist_the_theme(tmp_pa
     assert "<!doctype" not in doc and "<body" not in doc and "</html>" not in doc
     assert 'name="claude:viewport-fit-sides"' in doc and "if (false)" in doc
     assert "if (true)" in html.page("T", [], tmp_path / "index.html").read_text()
+
+
+def test_strength_hist_ranks_the_candidate_and_mirrors_brightening(tmp_path):
+    fade = np.r_[np.linspace(1, 5, 400), 9.0, 12.0, 30.8]
+    rise = np.linspace(1, 4, 300)
+    bulk = (RNG.lognormal(-1.5, 0.8, 5000), RNG.lognormal(-1.5, 0.8, 5000))
+    paths = style.render(population.strength_hist, tmp_path / "s", fade, rise, 9.0, n_stars=100_000, bulk=bulk,
+                         themes=("light",))
+    svg = _svg_text(paths)
+    assert "rank 3 of 100,000" in svg                  # 12.0 and 30.8 are stronger
+    assert "≥ 9: 3 fading, 0 brightening" in svg
+    assert svg.count("<title>") > 20                   # hover text on the bars

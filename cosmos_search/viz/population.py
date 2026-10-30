@@ -1,6 +1,6 @@
-"""Where a candidate sits among ordinary stars and DPAC's known classes.
+"""A candidate against the comparison sample and the DPAC variability classes.
 
-    how_rare(pop, strength, group="G<19")                 # tail of fading strengths, with the brightening mirror
+    strength_hist(fade, rise, strength, n, bulk)         # mirrored histogram: fading up, brightening down
     known_classes(pop, cand, x="abbe", y="dim_depth")     # small multiples: one known class per panel
     hr_diagram(ref, cand)                                 # colour against absolute brightness
     dip_depth(pop, cand)                                  # deepest single epoch against brightness (short dips)
@@ -26,67 +26,90 @@ def _get(cand, key, default=np.nan):
     return default if v is None else v
 
 
-def how_rare(fade, rise, strength, n_stars=None, label="this star", width=style.WIDTH, heading=None, where=""):
-    """How many stars fade at least as strongly as the candidate, and how many brighten as strongly.
+def strength_hist(fade, rise, strength, n_stars=None, bulk=None, label="candidate", width=style.WIDTH,
+                  heading=None, where="", lo=0.03, per_decade=10):
+    """Fading and brightening strength of every star scored, as one mirrored histogram: fading above the axis,
+    brightening (the same statistic with the sign reversed, so a false-alarm estimate) below it, counts on log
+    scales, the candidate as an orange line with its rank among the fades.
 
-    fade, rise: fading and brightening strengths of every star scored in the candidate's magnitude range (or of
-    the lists, which hold every star past strength 1 in either direction); strength: the candidate's. Strength is
-    each score over its threshold (1 = at the threshold), as the lists order stars. Getting brighter is the mirror
-    of getting fainter, so its curve is what chance and ordinary variability give at each strength: a fade is worth
-    reading where the fading curve stands clear of it. n_stars: how many stars were scored, for the subtitle."""
+    fade, rise: strengths of every star at or above the threshold (1) in the candidate's magnitude range, from the
+    lists. bulk: (fade, rise) strengths of a random sample of the same stars, scaled to n_stars for the bins below
+    the threshold, which the lists do not hold. Strength is score / threshold; stars below `lo` are not shown."""
     f = np.asarray(fade, float)
     r = np.asarray(rise, float)
-    f, r = f[np.isfinite(f)], r[np.isfinite(r)]
-    lo = max(min(np.percentile(f, 1), np.percentile(r, 1), 1.0) * 0.85, 0.3) if len(f) and len(r) else 0.85
-    hi = max(f.max() if len(f) else 1, r.max() if len(r) else 1, strength) * 1.6
-    at = np.logspace(np.log10(lo), np.log10(hi), 200)
-    nf, nr = data.survival(f, at), data.survival(r, at)
-    height = 400
+    f, r = f[np.isfinite(f) & (f >= 1)], r[np.isfinite(r) & (r >= 1)]
+    n = n_stars or (len(f) + len(r))
+    top_s = max(f.max() if len(f) else 1, r.max() if len(r) else 1, strength)
+    k0, k1 = int(np.floor(np.log10(lo) * per_decade)), int(np.ceil(np.log10(top_s * 1.05) * per_decade)) + 1
+    edges = 10 ** (np.arange(k0, k1 + 1) / per_decade)   # 1 is an edge, so no bin straddles the threshold
+    above = edges[:-1] >= 1 - 1e-9
+    counts = {}
+    for key, tail, b in (("fade", f, 0), ("rise", r, 1)):
+        c_ = np.histogram(tail, edges)[0].astype(float)
+        if bulk is not None:
+            smp = np.asarray(bulk[b], float)
+            smp = smp[np.isfinite(smp)]
+            if len(smp):
+                c_ = np.where(above, c_, np.histogram(smp, edges)[0] * n / len(smp))
+        counts[key] = c_
+
+    height = 460
     fig = style.figure(width, height)
-    ax = fig.add_axes([80 / width, 76 / height, 1 - 104 / width, 1 - 174 / height])
-    n = n_stars or max(len(f), len(r))
-    style.title(fig, heading or "How rare is a change this strong?",
-                sub=f"{n:,} stars{' ' + where if where else ''} scored; 1 on the bottom axis is the threshold")
-    for counts, col, ls in ((nr, c("muted"), (0, (4, 3))), (nf, c("blue"), "-")):
-        m = counts > 0
-        ax.step(at[m], counts[m], where="post", color=col, lw=px(2), ls=ls, zorder=5)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    style.plain_log(ax.xaxis)
-    style.plain_log(ax.yaxis)
-    for share in (0.2, 0.42, 0.08):   # where the curves are labelled: clear of the candidate's label
-        xl = at[int(len(at) * share)]
-        if abs(np.log10(xl / strength)) >= 0.3:
-            break
-    kf, kr = int(data.survival(f, [xl])[0]), int(data.survival(r, [xl])[0])
-    ax.text(xl, max(kf, 1) * 1.5, "getting fainter", color=c("fg"), ha="left", va="bottom", fontsize=px(style.FONT_PX))
-    ax.text(xl, max(kr, 1) / 1.8, "getting brighter", color=c("muted"), ha="right", va="top",
-            fontsize=px(style.FONT_PX))
-    fig.text(80 / width, 10 / height, "getting brighter mirrors getting fainter: it shows what chance and ordinary "
-             "variability give", color=c("muted"), fontsize=px(style.FONT_PX), ha="left", va="bottom")
-    ax.axvline(1, color=c("rule"), lw=px(1), zorder=0)
-    k, kb = int(data.survival(f, [strength])[0]), int(data.survival(r, [strength])[0])
-    y = max(k, 1)
-    ax.plot([strength, strength], [0.6, y], color=c("orange"), lw=px(2), zorder=6, solid_capstyle="butt")
-    style.candidate_marker(ax, strength, y)
-    top = max(nf.max(), nr.max(), 2) * 3
-    text = f"{label}: {strength:.3g}× threshold"
-    if np.log(strength / lo) / np.log(hi / lo) < 0.5:   # room on the right, where the curves fall away
-        style.chip(ax, strength * 1.12, min(y * 1.8, top / 4), text, ha="left", va="bottom")
-    else:
-        style.chip(ax, strength / 1.12, min(y * 4, top / 4), text, ha="right", va="bottom")
-    style.note(ax, 0.99, 0.97, f"as strong or stronger: {k:,} fading, {kb:,} brightening", ha="right", va="top",
-               color=c("fg"))
-    ax.set_ylim(0.6, top)
-    ax.set_xlim(at[0], at[-1])
-    ax.set_xlabel("strength (score ÷ threshold)")
-    ax.set_ylabel("stars at least this strong")
+    left, right, top, bottom = 84, 24, 104, 64
+    ph = (height - top - bottom) / 2
+    a_up = fig.add_axes([left / width, (bottom + ph) / height, 1 - (left + right) / width, ph / height])
+    a_dn = fig.add_axes([left / width, bottom / height, 1 - (left + right) / width, ph / height], sharex=a_up)
+    rank = int(np.sum(f > strength)) + 1
+    k, kb = int(np.sum(f >= strength)), int(np.sum(r >= strength))
+    style.title(fig, heading or "Fade strength vs all stars scored",
+                sub=f"{n:,} stars{', ' + where if where else ''} · fading above the axis, brightening below")
+    ymax = max(counts["fade"].max(), counts["rise"].max(), 2) * 2.5
+    for ax, key, col, text in ((a_up, "fade", c("blue"), "fading"), (a_dn, "rise", c("muted"), "brightening")):
+        cnt = counts[key]
+        for sel, shade in ((~above, 0.45), (above, 1.0)):   # below threshold lighter
+            m = sel & (cnt > 0)
+            bars = ax.bar(edges[:-1][m], cnt[m] - 0.5, width=np.diff(edges)[m], bottom=0.5, align="edge",
+                          color=style.mix(col, "box", shade) if shade < 1 else col, edgecolor=c("box"),
+                          linewidth=px(1), zorder=3)
+            style.hover_bars(bars, [f"{text} {a:.3g}–{b:.3g}: {v:,.0f} stars" for a, b, v in
+                                    zip(edges[:-1][m], edges[1:][m], cnt[m])])
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_ylim(0.5, ymax)
+        style.plain_log(ax.yaxis)
+        ax.set_yticks([v for v in 10.0 ** np.arange(0, 10, 2) if v < ymax and (ax is a_up or v > 1)])
+        style.note(ax, 0.01, 0.92 if ax is a_up else 0.08, text, color=c("fg"), ha="left",
+                   va="top" if ax is a_up else "bottom", fontweight="bold")
+        ax.axvline(1, color=c("fg"), lw=px(1), ls=(0, (4, 3)), zorder=4)
+        ax.axvline(strength, color=c("orange"), lw=px(2), zorder=6)
+    a_dn.invert_yaxis()
+    a_up.tick_params(labelbottom=False, bottom=False)
+    a_up.spines["bottom"].set_visible(False)
+    a_dn.spines["top"].set_visible(True)
+    a_dn.spines["top"].set_color(c("rule"))
+    a_dn.set_xlim(lo, edges[-1])
+    style.plain_log(a_dn.xaxis)
+    a_dn.set_xticks([v for v in 10.0 ** np.arange(-3, 5) if lo <= v <= edges[-1]])
+    a_dn.set_xticklabels([("1 = threshold" if v == 1 else style._plain_number(v)) for v in a_dn.get_xticks()])
+    late = np.log(strength / lo) / np.log(edges[-1] / lo) > 0.6
+    style.chip(a_up, strength, 1.0, f"{label}: {strength:.3g}, rank {rank:,} of {n:,}",
+               transform=a_up.get_xaxis_transform(), ha="right" if late else "left", va="bottom",
+               dx=-4 if late else 4, dy=4)
+    style.note(a_dn, strength, 0.0, f"≥ {strength:.3g}: {k:,} fading, {kb:,} brightening",
+               transform=a_dn.get_xaxis_transform(), ha="right" if late else "left", va="bottom", color=c("fg"),
+               fontsize=px(style.FONT_PX))
+    a_dn.set_xlabel("strength (score / threshold)")
+    fig.text(14 / width, (bottom + ph) / height, "stars per bin", rotation=90, ha="left", va="center",
+             color=c("muted"), fontsize=px(style.FONT_PX))
+    if bulk is not None:
+        fig.text(left / width, 8 / height, "lighter bars: below threshold, scaled from the comparison sample",
+                 color=c("muted"), fontsize=px(style.FONT_PX), ha="left", va="bottom")
     return fig
 
 
 def known_classes(pop, cand, x="abbe", y="dim_depth", classes=DEFAULT_CLASSES, class_col="best_class_name",
-                  x_label="smoothness: Abbe value (near 0: one smooth change; 1: jumps about like noise)",
-                  y_label="depth of the change (%)", log_x=False, log_y=True, y_scale=100.0, ncols=3,
+                  x_label="Abbe value, G (0: smooth; 1: uncorrelated)",
+                  y_label="episode depth (%)", log_x=False, log_y=True, y_scale=100.0, ncols=3,
                   max_dots=600, width=style.WIDTH, heading=None, seed=0):
     """Small multiples: every comparison star in the ramp, one known class per panel as ink dots, the candidate in
     orange in every panel. Shows which known kind of variable, if any, behaves like the candidate on two numbers.
@@ -121,8 +144,8 @@ def known_classes(pop, cand, x="abbe", y="dim_depth", classes=DEFAULT_CLASSES, c
     top, rowgap = 76, 36
     height = int(top + nrows * (ph + rowgap) + 50)
     fig = style.figure(width, height)
-    style.title(fig, heading or "Does it behave like a known kind of variable?",
-                sub="blue: all stars compared · dots: one DPAC class per panel · orange: the candidate")
+    style.title(fig, heading or "Abbe value vs episode depth, by DPAC class",
+                sub="density: comparison sample · dots: DPAC class · orange: candidate")
     for i, k in enumerate(classes):
         r, col = divmod(i, ncols)
         x0 = (left + col * (pw + gap)) / width
@@ -168,8 +191,8 @@ def hr_diagram(ref, cand, width=style.WIDTH, heading=None, regions=REGIONS, labe
     height = 560
     fig = style.figure(width, height)
     ax = fig.add_axes([74 / width, 56 / height, 1 - 100 / width, 1 - 150 / height])
-    style.title(fig, heading or "What kind of star is it?",
-                sub=f"{len(r):,} Gaia stars with distances better than 10%, by colour and true brightness")
+    style.title(fig, heading or "Colour–magnitude diagram",
+                sub=f"{len(r):,} Gaia stars, parallax / error > 10, no extinction correction")
     style.density(ax, r["bp_rp"], mg, (np.linspace(-0.6, 4.2, 150), np.linspace(-5, 17, 160)))
     for bx, my, text, ha in regions:
         style.note(ax, bx, my, text, transform=ax.transData, ha=ha, va="center")
@@ -186,19 +209,19 @@ def hr_diagram(ref, cand, width=style.WIDTH, heading=None, regions=REGIONS, labe
         style.chip(ax, col, m, label, ha="left", dx=14)
     else:
         why = "no parallax" if not np.isfinite(plx) else f"parallax {plx:.2f} ± {plx_e:.2f} mas"
-        fig.text(14 / width, 1 - 58 / height, f"{label}: {why}, too uncertain to place it on the diagram; the line "
-                 "marks its colour", ha="left", va="top", fontsize=px(style.FONT_PX), color=c("fg"))
+        fig.text(14 / width, 1 - 58 / height, f"{label}: {why} (under 3σ); line marks BP − RP only",
+                 ha="left", va="top", fontsize=px(style.FONT_PX), color=c("fg"))
         ax.axvline(col, color=c("orange"), lw=px(2), zorder=17)
-        style.chip(ax, col, 0.97, f"{label}'s colour", transform=ax.get_xaxis_transform(), ha="center", va="top")
-    ax.set_xlabel("colour, BP − RP (bluer ← → redder)")
-    ax.set_ylabel("absolute G magnitude (brighter up)")
+        style.chip(ax, col, 0.97, f"{label} BP − RP", transform=ax.get_xaxis_transform(), ha="center", va="top")
+    ax.set_xlabel("BP − RP (mag)")
+    ax.set_ylabel("M_G (mag)")
     return fig
 
 
 def dip_depth(pop, cand, depth="min_frac", g_col="phot_g_mean_mag", classes=("ECL",), class_col="best_class_name",
               width=style.WIDTH, heading=None, label="candidate"):
     """Short dips: the deepest single epoch of every comparison star (fractional drop, percent, log) against its
-    brightness, eclipsing binaries as ink dots, and the candidate. Shows how deep a one-epoch dip ordinary stars
+    brightness, eclipsing binaries as ink dots, and the candidate. Shows how deep a one-epoch dip comparison stars
     of the same brightness reach."""
     g = pop[g_col].to_numpy(float)
     dd = -100.0 * pop[depth].to_numpy(float) if np.nanmedian(pop[depth]) < 0 else 100.0 * pop[depth].to_numpy(float)
@@ -206,8 +229,8 @@ def dip_depth(pop, cand, depth="min_frac", g_col="phot_g_mean_mag", classes=("EC
     height = 440
     fig = style.figure(width, height)
     ax = fig.add_axes([74 / width, 56 / height, 1 - 100 / width, 1 - 150 / height])
-    style.title(fig, heading or "How deep do ordinary stars dip?",
-                sub=f"the deepest single epoch of {ok.sum():,} stars, against their brightness")
+    style.title(fig, heading or "Deepest single-epoch dip vs G",
+                sub=f"{ok.sum():,} comparison stars; dots: DPAC eclipsing binaries")
     style.density(ax, g[ok], dd[ok], (np.linspace(np.nanpercentile(g[ok], 0.2), np.nanpercentile(g[ok], 99.8), 90),
                                       np.linspace(-1.5, 2.0, 80)), log_y=True)
     if class_col in pop:
@@ -222,6 +245,6 @@ def dip_depth(pop, cand, depth="min_frac", g_col="phot_g_mean_mag", classes=("EC
     cd = -100 * cd if cd < 0 else 100 * cd
     style.candidate_marker(ax, cg, cd)
     style.chip(ax, cg, cd, label, ha="left", dx=14)
-    ax.set_xlabel("G magnitude (fainter →)")
-    ax.set_ylabel("deepest single epoch (% fainter)")
+    ax.set_xlabel("G (mag)")
+    ax.set_ylabel("max single-epoch depth (%)")
     return fig

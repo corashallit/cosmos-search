@@ -50,12 +50,12 @@ def change_of(row):
 
 
 def facts(row, cls=None, astro=None):
-    """One line about the star for under the light curve's title."""
+    """One line of catalogue values for under the light-curve title."""
     parts = [f"G = {float(_get(row, 'phot_g_mean_mag')):.1f}", f"BP−RP = {float(_get(row, 'bp_rp')):.2f}"]
     if cls:
         parts.append("DPAC class: " + data.CLASS_NAMES.get(cls, cls))
     else:
-        parts.append("no DPAC class")
+        parts.append("DPAC class: none")
     if astro is not None and np.isfinite(float(_get(astro, "parallax"))):
         p, e = float(_get(astro, "parallax")), float(_get(astro, "parallax_error"))
         parts.append(f"parallax {p:.2f} ± {e:.2f} mas")
@@ -63,9 +63,9 @@ def facts(row, cls=None, astro=None):
 
 
 def slow_candidate(ctx, row, epochs, out_dir, others=None, checks=None, astro=None, cls=None, name=None,
-                   label="this star", sid=None, themes=style.THEMES):
-    """Figures for one slow-change candidate: light curves, how rare the change is, known classes, HR diagram,
-    colour of the change and (with NEOWISE in `checks`) the infrared response. row: the star's row from the lists
+                   label="candidate", sid=None, themes=style.THEMES):
+    """Figures for one slow-change candidate: light curves, strength distribution, DPAC classes, colour-magnitude
+    diagram, BP/RP depth ratio and (with NEOWISE in `checks`) the W1/W2 change. row: the star's row from the lists
     (or detector output with the same columns); epochs: its Gaia epochs (data.epochs); sid: its source id when
     the row cannot hold it exactly (a row of floats rounds 19-digit ids)."""
     out_dir = Path(out_dir)
@@ -84,56 +84,56 @@ def slow_candidate(ctx, row, epochs, out_dir, others=None, checks=None, astro=No
     add("lightcurve", lightcurve.slow_change, epochs, change_of(row), others=others, noise=noise,
         release=ctx.release, name=name, facts=facts(row, cls, astro),
         title="Light curves",
-        caption="Each dot is one Gaia visit, as the change from the star's normal level (the median); brighter is "
-                "up. The orange band marks the change the search found. The grey band around zero is the "
-                "visit-to-visit scatter of an ordinary star this bright. Lower panels: Gaia's blue and red "
-                "bands over the same dates, then other telescopes where they have data.")
+        caption="Gaia visit means (epochs within 2 d) as ΔF/F about the median; magnitudes when the range exceeds "
+                "40%. Orange: detected episode or trend. Grey band: ±2σ visit-to-visit scatter of non-variable "
+                "stars at the same G. Lower panels: BP and RP, then ZTF (15 d means) and NEOWISE W1/W2 where "
+                "available.")
     strength = float(_get(row, "strength"))
     if grp in ctx.lists and np.isfinite(strength):
         f, r, n = ctx.lists[grp]
-        add("rare", population.how_rare, f, r, strength, n_stars=n, where=f"at {grp.replace('<', ' < ').replace('>=', ' ≥ ')} in {ctx.label}",
-            label=label, title="How rare is a change this strong?",
-            caption="Number of stars whose fading (blue) or brightening (grey, dashed) is at least as strong as the "
-                    "value on the bottom axis. The search's threshold is 1. Brightening mirrors fading, so its "
-                    "curve shows what chance and ordinary variability produce; a fade stands out where the blue "
-                    "curve runs above the grey one.")
+        pg = ctx.pop[ctx.pop["group"] == grp] if "group" in ctx.pop else None
+        bulk = (pg["fade_strength"], pg["rise_strength"]) if pg is not None and len(pg) else None
+        add("strength", population.strength_hist, f, r, strength, n_stars=n, bulk=bulk, where=f"{grp.replace('<', ' < ').replace('>=', ' ≥ ')}, {ctx.label}",
+            label=label, title="Fade strength distribution",
+            caption="Histogram of strength (score / threshold) for every star scored in the same magnitude range: "
+                    "fading above the axis, brightening below (log counts). Brightening is the same statistic with "
+                    "the sign reversed, so at each strength it estimates the false-alarm count among the fades. "
+                    "Bars at strength ≥ 1 count every star in the run; lighter bars below 1 are scaled from the "
+                    "comparison sample. Rank: position of the candidate among all fades.")
     cand = {"abbe": _get(row, "abbe"), "dim_depth": _get(row, "dim_depth")}
     if "best_class_name" in ctx.pop:
-        add("classes", population.known_classes, ctx.pop, cand, title="Known kinds of variable star",
-            caption="Two numbers the search measures: how smooth the light curve is (bottom) and how deep the "
-                    "change is (side). Blue shows every star compared; each panel's dots are the stars Gaia's "
-                    "variability team (DPAC) put in one class. A candidate that sits among a class's dots behaves "
-                    "like that class on these two numbers.")
+        add("classes", population.known_classes, ctx.pop, cand, title="DPAC variability classes",
+            caption="Abbe value of the G light curve (0: smooth, 1: uncorrelated visit to visit) against episode "
+                    "depth. Density: comparison sample. Dots: stars of one DPAC class (vari_classifier_result) per "
+                    "panel.")
     if ctx.hr is not None and astro is not None:
         hr_row = {"phot_g_mean_mag": g, "bp_rp": _get(row, "bp_rp"), "parallax": _get(astro, "parallax"),
                   "parallax_error": _get(astro, "parallax_error")}
-        add("hr", population.hr_diagram, ctx.hr, hr_row, label=label, title="What kind of star is it?",
-            caption="Colour against true brightness (from the parallax distance, with no correction for dust) for "
-                    "nearby Gaia stars. Stars sit on the main sequence while they burn hydrogen, then swell into "
-                    "giants; white dwarfs are the cooling cores left at the end.")
+        add("hr", population.hr_diagram, ctx.hr, hr_row, label=label, title="Colour–magnitude diagram",
+            caption="Absolute G (from parallax, no extinction correction) against BP − RP for Gaia stars with "
+                    "parallax / error > 10.")
     if np.isfinite(float(_get(row, "depth_bp"))) and np.isfinite(float(_get(row, "depth_rp"))):
         col_row = {k: _get(row, k) for k in ("dim_depth", "depth_bp", "depth_bp_err", "depth_rp", "depth_rp_err",
                                              "bp_rp")}
         add("colour", colour.change_colour, ctx.pop, col_row, label=label,
-            title="The colour of the change",
-            caption="How much deeper the change is in Gaia's blue band than in its red band. An opaque body blocks "
-                    "both alike (ratio 1); small dust grains dim blue light more; a star that cools dims most in "
-                    "the blue too, by an amount set by its temperature.")
+            title="BP/RP depth ratio",
+            caption="BP depth / RP depth against G depth. Reference lines: grey occulter (ratio 1), dust with "
+                    "A ∝ λ^−1.5, and a temperature drop from the T_eff implied by BP − RP.")
     if checks is not None:
         ir = dict(checks)
         ir.setdefault("dim_depth", _get(row, "dim_depth"))
         ir.setdefault("bp_rp", _get(row, "bp_rp"))
-        add("infrared", colour.infrared, ir, title="The infrared over the same dates",
-            caption="NEOWISE's change at 3.4 and 4.6 µm while Gaia saw the change, against what each explanation "
-                    "predicts. Dust that absorbs starlight warms up and glows in the infrared; an opaque cold body "
-                    "or a cooling star does not.")
+        add("infrared", colour.infrared, ir, title="NEOWISE W1/W2",
+            caption="W1 (3.4 µm) and W2 (4.6 µm) change over the episode dates, measured (orange, ±1σ) and "
+                    "predicted per model (dots; filled = within 1σ). Dust that absorbs the light re-emits in W1/W2; "
+                    "an opaque cold occulter and a temperature drop do not.")
     return entries
 
 
-def short_dip_candidate(ctx, row, epochs, t_dip, out_dir, name=None, label="this star", sid=None,
+def short_dip_candidate(ctx, row, epochs, t_dip, out_dir, name=None, label="candidate", sid=None,
                         themes=style.THEMES):
-    """Figures for one short-dip candidate: the dip in context and zoomed, and its depth against ordinary stars of
-    the same brightness (needs min_frac in ctx.pop and in row)."""
+    """Figures for one short-dip candidate: the dip in context and zoomed, and the dip depth against the comparison
+    sample by G (needs min_frac in ctx.pop and in row)."""
     out_dir = Path(out_dir)
     sid = int(sid if sid is not None else _get(row, "id", _get(row, "source_id", 0)))
     name = name or f"Gaia {ctx.label} {sid}"
@@ -143,14 +143,14 @@ def short_dip_candidate(ctx, row, epochs, t_dip, out_dir, name=None, label="this
     paths = style.render(lightcurve.short_dip, out_dir / f"{sid}-dip", epochs, t_dip, noise=noise, name=name,
                          themes=themes)
     if paths:
-        entries.append({"key": "dip", "title": "The dip", "paths": paths,
-                        "caption": "Left: every Gaia epoch of the star, the dip's epochs in orange. Right: the hours "
-                                   "around the dip in all three bands. Gaia sees a star twice about 106 minutes "
-                                   "apart (its two fields of view), then again some hours or weeks later."})
+        entries.append({"key": "dip", "title": "Short dip", "paths": paths,
+                        "caption": "Left: all G epochs, dip epochs in orange. Right: G, BP and RP near the minimum. "
+                                   "The two fields of view give transit pairs 106 min apart; the next pair follows "
+                                   "hours to weeks later."})
     if "min_frac" in ctx.pop and np.isfinite(float(_get(row, "min_frac"))):
         paths = style.render(population.dip_depth, out_dir / f"{sid}-dipdepth", ctx.pop, row, label=label,
                              themes=themes)
-        entries.append({"key": "dipdepth", "title": "How deep do ordinary stars dip?", "paths": paths,
-                        "caption": "The deepest single epoch of every star compared, against its brightness. "
-                                   "Eclipsing binaries (dots) reach the deepest single-epoch dips."})
+        entries.append({"key": "dipdepth", "title": "Single-epoch depth vs G", "paths": paths,
+                        "caption": "Largest single-epoch flux decrease of each comparison star against G. Dots: DPAC "
+                                   "eclipsing binaries, which reach the largest single-epoch depths."})
     return entries
