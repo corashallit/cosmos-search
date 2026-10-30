@@ -144,3 +144,60 @@ def test_rule_v3_flags_fades_and_lists_early_faint_stars_apart():
     assert list(out["flagged"]) == [True, False, False, True]
     assert list(out["early"]) == [False, True, False, False]
     assert list(out["by"]) == ["episode", "", "", "trend"]
+
+
+def _shared_changes_reference(stats, patch, targets=None, target_patch=None, date_cols=("dim_t0", "rise_t0"),
+                              score_cols=("s_fade", "s_rise"), s_min=4.0, window=1.5, p_max=1e-3):
+    """sky.shared_changes as first written (a boolean mask per patch), the reference for the faster loop."""
+    from scipy.stats import poisson
+
+    s = stats.reset_index(drop=True)
+    patch = np.asarray(patch)
+    own_in = targets is None
+    tg = s if own_in else targets.reset_index(drop=True)
+    tpatch = patch if own_in else np.asarray(target_patch)
+    events = []
+    for d, c in zip(date_cols, score_cols):
+        m = (s[c].to_numpy() > s_min) & np.isfinite(s[d].to_numpy())
+        events.append(pd.DataFrame({"row": np.flatnonzero(m), "patch": patch[m], "t": s[d].to_numpy()[m]}))
+    ev = pd.concat(events, ignore_index=True).drop_duplicates(["row", "t"])
+    out = pd.DataFrame(index=tg.index, data={"n_same_fade": 0, "n_same_rise": 0, "expected": 0.0})
+    for p, e in ev.groupby("patch"):
+        m = tpatch == p
+        if not m.any():
+            continue
+        t = np.sort(e["t"].to_numpy())
+        dates = t[np.r_[True, np.diff(t) > window]]
+        n_strong = e["row"].nunique()
+        for k, (d, c) in enumerate(zip(date_cols, score_cols)):
+            mine = tg.loc[m, d].to_numpy()
+            ok = np.isfinite(mine)
+            cnt = np.where(ok, np.searchsorted(t, np.where(ok, mine, 0) + window, "right")
+                           - np.searchsorted(t, np.where(ok, mine, 0) - window, "left"), 0)
+            if own_in:
+                cnt = np.maximum(cnt - (tg.loc[m, c].to_numpy() > s_min).astype(int), 0)
+            out.loc[m, ["n_same_fade", "n_same_rise"][k]] = cnt
+        out.loc[m, "expected"] = max(n_strong - (1 if own_in else 0), 0) / max(len(dates), 1)
+    for k in ("fade", "rise"):
+        n = out[f"n_same_{k}"].to_numpy()
+        out[f"shared_{k}"] = (n >= 2) & (poisson.sf(n - 1, np.maximum(out["expected"].to_numpy(), 1e-9)) < p_max)
+    return out
+
+
+def test_shared_changes_matches_reference_loop():
+    rng = np.random.default_rng(4)
+    n = 3000
+    dates = rng.choice(np.arange(0.0, 900.0, 30.0), n)
+    stats = pd.DataFrame({"s_fade": rng.exponential(3, n), "s_rise": rng.exponential(3, n),
+                          "dim_t0": np.where(rng.random(n) < 0.8, dates + rng.normal(0, 0.5, n), np.nan),
+                          "rise_t0": np.where(rng.random(n) < 0.8, rng.uniform(0, 900, n), np.nan)})
+    stats.loc[:400, "dim_t0"] = 269.2  # a crowd stepping on one scan in patch 0
+    stats.loc[:400, "s_fade"] = 6.0
+    patch = np.where(np.arange(n) <= 400, 0, rng.integers(1, 40, n))
+    got = sky.shared_changes(stats, patch)
+    pd.testing.assert_frame_equal(got, _shared_changes_reference(stats, patch), check_exact=True)
+    assert got["shared_fade"].iloc[:400].mean() > 0.9 and got["shared_fade"].iloc[401:].mean() < 0.05
+    targets = stats.iloc[:50].assign(dim_t0=269.2)
+    tp = np.r_[np.zeros(25, int), np.full(25, 7)]
+    pd.testing.assert_frame_equal(sky.shared_changes(stats, patch, targets, tp),
+                                  _shared_changes_reference(stats, patch, targets, tp), check_exact=True)

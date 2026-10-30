@@ -33,6 +33,11 @@ from cosmos_search.gaia import dr3_pass, epoch
 from cosmos_search.slow import drift, release, rule_v3, search
 
 _STATE = {}
+# What `flag` reads of the scores (the rest stays in the per-file stats).
+STATS_COLUMNS = {"source_id", "gbin", "n_visits", "sigma_visit", "abbe", "s_fade", "s_rise", "fade_kind", "rise_kind",
+                 "slope_z", "slope", "s_rep", "s_rep_bright", "rep_period", "rep_depth", "rep_band_z", "dim_t0",
+                 "dim_t1", "dim_visits", "dim_depth", "depth_bp", "depth_bp_err", "depth_rp", "depth_rp_err",
+                 "rise_t0", "slow_z", "t_first", "t_last"}
 LIST_COLUMNS = ["id", "phot_g_mean_mag", "bp_rp", "gbin", "by", "strength", "n_visits", "sigma_visit", "abbe",
                 "s_fade", "fade_kind", "slope_z", "slope", "s_rep", "rep_period", "s_rise", "rise_kind", "slow_z",
                 "dim_depth", "dim_t0", "dim_t1", "dim_visits", "depth_bp", "depth_bp_err", "depth_rp",
@@ -244,13 +249,15 @@ def score(a):
 def flag(a):
     run = Path(a.run)
     out = Path(a.out or run)
-    cols = None
     parts = []
     for p in sorted((run / "stats").glob("*.parquet")):
-        d = pd.read_parquet(p)
+        names = pq.read_schema(p).names
+        d = pd.read_parquet(p, columns=[c for c in names if c in STATS_COLUMNS])
         if len(d):
-            parts.append(d)
+            parts.append(d.astype({c: "category" for c in ("fade_kind", "rise_kind") if c in d}))
     stats = pd.concat(parts, ignore_index=True)
+    for c in ("fade_kind", "rise_kind"):  # categories differ between files; strings cost ~1 GB at 10^7 stars
+        stats[c] = stats[c].astype(str).astype("category")
     aux = pd.read_parquet(a.aux, columns=["source_id", "phot_g_mean_mag", "bp_rp"])
     print(f"{len(stats)} stars scored in {len(parts)} files", flush=True)
     t0 = time.time()
