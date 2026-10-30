@@ -568,6 +568,62 @@ not clean, or whose reply does not parse, is re-run once with a fresh agent; if 
 rule: a fake not shortlisted, a natural star shortlisted), `vetting commit --archive prereg/verdicts/slow-cal-1`,
 `git push`, then `score` (refuses unless the archive commit is on origin).
 
+### Result (2026-10-30)
+
+432 objects reviewed (280 natural, 42 chance passes, 110 fakes), one subagent each. Every reply parsed and every
+transcript was one Read of its prompt and one Write of its reply (`audit.json`: 432 clean), so nothing was re-run.
+The verdicts went to `prereg/verdicts/slow-cal-1` (commit 83b887f, pushed) before the key was opened.
+
+| | Criterion | Result | |
+|---|---|---|---|
+| R1 | Grey, dust and re-emitting fakes at S/N ≥ 20 shortlisted, lower bound ≥ 50% | 44/50 (88%; one-sided bounds 78-95%) | pass |
+| R2 | Natural and chance-pass stars shortlisted, upper bound ≤ 10% | 26/322 (8.1%; one-sided bounds 5.7-11.0%) | **fail** |
+| C1 | Colour of the change within 2 stated errors of the injected ratio, ≥ 85% | 76/79 (96%) | pass |
+| C2 | NEOWISE W1 change within 2 stated errors of the injected change, ≥ 85% | 72/78 (92%) | pass |
+
+So, as written above: the review finds anomalous slow changes, but on DR4 it has to come after automated cuts that
+keep its false entries within the ~10³ expert budget. The rates to quote for it are recall 88% (78-95%) at S/N ≥ 20
+and 5/10 at S/N 6-20, and a false shortlist of 5.0% of flagged stars (2.8-7.5%, bootstrap) once the natural rates
+are weighted back to the frame's mix of flagged stars; the pooled 8.1% is higher because the draw oversampled the
+classes expected to be hard. At 5%, at most ~2×10⁴ flagged stars can reach the review.
+
+*Natural stars.* None of the 128 AGN, ECL, ELL, LPV, RR and S stars was shortlisted. The 26 are CV 5/10, YSO
+3/13, BE|GCAS|SDOR|WR 2/11, DSCT|GDOR|SXPHE 2/11, RS 5/41, SOLAR_LIKE 6/52, other 2/14 and chance passes 1/42.
+Stars flagged by an episode are shortlisted more often (episode alone 7/81, with a trend 9/39, with a repeat 4/31)
+than those flagged by a trend alone (4/109) or a repeat alone (2/60). 15 of the 26 sit at S 0.35-0.45.
+Exploratory, chosen after the reveal and not adoptable without a fresh batch: at S ≥ 0.40 the same verdicts give
+43/50 (lower bound 75%) and 16/322 (upper bound 7.4%).
+
+*Detector artefact.* PR #78 found that the period search's straight-line detrend can be pulled by one visit far
+above the rest, which makes spurious repeat flags with s_rep in the hundreds. Three natural stars here have that
+signature (repeat only, s_rep 72-314, Abbé ≈ 1.1), all cataclysmic variables in outburst; one was shortlisted.
+Without them R2 is 25/319 (upper bound 10.8%), still a fail.
+
+*Fakes reported only.* Temperature changes were shortlisted 19/25, mostly as dust occultation (9) or unexplained
+(5). At these depths (G 0.6-9%, median 3%) the infrared difference between dust in front and a cooling star is below NEOWISE's
+errors (injected W1 changes ≤ 0.03, stated errors 0.002-0.05), so neither the checks nor the reviewer can tell
+them apart. G-only changes were shortlisted 13/25, 12 of them as unexplained: the review takes a change seen in G
+alone as unexplained rather than instrumental. The colour test gives the BP/RP ratio, which is undefined when
+neither band moves, and no test says whether G's change agrees with BP's and RP's. Exploratory: G's depth lying
+outside the range of the BP and RP depths by more than 3 combined errors marks 14 of the 25 G-only fakes (8 of the
+13 shortlisted), none of the 85 other fakes and 3 of the 315 natural and chance stars with all three depths. That
+would be a cheap automated cut before the review; it needs fresh fakes before it is used.
+
+*The checks on natural stars.* Coverage over the whole batch: colour 346/432, a NEOWISE visit inside the change
+253/432, ZTF in at least one band 238/432. The checks alone would cut DR4's list very little: of the 253 natural and
+chance stars with a measured colour, 235 are grey within 2σ and 207 dust-like, and only 13 are neither; of the 104
+episodes with an infrared prediction, 6 match neither grey nor dust. C1's three misses are two temperature fakes
+and a grey fake at S/N 18. Of C2's six, two grey fakes sit just outside (z 2.01) and four are hosts whose own W1
+moved by 1.7-10% where almost nothing was injected (three temperature fakes, one G-only); one of those has a stated
+W1 error of 0.002, too small for NEOWISE, so the error from visit scatter needs a look before DR4.
+
+*Review quality.* Brier score of S against "should be shortlisted" over R1's fakes and the natural stars 0.064
+(0.116 for always giving the base rate); AUC 0.977. One star (of 432) was named from its light curve and colours,
+correctly (an eclipsing symbiotic star), and not shortlisted. Each review took 60-100 thousand tokens.
+
+Data: `/mnt/project-files/slow-cal/` (sealed plan and key, review files, prompts, replies, transcripts, audit,
+`verdicts_table.csv`, `report.json`).
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -632,3 +688,8 @@ rule: a fake not shortlisted, a natural star shortlisted), `vetting commit --arc
   packets: held-out recall 22/48 (one-sided lower bound 33% vs the 30% criterion), reserved controls 3/135 (all
   RS or SOLAR_LIKE), queue sample 1/100. Rule v3b on the same packets: 28/48, 20/135, 8/100. Hiding the pipeline
   tests cut recall to 18/48. Most misses (15 of 26) and most of the queue (69 of 100) read as EBs (docs/dayone.md).
+- 2026-10-30. Calibration run on slow-change candidates (§14), 432 objects from DR3 shard 4, verdicts pushed before
+  the reveal. Recall of anomalous fakes 44/50 (pass), natural and chance-pass stars shortlisted 26/322 (upper bound
+  11.0% against 10%: fail), colour and NEOWISE errors hold (96%, 92%). Weighted to the mix of flagged stars the
+  false shortlist is 5.0% (2.8-7.5%). On DR4 the review comes after automated cuts. The review reads 12 of 25
+  G-only changes as unexplained; no test compares G's change with BP's and RP's.

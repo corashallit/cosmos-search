@@ -254,6 +254,12 @@ was expected; the point was to see the checks work:
 
 Output: `checks.csv` (one row per star) and the NEOWISE and ZTF epochs.
 
+Calibrated on 2026-10-30 together with the blind review (docs/vetting.md §14, 432 DR3 objects): the colour and
+NEOWISE errors hold on fakes (96% and 92% within 2σ), but at DR3's depths the checks barely separate natural stars
+(13 of 253 have a colour neither grey nor dust-like). The review shortlists 44/50 anomalous fakes and 5.0% of
+flagged natural stars at DR3's mix (2.8-7.5%), so DR4's review comes after automated cuts. It also reads half of
+the G-only fakes as unexplained; a check of G's change against BP's and RP's is missing.
+
 ## Blind test (S6)
 
 Written down and pushed before the batch is drawn. Nothing below changes after the draw.
@@ -621,6 +627,9 @@ sits on 3 stars beyond the 0.1% point. That is the case for ~25,000 quiet stars 
 
 ## Log
 
+- **2026-10-30.** Checks and blind review calibrated on 432 DR3 objects (S5, docs/vetting.md §14): recall of
+  anomalous fakes 44/50 (pass), false shortlist 26/322 pooled (upper bound 11.0%, fail; 5.0% at the flagged mix),
+  colour and NEOWISE errors hold. Three cataclysmic variables carry the repeat-flag artefact fixed in PR #78.
 - **2026-10-23.** Fades in time order (slow-v3, above): late-starting brightenings no longer pass as fades (53% →
   2-2.5% at signal-to-noise ≥ 20), late-starting fades found 90-92% instead of 84%, on shard 0 and on fresh shard 3.
   Dips already under way at the first visit move to a second list. A crowd of stars stepping on the same scan in
