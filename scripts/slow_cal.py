@@ -368,46 +368,63 @@ def at_2019(r):
     return r["ra"] + pmra * dt / 3.6e6 / np.cos(np.radians(r["dec"])), r["dec"] + pmdec * dt / 3.6e6
 
 
-def fetch_external(gaia, out):
-    """NEOWISE single exposures and raw ZTF epochs per star, one Parquet each under out/, skipped when present."""
+NEOWISE_COLS = ("mjd, w1mpro, w1sigmpro, w2mpro, w2sigmpro, qual_frame, cc_flags, nb, qi_fact, saa_sep, "
+                "moon_masked")
+NEOWISE_CHUNK = 100
+
+
+def neowise_upload(gaia, chunk=NEOWISE_CHUNK):
+    """NEOWISE-R single exposures around many stars in a few IRSA TAP jobs (positions uploaded and joined), the
+    same cone and columns as `checks.neowise_adql`: ~0.7 s a star instead of ~75 s for one cone at a time.
+    Returns {source_id: rows}."""
+    from astropy.table import Table
+
     from cosmos_search.net.tap import Tap
 
-    out.mkdir(parents=True, exist_ok=True)
     irsa = Tap(checks.IRSA_TAP)
+    pos = [at_2019(r) for _, r in gaia.iterrows()]
+    t = Table({"sid": gaia["source_id"].to_numpy(np.int64), "ra": np.array([p[0] for p in pos]),
+               "dec": np.array([p[1] for p in pos])})
+    q = (f"SELECT u.sid, {', '.join('n.' + c.strip() for c in NEOWISE_COLS.split(','))} "
+         "FROM neowiser_p1bs_psd AS n, TAP_UPLOAD.pos AS u WHERE CONTAINS(POINT('ICRS', n.ra, n.dec), "
+         f"CIRCLE('ICRS', u.ra, u.dec, {checks.NEOWISE_RADIUS_ARCSEC / 3600:.7f})) = 1")
+    out = {}
+    for i in range(0, len(t), chunk):
+        r = irsa.query(q, uploads={"pos": t[i:i + chunk]}).to_pandas()
+        out.update({int(k): g.drop(columns="sid") for k, g in r.groupby("sid")})
+        print(f"NEOWISE {min(i + chunk, len(t))}/{len(t)}", flush=True)
+    return out
 
-    def neowise(r):
-        p = out / f"neowise_{int(r['source_id'])}.parquet"
-        if p.exists():
+
+def fetch_external(gaia, out):
+    """Clean NEOWISE single exposures and raw ZTF epochs per star, one Parquet each under out/, skipped when
+    present."""
+    out.mkdir(parents=True, exist_ok=True)
+    need = gaia[[not (out / f"neowise_{int(s)}.parquet").exists() for s in gaia["source_id"]]]
+    if len(need):
+        rows = neowise_upload(need)
+        for sid in need["source_id"].astype("int64"):
+            checks.neowise_clean(rows.get(int(sid), [])).to_parquet(out / f"neowise_{sid}.parquet", index=False)
+
+    def ztf(r):
+        # itertuples keeps source_id an exact integer (a row from iterrows of an all-numeric frame is float64)
+        p = out / f"ztf_{int(r.source_id)}.parquet"
+        if p.exists() or r.dec < -30:
             return
-        ra, dec = at_2019(r)
         for attempt in range(4):
             try:
-                rows = irsa.query(checks.neowise_adql(ra, dec), sync=True).to_pandas()
-                checks.neowise_clean(rows).to_parquet(p, index=False)
+                vet.ztf_raw(float(r.ra), float(r.dec)).to_parquet(p, index=False)
                 return
             except Exception as e:  # noqa: BLE001 (retry, then record the failure)
                 err = e
                 time.sleep(5 * 2 ** attempt)
-        print("NEOWISE failed", int(r["source_id"]), err)
+        print("ZTF failed", int(r.source_id), err)
 
-    def ztf(r):
-        p = out / f"ztf_{int(r['source_id'])}.parquet"
-        if p.exists() or r["dec"] < -30:
-            return
-        for attempt in range(4):
-            try:
-                vet.ztf_raw(r["ra"], r["dec"]).to_parquet(p, index=False)
-                return
-            except Exception as e:  # noqa: BLE001
-                err = e
-                time.sleep(5 * 2 ** attempt)
-        print("ZTF failed", int(r["source_id"]), err)
-
-    rows = [r for _, r in gaia.iterrows()]
-    with ThreadPoolExecutor(10) as ex:
-        list(ex.map(neowise, rows))
-    with ThreadPoolExecutor(6) as ex:
-        list(ex.map(ztf, rows))
+    # IRSA's ZTF light-curve service takes ~35 s a star; the host policy runs four at once.
+    with ThreadPoolExecutor(4) as ex:
+        for k, _ in enumerate(ex.map(ztf, list(gaia[["source_id", "ra", "dec"]].itertuples(index=False)))):
+            if (k + 1) % 50 == 0:
+                print(f"ZTF {k + 1}/{len(gaia)}", flush=True)
 
 
 def _context(xm, sid):
@@ -454,7 +471,7 @@ def cmd_build(a):
     for kind, sid, label, spec in objs:
         by_file.setdefault(sidx.at[sid, "file"], []).append((kind, sid, label, spec))
 
-    packets, keys = [], []
+    packets, keys, refused = [], [], []
     for fname, items in sorted(by_file.items()):
         rows = read_rows(Path(a.run) / "lightcurves" / fname, [x[1] for x in items])
         for kind, sid, label, spec in items:
@@ -493,7 +510,13 @@ def cmd_build(a):
             source = {k: float(g[k]) for k in SOURCE_KEYS if k in g.index and pd.notna(g[k])}
             cand = vet.candidate(f"gaia_dr3:{sid}", row, ep, source, _context(xm, sid),
                                  neowise=vet.neowise_visits(nw_clean), ztf=ztf, tests_=tests)
-            pk, key = packet_mod.build(cand, holdout=(), pipeline_flags=False, pipeline_tests=False)
+            try:
+                pk, key = packet_mod.build(cand, holdout=(), pipeline_flags=False, pipeline_tests=False)
+            except packet_mod.LeakError as e:
+                # A refused packet cannot be vetted; it is listed, and counts against the rule when scored.
+                print("refused:", kind, label, e)
+                refused.append({"kind": kind, "label": label, "source_id": sid, "error": str(e)})
+                continue
             truth = {}
             if sig is not None:
                 truth = expected_checks(sig, ep, row, nw_clean)
@@ -519,7 +542,9 @@ def cmd_build(a):
         (d / "prompts" / f"{p['packet_id']}.md").write_text(f"{system}\n\n---\n\n{user}\n")
     write_sealed(json.loads(json.dumps(keys, default=_json)), d / "key.json.age", RECIPIENTS)
     (d / "packet_ids.txt").write_text("\n".join(p["packet_id"] for p in packets) + "\n")
-    print(f"{len(packets)} packets")
+    if refused:
+        write_sealed(refused, d / "refused.json.age", RECIPIENTS)
+    print(f"{len(packets)} packets, {len(refused)} refused by the leak scan")
 
 
 def _json(x):
