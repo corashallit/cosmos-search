@@ -194,10 +194,30 @@ class Composite:
         return k
 
 
+@dataclass
+class BandScaled:
+    """Another signal's change in G carried into every band as a fixed fraction of it:
+    k_b(t) = 1 - ratios[b] * (1 - k_G(t)), with `default` for bands not listed.
+
+    For colour laws a single screen cannot give: a star's temperature change, dust that dims the optical while its
+    re-emission brightens the infrared (negative ratios), or an artefact in one band (ratio 0 elsewhere)."""
+
+    base: object
+    ratios: dict
+    default: float = 1.0
+    kind: str = field(default="band_scaled", init=False)
+
+    def factor(self, t, band):
+        return 1.0 - self.ratios.get(band, self.default) * (1.0 - self.base.factor(t, "G"))
+
+
 def truth(signal):
     """JSON-serialisable description of a signal, for the sealed truth table."""
     if isinstance(signal, Composite):
         return {"kind": "composite", "parts": [truth(p) for p in signal.parts]}
+    if isinstance(signal, BandScaled):
+        return {"kind": "band_scaled", "base": truth(signal.base), "ratios": dict(signal.ratios),
+                "default": signal.default}
     d = asdict(signal)
     return {k: (None if isinstance(v, float) and np.isinf(v) else v) for k, v in d.items()}
 
