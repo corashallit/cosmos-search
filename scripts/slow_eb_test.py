@@ -60,7 +60,7 @@ def cmd_hosts(a):
     q = pd.read_parquet(a.flags)
     used = set(pd.read_parquet(a.exclude)["host"]) if a.exclude else set()
     excl = Path(bt.EXCLUDE)
-    used |= set(int(x) for x in excl.read_text().split()) if excl.exists() else set()
+    used |= {int(x) for x in excl.read_text().split()} if excl.exists() else set()
     h = nb.merge(q, on="source_id")
     h = h[h["quiet"] & (h["gbin"] <= 7) & ~h["source_id"].isin(used)]
     h = h.sample(frac=1.0, random_state=SEED).head(a.n)

@@ -96,7 +96,7 @@ def _eval_file(job):
 def cmd_fakes(a):
     sample, out = Path(a.sample), Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    thr, thr_p, table = rule_v3.load(a.rule)
+    _, _, table = rule_v3.load(a.rule)
     nb = pd.read_parquet(Path(a.rule) / "stats.parquet")          # every sample star: the hosts' neighbours
     aux = pd.read_parquet(sample / "aux.parquet")
     cells = drift.star_cells(aux)
@@ -109,7 +109,7 @@ def cmd_fakes(a):
     with np.errstate(invalid="ignore", divide="ignore"):
         bl["blend"] = np.fmax(bl["phot_bp_n_blended_transits"] / bl["phot_bp_n_obs"],
                               bl["phot_rp_n_blended_transits"] / bl["phot_rp_n_obs"])
-    used = set(int(x) for x in Path(EXCLUDE).read_text().split()) if Path(EXCLUDE).exists() else set()
+    used = {int(x) for x in Path(EXCLUDE).read_text().split()} if Path(EXCLUDE).exists() else set()
     hosts = (nb[["source_id", "gbin", "sigma_visit"]].merge(q, on="source_id").merge(aux, on="source_id")
              .merge(bl[["source_id", "blend"]], on="source_id", how="left").merge(where, on="source_id"))
     hosts = hosts[hosts["quiet"] & (hosts["gbin"] <= 7) & ~hosts["source_id"].isin(used)].reset_index(drop=True)
