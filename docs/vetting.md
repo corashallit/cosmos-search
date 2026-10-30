@@ -462,6 +462,105 @@ window 0.7 × 2.1, BP/RP 3.5 × 2.1, plus timing and ephemeris slack) and 150 ar
 converted from BJD to observer UTC by removing the barycentric light time towards the source (up to ±8.3 min).
 NEOs within 0.8 au can fall outside the widened cone.
 
+## 14. Calibration run (V3) on slow-change candidates (written 2026-10-30, before the batch is drawn)
+
+**Why on slow changes.** §7 set aside ~400 objects to calibrate the checks. The short-dip review has since had its
+own 376-packet test (docs/dayone.md, "Confirmatory result"), and slow fades and long dimming episodes became the
+main DR4 search (docs/arms/slow-changes.md). Nothing has yet measured how the per-candidate checks (S5) or the
+blind review behave on that search's candidates. This run does, on DR3. Nothing below changes after the draw.
+
+**What is measured.**
+
+1. *The automated checks* (`slow/checks.py`): the colour of the change (BP depth over RP depth), NEOWISE W1/W2
+   over the same dates, and ZTF from 2018 on. For each: how often it can be computed; whether its stated error
+   holds, on fakes with a known answer; and how often natural slow changers of each class look grey or match each
+   explanation's infrared prediction.
+2. *The blind review*: one Claude subagent per object with the frozen Stage A text (`vetting/stage_a.md`,
+   unchanged), told to make one Read of its prompt and one Write of its reply; the frozen shortlist rule (S =
+   P(disk occultation + debris transit + other astrophysical + unexplained) ≥ 0.35, `dayone.vet.S_SHORTLIST`).
+   How often it shortlists natural stars of each class, chance passes, and fakes of each kind.
+
+**Stars.** Shard 4/10 of DR3's epoch photometry (`dr3_pass --shard 4/10`, every light curve kept: 350 bulk files),
+which no slow-change calibration or test has used (shards 0-3 have). Detector, period search, shared-date test,
+thresholds and drift table as frozen in `prereg/rules/slow-v3/`, applied unchanged; a star counts as flagged when
+rule slow-v3 flags it (main list, not `early`). The period search costs ~40 ms a star, so it runs on every star of
+a sampling frame of 120 of the 350 files (chosen with OS randomness before scoring, list kept with the batch) and on
+the quiet stars of all 350. Natural stars are drawn from the frame. Stars in
+`rehearsal-inputs/exclude/all_used_ids.txt` are left out.
+
+**Batch (about 410).**
+
+| Group | Objects | Label for scoring | Measures |
+|---|---|---|---|
+| Natural stars flagged by slow-v3, by DPAC class | 280 | DPAC `best_class_name` (the star's own variability) | false shortlist per class; the checks on real slow changers |
+| Quiet stars flagged by slow-v3 (all 350 files) | all of them (expected ~15-30) | no real change | false shortlist on chance passes |
+| Fakes, grey (every band dims by the same fraction) | 25 | should be shortlisted | recall |
+| Fakes, dust in front (fraction ∝ λ^−β, β 1-2.5; W1/W2 a few % of G) | 15 | should be shortlisted | recall |
+| Fakes, dust that absorbs and re-emits (optical as dust; W1/W2 brighten at 300, 600 or 1000 K, `checks.reemission`) | 10 | should be shortlisted | recall |
+| Fakes, change in the star's temperature (band ratios of a cooling blackbody at the host's Teff) | 25 | natural | reported only |
+| Fakes, G alone (BP, RP, ZTF, W1, W2 unchanged) | 25 | instrumental | reported only (confabulation) |
+| Fakes, grey, signal-to-noise 6-20 | 10 | — | reported only (recall near the threshold) |
+
+- *Natural strata*: DPAC classes with at least 10 flagged stars in the frame get their own stratum, the rest are
+  pooled as "other". The 280 are split by `design.neyman_allocation` with floor 10 (or all of a stratum, if fewer),
+  mix = each stratum's share of flagged frame stars, and guessed false-pass rates 0.02 for LPV and ECL, 0.10 for RS,
+  SOLAR_LIKE, YSO and "other", 0.05 for the rest. Drawn with OS randomness. Rates are reported per stratum, pooled,
+  and weighted back to the frame's flagged mix (bootstrap within strata).
+- *Fakes*: shapes drawn uniformly from long dip, late-starting fade, steady fade, staircase fade, accelerating fade
+  and repeating long dip (`inject.lightcurve`; calibrated or spent shapes, none held out), made achromatic, then
+  given the flavour's fraction of the G change in each band (G, BP, RP, ztf_g/r/i, W1, W2). Each goes into its own
+  quiet star at G < 19 from the 230 files outside the frame (never also a natural star), injected into the raw
+  epochs before normalisation and drift correction, and the same signal into that star's ZTF and NEOWISE exposures.
+  A fake is kept only if slow-v3 flags it, with the host's real neighbours in the shared-date test, and if its
+  signal-to-noise (S3: deepest G deficit at the visits × √(visits below half that depth) ÷ the host's visit noise)
+  is at least 20 (6-20 for the last row). Hosts are visited in a shuffled order; a host whose draw fails passes to
+  the next draw. The plan (hosts, signals, flavours) is sealed with age to Cora's key and the reveal key.
+
+**Packets** (`vetting.packet.build`, no holdout). Drift-corrected G, BP and RP epochs; ZTF epochs (IRSA, catflags 0,
+each ZTF object renormalised to its median after any injection); NEOWISE visit means as bands W1 and W2 (clean single
+exposures from `neowiser_p1bs_psd`, `checks.neowise_clean`, averaged per ~6-month visit). The detected change goes in
+as the packet's one detected dip (start, end, deepest visit, depth). Tests: the detector's scores, the colour of the
+change, the NEOWISE change (or slope, for trends) beside what grey blocking, dust in front, and re-emission at 300 and
+1000 K predict, and ZTF's level after 2020-01-20 against 2018-19; each test carries a description of what it
+computes and what each explanation predicts, and none quotes a calibration figure. Context: AllWISE W1-W4 and 2MASS
+Ks through `cosmos_search.xmatch` (limits renamed as in `dayone.vet.wise_limits`). The short-dip pipeline tests
+(recurrence, single event) are not shown: they answer a different question. No variable-star catalogue type is shown,
+because VSX carries Gaia DR3's own classes.
+
+**Pass criteria** (one-sided 95% Clopper–Pearson, `vetting.power`):
+
+| | Criterion | Passes a good rule | Passes a bad one |
+|---|---|---|---|
+| R1 | Grey, dust and re-emitting fakes at signal-to-noise ≥ 20 shortlisted: lower bound ≥ 50% (≥ 32 of 50) | 0.86 at recall 0.7 | 0.03 at 0.5 |
+| R2 | Natural and chance-pass stars shortlisted, pooled: upper bound ≤ 10% (≤ 21 of 300) | 0.95 at 0.05 | 0.05 at 0.10 |
+| C1 | Colour of the change on fakes: (BP/RP ratio − injected ratio) within 2 stated errors for ≥ 85% | | |
+| C2 | NEOWISE change on fakes with a visit inside the change: (W1 change − injected) within 2 stated errors for ≥ 85% | | |
+
+C1 and C2 are of the error bars: a Gaussian error gives 95%; errors that are half the true scatter give ~68%.
+
+**Reported whatever the outcome**: per-stratum and frame-weighted shortlist rates; recall by flavour, shape and
+signal-to-noise; the shortlist rate of temperature-change and G-only fakes; top classes; coverage of each check;
+how many natural stars of each class look grey (|z_grey| < 2) or match the dust or grey infrared prediction within
+2σ, which sets how far the checks alone could cut DR4's list; Brier score and recognition rate; transcript audit.
+
+**What each outcome leads to.**
+
+- R1 and R2 pass: the blind review with the frozen rule is the review step for DR4's slow-change candidates, and
+  these rates are the ones quoted for it.
+- R1 fails: the review misses anomalous slow changes. The misses are read after the reveal, and the choice (a
+  slow-specific rule, which then needs its own fresh blind batch, or the rule as is with the lower recall stated)
+  goes to Cora.
+- R2 fails: likewise for false entries; DR4's review then has to come after automated cuts that keep the
+  expected false entries within the ~10³ budget.
+- C1 or C2 fails: the error of that check is fixed (for example from the star's own scatter), and the fix is
+  checked on new fakes before DR4.
+
+**Procedure.** `scripts/slow_cal.py`: `draw` (strata, natural ids, sealed fake plan), `build` (fetch NEOWISE,
+ZTF and context; packets, prompts, sealed key), Stage A subagents (transcripts audited: a packet whose transcript is
+not clean, or whose reply does not parse, is re-run once with a fresh agent; if it still fails it counts against the
+rule: a fake not shortlisted, a natural star shortlisted), `vetting commit --archive prereg/verdicts/slow-cal-1`,
+`git push`, then `score` (refuses unless the archive commit is on origin).
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
