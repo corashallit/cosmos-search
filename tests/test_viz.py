@@ -40,6 +40,20 @@ def _pop(n=4000):
     return pd.concat([pop, data.strengths(pop, THR)], axis=1)
 
 
+def _top(n=3000):
+    """Strong fades with astrometry and classes: long-period variables red, everything else bluer."""
+    cls = RNG.choice(["ECL", "AGN", "LPV", "RS", None], n, p=[0.4, 0.4, 0.05, 0.1, 0.05])
+    red = cls == "LPV"
+    t0 = RNG.uniform(0, 600, n)
+    return pd.DataFrame({
+        "id": np.arange(10_000, 10_000 + n), "dim_depth": 10 ** RNG.uniform(-2, -0.5, n),
+        "fade_kind": RNG.choice(["dip", "fade", "drop"], n), "dim_t0": t0, "dim_t1": t0 + RNG.uniform(20, 300, n),
+        "abbe": RNG.uniform(0.02, 1.2, n), "bp_rp": np.where(red, RNG.normal(3.5, 0.2, n), RNG.normal(1.0, 0.3, n)),
+        "phot_g_mean_mag": RNG.uniform(12, 20, n), "parallax": RNG.normal(0.5, 0.3, n), "parallax_error": 0.1,
+        "pmra": RNG.normal(0, 3, n), "pmra_error": 0.1, "pmdec": RNG.normal(0, 3, n), "pmdec_error": 0.1,
+        "best_class_name": cls})
+
+
 def _svg_text(paths, theme="light"):
     return paths[theme]["svg"].read_text()
 
@@ -112,7 +126,7 @@ def test_slow_candidate_sheet_and_page(tmp_path):
     rise = pop.loc[pop["rise_strength"] >= 1, "rise_strength"].to_numpy()
     hr = pd.DataFrame({"phot_g_mean_mag": RNG.uniform(8, 18, 3000), "bp_rp": RNG.uniform(0, 3, 3000),
                        "parallax": RNG.uniform(1, 20, 3000)})
-    ctx = sheet.Context(pop=pop, lists={"G<19": (fade, rise, len(pop))}, hr=hr)
+    ctx = sheet.Context(pop=pop, lists={"G<19": (fade, rise, len(pop))}, hr=hr, top=_top())
     row = pd.Series({"id": 4321, "phot_g_mean_mag": 15.2, "bp_rp": 1.0, "abbe": 0.2, "dim_depth": 0.03,
                      "fade_kind": "dip", "dim_t0": 400.0, "dim_t1": 650.0, "by": "episode", "slope": np.nan,
                      "strength": 3.1, "depth_bp": 0.031, "depth_bp_err": 0.002, "depth_rp": 0.029,
@@ -121,7 +135,8 @@ def test_slow_candidate_sheet_and_page(tmp_path):
               "W1_pred_grey": -0.03, "W2_pred_grey": -0.03, "W1_pred_dust_in_front": -0.002,
               "W2_pred_dust_in_front": -0.001}
     figs = sheet.slow_candidate(ctx, row, _epochs(depth=0.03, t0=400, t1=650), tmp_path, checks=checks,
-                                astro={"parallax": 2.0, "parallax_error": 0.05}, sid=4321)
+                                astro={"parallax": 2.0, "parallax_error": 0.05, "pmra": 1.0, "pmra_error": 0.1,
+                                       "pmdec": 0.0, "pmdec_error": 0.1}, sid=4321)
     assert [f["key"] for f in figs] == ["lightcurve", "strength", "classes", "hr", "colour", "infrared"]
     assert all(f["caption"] and f["paths"]["dark"]["svg"].exists() for f in figs)
     out = html.page("Test page", [{"heading": "A star", "text": "<p>hello</p>", "figures": figs}],
@@ -191,3 +206,25 @@ def test_strength_hist_ranks_the_candidate_and_mirrors_brightening(tmp_path):
     assert "rank 3 of 100,000" in svg                  # 12.0 and 30.8 are stronger
     assert "≥ 9: 3 fading, 0 brightening" in svg
     assert svg.count("<title>") > 20                   # hover text on the bars
+
+
+def test_similar_classes_counts_the_nearest_and_leaves_out_the_candidate(tmp_path):
+    top = _top()
+    cand = top[top["best_class_name"] == "LPV"].iloc[0].to_dict()
+    top.loc[top["id"] == cand["id"], "best_class_name"] = "RCB"     # the candidate is among the comparison stars
+    paths = style.render(population.similar_classes, tmp_path / "sim", top, cand, exclude=cand["id"], k=50,
+                         themes=("light",))
+    svg = _svg_text(paths)
+    m = re.search(r"long-period variables: (\d+) of the 50 nearest", svg)
+    assert m and int(m.group(1)) >= 45                  # red stars are long-period variables here
+    assert "R CrB stars: 1 of 3,000 comparison stars" not in svg      # excluded, not counted
+    assert "no DPAC class" in svg and "larger than for" in svg
+
+
+def test_similarity_features_put_large_drops_in_magnitudes():
+    f = data.similarity_features(pd.DataFrame({"dim_depth": [5.3, 0.5], "fade_kind": ["drop", "dip"],
+                                               "dim_t0": [0.0, 0.0], "dim_t1": [100.0, 10.0]}))
+    assert 10 ** f["depth"].tolist()[0] == pytest.approx(2.5 * np.log10(6.3))   # 2 mag, not 530%
+    assert 10 ** f["depth"].tolist()[1] == pytest.approx(-2.5 * np.log10(0.5))
+    assert f["duration"].tolist() == pytest.approx([2.0, 1.0])
+    assert f["parallax"].isna().all()

@@ -8,6 +8,8 @@ Plot functions take plain DataFrames so the same code serves DR3 trial output an
   (1 at the star's normal level) and `err`, as `slow.vet.ztf_normalised` and `slow.vet.neowise_visits` give them.
 - population: one row per star of the comparison sample with the detector's columns (`slow.search.score`), plus
   `phot_g_mean_mag` and `bp_rp`; `strengths` adds the fading and brightening strengths the lists are ordered by.
+- top: the strongest fades of the run (rows of lists/fading.parquet) with parallax, proper motion and their errors
+  and the DPAC class; `similarity_features` turns these into the numbers similar stars are found by.
 """
 
 import json
@@ -37,7 +39,13 @@ CLASS_SHORT = {
     "ECL": "eclipsing binaries", "AGN": "quasars", "LPV": "long-period variables", "RS": "spotted stars",
     "BE|GCAS|SDOR|WR": "Be stars", "YSO": "young stars", "SOLAR_LIKE": "Sun-like active stars",
     "DSCT|GDOR|SXPHE": "δ Scuti, γ Dor", "RR": "RR Lyrae", "CEP": "Cepheids", "CV": "cataclysmic variables",
+    "RCB": "R CrB stars",
 }
+
+# What similar stars are found by (similarity_features), in plain words for captions and footnotes.
+SIMILAR_BY = "episode depth and duration, Abbe value, BP − RP, G, parallax / error, proper motion / error"
+SIMILAR_COLUMNS = ("dim_depth", "fade_kind", "dim_t0", "dim_t1", "abbe", "bp_rp", "phot_g_mean_mag", "parallax",
+                   "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error")
 
 
 def band_of(x):
@@ -134,6 +142,34 @@ def typical_noise(pop, g_mag, width=0.5, g_col="phot_g_mean_mag", quiet=True, cl
         m &= pop[class_col].isna().to_numpy()
     s = pop.loc[m, "sigma_visit"].to_numpy(float)
     return float(np.nanmedian(s)) if len(s) else np.nan
+
+
+def similarity_features(df):
+    """Numbers for finding stars like a candidate (population.similar_classes), one row per star: episode depth in
+    magnitudes and duration in days (both log10), Abbe value, BP − RP, G, and log10(1 + |x / error|) of parallax
+    and of total proper motion. Missing inputs give NaN.
+
+    dim_depth is ΔF/F against the median of all visits. For a drop (bright first, fainter to the end) that median
+    sits at the faint level, so depth = 2.5 log10(1 + dim_depth); for a dip or fade it sits at the normal level,
+    so depth = -2.5 log10(1 - dim_depth). Either way large changes stay on one scale (a drop from six times the
+    median is 2 mag, not 500%)."""
+    def col(name):
+        return pd.to_numeric(df[name], errors="coerce").to_numpy(float) if name in df else np.full(len(df), np.nan)
+
+    d = col("dim_depth")
+    drop = (df["fade_kind"].astype(str) == "drop").to_numpy() if "fade_kind" in df else np.zeros(len(df), bool)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mag = np.where(drop, 2.5 * np.log10(1 + np.clip(d, 0, None)), -2.5 * np.log10(1 - np.clip(d, 0, 0.99)))
+        pm = np.hypot(col("pmra") / col("pmra_error"), col("pmdec") / col("pmdec_error"))
+        return pd.DataFrame({
+            "depth": np.log10(np.clip(mag, 1e-3, None)),
+            "duration": np.log10(np.clip(col("dim_t1") - col("dim_t0"), 1, None)),
+            "abbe": col("abbe"),
+            "bp_rp": col("bp_rp"),
+            "g": col("phot_g_mean_mag"),
+            "parallax": np.log10(1 + np.abs(col("parallax") / col("parallax_error"))),
+            "motion": np.log10(1 + pm),
+        }, index=df.index)
 
 
 def survival(x, at):

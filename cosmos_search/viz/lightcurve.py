@@ -239,7 +239,7 @@ def slow_change(epochs, change=None, others=None, noise=None, release=None, name
     ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), ncol=2, handletextpad=0.2, columnspacing=1.2,
               borderaxespad=0.1)
     ax.set_ylabel(UNIT[scale])
-    style.panel_label(ax, "Gaia BP, RP")
+    style.panel_label(ax, "Gaia BP (330–680 nm), RP (630–1050 nm)")
 
     for key, bands, label, days in (("ztf", ("ztf_g", "ztf_r", "ztf_i"), "ZTF g, r, i (15 d means)", 15.0),
                                     ("wise", ("W1", "W2"), "NEOWISE W1, W2 (visit means)", None)):

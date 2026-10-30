@@ -66,8 +66,9 @@ def change_colour(pop, cand, min_z=5.0, width=style.WIDTH, heading=None, label="
     ax.set_ylim(-0.2, 3.2)
     ax.set_xlabel("G depth (%)")
     ax.set_ylabel("BP depth / RP depth")
-    fig.text(74 / width, 14 / height, "grains much larger than 1 µm are also grey",
-             color=c("muted"), fontsize=px(style.FONT_PX), ha="left", va="bottom")
+    fig.text(74 / width, 14 / height,
+             "BP: 330–680 nm · RP: 630–1050 nm · grains much larger than 1 µm are also grey", color=c("muted"),
+             fontsize=px(style.FONT_PX), ha="left", va="bottom")
     return fig
 
 
