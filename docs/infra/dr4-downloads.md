@@ -111,5 +111,8 @@ So a 4-core container keeping a selection is limited by its network (~120 MB/s),
 5. Per-CCD G (DataLink only, not on the CDN): top ~10⁴ candidates through DataLink. For many more, the Gaia
    Helpdesk can grant bulk access on request.
 
+The slow-change search's own steps, from thresholds to checks, are in docs/arms/slow-changes.md ("Release day, end
+to end"), with timings from a trial on all of DR3 (2026-10-30).
+
 The dry run on DR3 (`--release "Gaia DR3" --schema gaiadr3 --cdn-prefix Gaia/gdr3/Photometry/`) finds AIP's table,
 no Parquet on the CDN (DR3's files are csv.gz) and DataLink at 0.66 light curves/s.

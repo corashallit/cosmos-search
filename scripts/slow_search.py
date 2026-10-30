@@ -272,8 +272,8 @@ def _read_stats(files, ranges, lo, hi):
     return t.to_pandas().astype({"fade_kind": "category", "rise_kind": "category"})
 
 
-FLAG_COLUMNS = ["id", "gbin", "flagged", "early", "rising", "rising_rep", "shared_fade", "shared_rise", "by",
-                "fade_kind", "strength", "rise_strength"]
+FLAG_COLUMNS = ["id", "gbin", "flagged", "early", "rising", "rising_rep", "shared_fade", "shared_rise",
+                "fade_set_aside", "rise_set_aside", "by", "fade_kind", "strength", "rise_strength"]
 
 
 def flag(a):

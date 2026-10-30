@@ -59,7 +59,7 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 | S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | Done 2026-10-23 (below); download routes in docs/infra/dr4-downloads.md |
 | S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | First version done 2026-10-23 (below); position needs DR4 epoch astrometry |
 | S6 | Pre-registered blind test of the detector: new fake shapes, fresh stars; known variable classes measured openly | S4, S5 | Run 2026-10-23 (below): fails on repeated slow cycles; Cora chose a slow period search, whose own blind test is written down (below) |
-| S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | slow-v3 (fades read in time order, below); release-day thresholds from DR4's own stars ready (below) |
+| S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | slow-v3 (fades read in time order, below); release-day thresholds from DR4's own stars ready (below); whole run tried on all of DR3 2026-10-30 (below) |
 | S8 | Verify top candidates: one new brightness measurement each; per-visit spectra for the best | S7 | |
 
 ## Known answers (S1)
@@ -376,6 +376,14 @@ passing as "repeating" on a test light curve: folded at a period shorter than th
 visit sharing its phase, one dip looked like two. The eclipsing-binary filter's period test was not reused: it is
 built for eclipses of hours to days.
 
+**Speed and an outlier fix (2026-10-30, PR #78).** The window search and the repeat conditions are compiled with
+numba, with numpy's summation order copied so results are bit-identical to the plain version: 255 → 23 ms per star
+at DR4's sampling, 18 → 5 ms on DR3. The full DR3 trial (below) then showed stars with one extreme bright visit (up
+to 10 times the star's flux) getting repeat scores in the hundreds: that visit tilted the straight-line trend
+removed before folding, and the tilt read as a repeating dip. Visits beyond 20σ are now left out of that line's fit
+(`period.DETREND_CLIP`; they stay in the search). This removed 94-100% of such flags; the quiet stars' threshold did
+not move, and recall of the repeating long dip went from 57.0% to 55.9%.
+
 **New shapes set aside before any tuning** (pushed in 5495052, before the search existed;
 `inject.lightcurve.HELD_OUT_SLOW`): sawtooth dips (a fast drop and slow recovery each cycle), a drifting cycle
 (period lengthening or shortening by 15-40% over the span), uneven dips (each cycle 20-100% as deep as the deepest)
@@ -625,8 +633,131 @@ definition). Thresholds with their bootstrap 16-84% intervals, against the froze
 The code reproduces the frozen values within their sampling noise, apart from the faint episode threshold, which
 sits on 3 stars beyond the 0.1% point. That is the case for ~25,000 quiet stars per magnitude range on release day.
 
+## Release day, end to end
+
+`scripts/slow_search.py` runs the search step by step; `slow/search.py` holds the scoring and flagging. On DR4:
+
+1. Routes: `python -m cosmos_search.gaia.dr4_routes --out routes.json` (docs/infra/dr4-downloads.md).
+2. Thresholds from DR4's own stars: `slow_search.py sample --out S --patches 300 --level 9 --schema gaiadr4`, then
+   `slow_release_thresholds.py --lightcurves S/lightcurves --aux S/aux.parquet --out RULE --check-against
+   prereg/rules/slow-v3` (section above).
+3. Whole-sky selection: `slow_search.py select --out SEL` (ESA TAP, 768 sky slices, 5 jobs at once). Its
+   `selection.parquet` carries G and BP-RP and serves as `--aux` below.
+4. Light curves of the selected stars: `dr4_bulk pull --select SEL/selection.parquet`, or the AIP mirror by
+   source_id range.
+5. Scores: `slow_search.py score --lightcurves DIR --aux SEL/selection.parquet --rule RULE --out R`, split over
+   machines with `--shard i/n`; resumes from done-markers and keeps the light curves of stars near a threshold
+   (fading or brightening).
+6. Lists: `slow_search.py flag --run R --aux SEL/selection.parquet --rule RULE --out L`: the shared-date test, then
+   the fading list, the `early` list and the rising list, each ordered by strength, one sky region at a time.
+7. Motion: `slow_search.py motion --run L` looks up parallax and proper motion for every star above strength 1
+   either way and marks those consistent with zero as `still` (quasars, galaxies, stars in other galaxies), which are
+   read as a list of their own. `L/motion_summary.json` has the fading and rising counts above each strength
+   without them.
+8. Reading: from the top of the fading list down to where it stops standing clear of the rising list. Eclipsing
+   binaries come out first (DR4's classes, then the eclipsing-binary filter for stars flagged by the repeat score),
+   then the checks: `slow_checks.py --fading L/fading.parquet --out L/checks --skip-still --skip-class ECL --n 1000`.
+
+### Trial on all of DR3 (2026-10-30)
+
+Every step that does not need DR4, on every DR3 star with a light curve: 11.6 M stars from ESA's bulk files (3,386
+files, 74 GB, streamed from the CDN), thresholds from 1,000 random level-5 sky patches fetched from AIP (1.07 M
+stars), and the selection query as DR4 will run it, on DR3's `gaia_source` with a stand-in score.
+
+**Time and failures.**
+
+| Step | DR3 trial | For DR4 |
+|---|---|---|
+| Selection (ESA TAP, 768 slices, 5 jobs) | 14.6 min, no failed slice | 4-5 s a slice on 1.8 × 10⁹ rows |
+| Sample for thresholds (AIP) | ~500 light curves/s with 8 workers | AIP refuses one query over ~10⁴ stars; dense patches are now split in quarters |
+| Thresholds | 17 min for 1.07 M stars | |
+| Scores | 11.8 h on 4 cores (272 stars/s, 14.7 ms per star per core), no failed file | ~25-35 ms per star per core at DR4's sampling: ~20 core-hours for a 0.1% selection (2.5 × 10⁶ stars), ten times that for 1% |
+| Lists | 100 s, 4.0 GB peak (10.8 GB in one pass) | memory follows the largest sky region (1/48 of the sky) |
+| Motion | 6 min for 1.47 M stars (30 uploaded queries) | |
+| Checks | 27 s a star with 6 at once, no failed fetch | IRSA allows 4 calls at once (NEOWISE ~2 min, ZTF ~1 min each): 10³ candidates in ~7.5 h |
+
+Fixed on the way: the period search's outlier bug (above), the shared-date test comparing every star with every
+patch (33 min → 46 s on 4.7 M stars, same results), joins against whole-sky tables inside per-file and per-region
+loops (seconds each time), and the checks running one star after another.
+
+**Thresholds** (quiet stars of the 1,000 patches; frozen slow-v3 values for comparison):
+
+| | Quiet stars | Episode (s_fade) | Trend (slope_z) | Repeat (s_rep) |
+|---|---|---|---|---|
+| G < 19, all patches | 65,867 | 5.63 | 3.80 | 7.00 |
+| G < 19, M31 field | 53,569 | 5.50 | 3.86 | 6.94 |
+| G < 19, elsewhere | 12,298 | 5.92 | 3.41 | 7.17 |
+| G < 19, frozen | 11,994 | 6.04 | 3.94 | 7.55 |
+| G ≥ 19, all patches | 70,815 | 6.37 | 3.90 | 7.66 |
+| G ≥ 19, M31 field | 68,962 | 5.59 | 3.64 | 7.41 |
+| G ≥ 19, elsewhere | 1,853 | 15.27 | 7.41 | 9.26 |
+| G ≥ 19, frozen | 2,389 | 17.09 | 7.84 | 9.71 |
+
+The M31 field (5.5° around M31, Gaia's GAPS release) is the only part of DR3 with light curves for every star, so
+it is the closest thing to DR4's population. Elsewhere DR3 published light curves only for stars already found
+variable, and its faint "quiet" stars are mostly quasars. So DR4's faint thresholds will likely sit near 5.6, not
+17; the release-day script sets them from DR4's own stars, so nothing frozen needs to change. The list step used the
+all-patches values.
+
+**Lists.** G < 19: 9.01 M stars scored, 565,241 fading (6.3%), 45,697 `early`, 365,905 rising. G ≥ 19: 2.60 M
+scored, 324,915 fading (12.5%), 59,787 `early`, 317,769 rising. These are DR3's variable stars, so the share is far
+above the 0.1% the thresholds allow for quiet stars. In the M31 field, which is mostly ordinary stars, 0.49% (G < 19)
+and 0.37% (G ≥ 19) are on the fading list, and the rising list is as long or longer at every strength:
+
+| Strength above | 1 | 1.5 | 2 | 3 | 5 | 10 |
+|---|---|---|---|---|---|---|
+| M31 field G < 19, fading / rising | 2,818 / 4,010 | 602 / 1,032 | 256 / 495 | 88 / 160 | 16 / 40 | 3 / 6 |
+| Elsewhere G < 19, fading / rising | 611,688 / 443,339 | 227,913 / 166,270 | 115,000 / 82,366 | 45,098 / 29,244 | 12,098 / 5,923 | 1,344 / 453 |
+
+In a population of ordinary stars the fading count does not stand clear of the rising count at any strength. So
+DR4's lists will hold far more stars than anyone can read, nearly all of them chance passes and ordinary
+variables; they are for reading from the top, and the rising count beside them says how far down reading still
+pays.
+
+**Shared-date test.** It set aside 72,210 fades and 49,359 brightenings at G < 19 that had passed the episode
+threshold (14,834 and 9,746 at G ≥ 19). Almost all are in dense fields: 1-2% of strong changes in level-6 pixels
+with under 400 scored stars, 33% at 900-2,100 and 58% above. These are not borderline cases: a median 128 other
+stars in the pixel changed within 1.5 days, 6 times what chance gives. 76% of the fades set aside fall in five
+10-day windows (mid-June to early July 2015 in the Galactic plane, late August to early October 2015 mostly towards
+the bulge), each across 180-650 pixels at once, so they come from a few scans, not single stars. In the M31 field
+the test sets aside about 20% of strong fades and 17% of strong brightenings, most of them in the second half of
+June 2015, in both directions. It works as intended and treats both directions alike. Its cost is any real
+change that happens on one of those few dates in a dense field.
+
+**Star types at the top.** By DPAC class, the 1,000 strongest fades at G < 19 are 82% eclipsing binaries (mostly
+flagged by episode and repeat score together). With those left out, half the next 1,000 are quasars ("AGN"), then
+spotted stars, long-period variables and Be stars. At G ≥ 19, 93% of the fading list has no measurable parallax
+or proper motion, and 99% of those are DPAC quasars. On the 10,000 strongest fades in each magnitude range, that
+test picked 9,665 of 9,688 DPAC quasars at G ≥ 19 and 2,367 of 2,376 at G < 19, and only 20 and 15 other stars
+(mostly long-period variables and eclipsing binaries). With those stars left out, fading stands clear of rising at G < 19 at every strength (9,075 against
+3,011 above 5); at G ≥ 19 rising outnumbers fading above strength 3, from outbursting cataclysmic variables (254
+rising against 126 fading).
+
+**Checks** on the 60 strongest fades at G < 17 that DPAC does not call eclipsing binaries: all are known variables
+(18 spotted stars, 10 Be stars, 7 long-period variables, 4 R CrB stars, 4 δ Scuti, 2 quasars, 1 microlensing
+event) or sit in DR3's short-timescale (11) and microlensing (3) tables. Nine of the 11 short-timescale stars repeat
+every 20-42 days, and all 11 dip by 16-34% at the repeat: most likely eclipsing binaries DPAC's classifier did not
+label, which the eclipsing-binary filter is built for. NEOWISE measured a change for 24 of the 44 episodes but a
+slope for only 2 of the 14 steady fades: 9 of those 14 lie within 5° of the Galactic plane, where few NEOWISE
+exposures pass the cleaning, and DR3's 2.8 years give NEOWISE 5-6 visits at best. ZTF covered 22 of the 27 stars
+north of -30°.
+
+**Known answers.** Of 77 known fading alerts with DR3 light curves, 24 are on the fading list and 3 on `early`; 70
+of the 77 alerts were raised in 2018-2020, after DR3's light curves end (May 2017), so this measures little. DY Per
+stars 6 of 8, R CrB stars 17 of 41 (18 more on the rising list, recovering from a decline), UX Ori stars 12 of 67.
+
+**Still to do before DR4.** A check of G's change against BP's and RP's (docs/vetting.md §14). The
+eclipsing-binary filter run in bulk on stars flagged by the repeat score. Neither blocks the run order above.
+
 ## Log
 
+- **2026-10-30.** Whole search tried on all 11.6 M DR3 stars with light curves (Release day, end to end; PRs #78,
+  #79): every step ran without a failed file, slice or fetch; scoring 14.7 ms per star per core. Fixed a period
+  search bug (one extreme bright visit faked repeat scores in the hundreds), made the shared-date test and list step
+  fast and the list step's memory bounded, and ran the checks several stars at a time. New step: stars without
+  measurable parallax or proper motion (`still`, nearly all quasars) set aside, 93% of the faint fading list. DR4's
+  faint thresholds will likely sit near 5.6 (M31 field) instead of DR3's 17. Among ordinary stars the rising list
+  is as long as the fading list at every strength, so DR4's lists are read from the top.
 - **2026-10-30.** Checks and blind review calibrated on 432 DR3 objects (S5, docs/vetting.md §14): recall of
   anomalous fakes 44/50 (pass), false shortlist 26/322 pooled (upper bound 11.0%, fail; 5.0% at the flagged mix),
   colour and NEOWISE errors hold. Three cataclysmic variables carry the repeat-flag artefact fixed in PR #78.

@@ -91,6 +91,9 @@ def flag(stats, rule_dir=rule_v3.RULE_DIR, shared_flags=None):
     out["shared_rise"] = sh["shared_rise"].to_numpy()
     out["rising"] = ((s_rise > s_th) & ~out["shared_rise"].to_numpy()) | (slope_z > z_th)
     out["rising_rep"] = stats["s_rep_bright"].to_numpy() > rep_th if "s_rep_bright" in stats else False
+    # Episodes past the threshold that the shared-date test set aside (shared_* alone also marks weak changes).
+    out["fade_set_aside"] = (stats["s_fade"].to_numpy() > s_th) & out["shared_fade"].to_numpy()
+    out["rise_set_aside"] = (s_rise > s_th) & out["shared_rise"].to_numpy()
     s_rise_ns = np.where(out["shared_rise"].to_numpy(), np.nan, s_rise)
     rep_b = stats["s_rep_bright"].to_numpy() if "s_rep_bright" in stats else np.full(len(stats), np.nan)
     out["strength"] = _strength(stats["s_fade"].to_numpy() / s_th, -slope_z / z_th, stats["s_rep"].to_numpy() / rep_th)
@@ -138,8 +141,8 @@ def summary(flags):
             "early": int(d["early"].sum()),
             "rising": int(d["rising"].sum()),
             "rising_rep": int(np.sum(d["rising_rep"])),
-            "shared_fade_set_aside": int(d["shared_fade"].sum()),
-            "shared_rise_set_aside": int(d["shared_rise"].sum()),
+            "fade_set_aside_shared_date": int(d["fade_set_aside"].sum()),
+            "rise_set_aside_shared_date": int(d["rise_set_aside"].sum()),
             "above_strength": tails.get(grp, {}),
         }
     return out

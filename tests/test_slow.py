@@ -439,6 +439,7 @@ def test_search_flags_fades_and_mirrors_rises():
     assert s["G<19"]["fading"] == 1 and s["G<19"]["rising"] == 2 and s["G>=19"]["fading"] == 0
     assert s["G<19"]["above_strength"]["1.25"] == {"fading": 1, "rising": 2}  # star 12 rises at 5 / 3.94
     assert s["G<19"]["above_strength"]["1.5"] == {"fading": 0, "rising": 0}
+    assert s["G<19"]["fade_set_aside_shared_date"] == 0 and s["G<19"]["rise_set_aside_shared_date"] == 0
     assert search.keep_mask(stats, *search.rule_v3.load()[:2]).tolist() == [True, True, True, False]
 
 
