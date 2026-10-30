@@ -59,7 +59,7 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 | S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | Done 2026-10-23 (below); download routes in docs/infra/dr4-downloads.md |
 | S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | First version done 2026-10-23 (below); position needs DR4 epoch astrometry |
 | S6 | Pre-registered blind test of the detector: new fake shapes, fresh stars; known variable classes measured openly | S4, S5 | Run 2026-10-23 (below): fails on repeated slow cycles; Cora chose a slow period search, whose own blind test is written down (below) |
-| S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | slow-v3 (fades read in time order, below); release-day thresholds from DR4's own stars ready (below); whole run tried on all of DR3 2026-10-30 (below) |
+| S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | slow-v3 (fades read in time order, below); release-day thresholds from DR4's own stars ready (below); whole run tried on all of DR3 2026-10-30, then the band, eclipsing-binary and NEOWISE checks settled (below) |
 | S8 | Verify top candidates: one new brightness measurement each; per-visit spectra for the best | S7 | |
 
 ## Known answers (S1)
@@ -669,7 +669,8 @@ sits on 3 stars beyond the 0.1% point. That is the case for ~25,000 quiet stars 
 8. Reading: from the top of the fading list down to where it stops standing clear of the rising list. The checks:
    `slow_checks.py --fading L/fading.parquet --lightcurves R/lightcurves --out L/checks --skip-still --skip-band
    --skip-class ECL --n 1000`. DR4's eclipsing-binary class is left out first; `--lightcurves` adds the
-   eclipsing-binary filter on G and ZTF (`eb_explained`), and explained stars move to the eclipsing-binary list.
+   eclipsing-binary filter on G and ZTF (`eb_explained`, its period and duration), shown to the reviewer as
+   information (its test failed for repeating long dips, "Eclipsing binaries among the candidates" below).
    Stars marked `g_only` or `bp_rp_only` are not checked but stay on the fading list with their verdict and are
    read after the rest, as the still stars are.
 
@@ -883,7 +884,33 @@ with ZTF), and of the 60 strongest non-eclipsing fades already checked in the tr
 **What each outcome leads to.** E1 passes: explained stars leave the review. E1 fails: the verdict is shown to the
 reviewer only, and the fakes it explained are read.
 
+**Result (2026-10-30): E1 fails.** 98 of the 100 slots filled in 30 rounds (two repeating long dips never reached
+S/N ≥ 20 on a free host). 9 of 98 fakes explained, upper bound 15.5% (> 5%). All 9 are repeating long dips (9 of
+48); none of the 50 other shapes. The filter found each one's injected period (within 0.3%, one at 1.14×), and the
+duration check let them through: the injected dips last 4-35 days (5-23% of periods of 50-305 days), but the
+filter's lower bound on duration, built for dips of hours, breaks a run of dip epochs at any gap over 1.5 days
+and so measured 0.7-4 days on ZTF's cadence. Two more were flagged `periodic_unphysical` (dips too long for any
+stellar pair), which is the right reading.
+
+Real stars, reported: 44 of the 52 DPAC eclipsing binaries at G < 17 with ZTF epochs are explained (8 of 60 lie
+south of −30°); the other 8 have a strict period, but the deepest Gaia epoch falls outside its eclipses. Of the 60
+checked non-eclipsing fades, 23 have ZTF epochs and 3 are explained, all three without a DPAC class (among the 11
+short-timescale stars that repeat every 20-42 days).
+
+So `eb_explained` goes into `checks.csv` and the review packet as information, and no star leaves the review on
+it. A strictly periodic long dip and a long-period eclipsing binary differ only in how long the dips last, which is
+the kind of object this search is for. Measuring duration from the folded light curve, rather than from unbroken
+runs of epochs, would tell them apart; it would need its own test. Data: `/mnt/project-files/slow-changes/eb-test/`.
+
 ## Log
+
+- **2026-10-30.** Last checks before DR4. G against BP and RP: passes its pre-written test twice (0 of 300 real
+  changes cut; 54, then 51, of 100 G-only fakes caught) and is a cut on release day. DR3's own fades showed that
+  DPAC drops 2-5% of epochs in one band only, which made one-transit eclipses look like G-only changes; every band
+  comparison now uses transits all three bands have (18% → 2.4% of the strongest natural fades marked). The
+  eclipsing-binary filter runs inside the checks on G and ZTF (44 of 52 DPAC eclipsing binaries explained) but
+  fails its test on repeating long dips (9 of 98 fakes explained), so it informs the review and cuts nothing.
+  NEOWISE's change and trend errors were too small with DR3's few visits; widened (S5).
 
 - **2026-10-30.** Whole search tried on all 11.6 M DR3 stars with light curves (Release day, end to end; PRs #78,
   #79): every step ran without a failed file, slice or fetch; scoring 14.7 ms per star per core. Fixed a period
