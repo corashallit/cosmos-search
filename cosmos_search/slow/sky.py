@@ -167,23 +167,30 @@ def shared_changes(stats, patch, targets=None, target_patch=None, date_cols=("di
         m = (s[c].to_numpy() > s_min) & np.isfinite(s[d].to_numpy())
         events.append(pd.DataFrame({"row": np.flatnonzero(m), "patch": patch[m], "t": s[d].to_numpy()[m]}))
     ev = pd.concat(events, ignore_index=True).drop_duplicates(["row", "t"])
-    out = pd.DataFrame(index=tg.index, data={"n_same_fade": 0, "n_same_rise": 0, "expected": 0.0})
+    n_same = np.zeros((len(date_cols), len(tg)), dtype=np.int64)
+    expected = np.zeros(len(tg))
+    # Row positions of the tested stars per patch, found once: a boolean mask per patch costs N x patches, hours
+    # for 10^7 stars over the whole sky (DR3 trial run, 2026-10-30).
+    where = pd.Series(np.arange(len(tg))).groupby(tpatch).indices
+    dates_tg = [tg[d].to_numpy() for d in date_cols]
+    scores_tg = [tg[c].to_numpy() for c in score_cols]
     for p, e in ev.groupby("patch"):
-        m = tpatch == p
-        if not m.any():
+        idx = where.get(p)
+        if idx is None:
             continue
         t = np.sort(e["t"].to_numpy())
         dates = t[np.r_[True, np.diff(t) > window]]
         n_strong = e["row"].nunique()
-        for k, (d, c) in enumerate(zip(date_cols, score_cols)):
-            mine = tg.loc[m, d].to_numpy()
+        for k in range(len(date_cols)):
+            mine = dates_tg[k][idx]
             ok = np.isfinite(mine)
             cnt = np.where(ok, np.searchsorted(t, np.where(ok, mine, 0) + window, "right")
                            - np.searchsorted(t, np.where(ok, mine, 0) - window, "left"), 0)
             if own_in:  # leave the star's own event out (in the list when its score passed s_min)
-                cnt = np.maximum(cnt - (tg.loc[m, c].to_numpy() > s_min).astype(int), 0)
-            out.loc[m, ["n_same_fade", "n_same_rise"][k]] = cnt
-        out.loc[m, "expected"] = max(n_strong - (1 if own_in else 0), 0) / max(len(dates), 1)
+                cnt = np.maximum(cnt - (scores_tg[k][idx] > s_min).astype(int), 0)
+            n_same[k, idx] = cnt
+        expected[idx] = max(n_strong - (1 if own_in else 0), 0) / max(len(dates), 1)
+    out = pd.DataFrame({"n_same_fade": n_same[0], "n_same_rise": n_same[1], "expected": expected}, index=tg.index)
     for k in ("fade", "rise"):
         n = out[f"n_same_{k}"].to_numpy()
         out[f"shared_{k}"] = (n >= 2) & (poisson.sf(n - 1, np.maximum(out["expected"].to_numpy(), 1e-9)) < p_max)

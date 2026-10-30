@@ -12,6 +12,10 @@ have kept. `flag` adds the rising mirror of each list: getting brighter by the s
 false-alarm estimate the thresholds were set from. `strength` (each score over its threshold, the largest)
 orders the lists; it is not a ranking by value.
 
+`still` marks stars whose parallax and proper motion are both consistent with zero: on the DR3 trial run nearly
+all were quasars (and DR3's AGN class nearly all still), which crowd the top of every list at G >= 19. They go to a
+list of their own, read separately, since stars in other galaxies are still too.
+
 `scripts/slow_search.py` runs the steps on DR4 (bulk files, a mirror or light-curve files) and on DR3 as a trial.
 """
 
@@ -22,6 +26,9 @@ from cosmos_search.slow import detect, drift, period, rule_v3, select
 from cosmos_search.slow.rule import mag_group
 
 KEEP_FRACTION = 0.8   # light curves are kept when a score reaches this fraction of its threshold, either direction
+STILL_P = 1e-3        # parallax and proper motion consistent with zero at this level: `still`
+MOTION_COLUMNS = ("parallax", "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error", "pmra_pmdec_corr",
+                  "parallax_pmra_corr", "parallax_pmdec_corr")
 
 
 def score(lc, cells, table, period_search=True):
@@ -71,7 +78,8 @@ def keep_mask(stats, thr, thr_p, fraction=KEEP_FRACTION):
 def flag(stats, rule_dir=rule_v3.RULE_DIR, shared_flags=None):
     """rule_v3.apply on every scored star, plus the mirror: `rising` (getting brighter by the episode score, its
     change date not shared, or by the trend), `rising_rep` (repeated brightening, which has no repeat conditions
-    and so over-counts), and `strength`.
+    and so over-counts), `strength` (largest of each fading score over its threshold) and `rise_strength` (the same
+    for getting brighter, repeated brightening included).
 
     stats: `score` output for whole sky patches (every scored star of a level-6 HEALPix pixel at once), joined
     with the cells (gbin)."""
@@ -83,9 +91,13 @@ def flag(stats, rule_dir=rule_v3.RULE_DIR, shared_flags=None):
     out["shared_rise"] = sh["shared_rise"].to_numpy()
     out["rising"] = ((s_rise > s_th) & ~out["shared_rise"].to_numpy()) | (slope_z > z_th)
     out["rising_rep"] = stats["s_rep_bright"].to_numpy() > rep_th if "s_rep_bright" in stats else False
-    with np.errstate(invalid="ignore", divide="ignore"):
-        parts = np.vstack([stats["s_fade"].to_numpy() / s_th, -slope_z / z_th, stats["s_rep"].to_numpy() / rep_th])
-    out["strength"] = np.nanmax(np.where(np.isfinite(parts), parts, -np.inf), axis=0)
+    # Episodes past the threshold that the shared-date test set aside (shared_* alone also marks weak changes).
+    out["fade_set_aside"] = (stats["s_fade"].to_numpy() > s_th) & out["shared_fade"].to_numpy()
+    out["rise_set_aside"] = (s_rise > s_th) & out["shared_rise"].to_numpy()
+    s_rise_ns = np.where(out["shared_rise"].to_numpy(), np.nan, s_rise)
+    rep_b = stats["s_rep_bright"].to_numpy() if "s_rep_bright" in stats else np.full(len(stats), np.nan)
+    out["strength"] = _strength(stats["s_fade"].to_numpy() / s_th, -slope_z / z_th, stats["s_rep"].to_numpy() / rep_th)
+    out["rise_strength"] = _strength(s_rise_ns / s_th, slope_z / z_th, rep_b / rep_th)
     for c in ("slow_z", "slope", "dim_depth", "dim_t0", "dim_t1", "dim_visits", "depth_bp", "depth_bp_err",
               "depth_rp", "depth_rp_err", "rep_period", "rep_depth", "rep_band_z", "t_first", "t_last"):
         if c in stats:
@@ -93,9 +105,31 @@ def flag(stats, rule_dir=rule_v3.RULE_DIR, shared_flags=None):
     return out
 
 
+def _strength(*ratios):
+    with np.errstate(invalid="ignore", divide="ignore"):
+        parts = np.vstack(ratios)
+    return np.max(np.where(np.isfinite(parts), parts, -np.inf), axis=0)
+
+
+STRENGTH_STEPS = (1.0, 1.25, 1.5, 2.0, 3.0, 5.0, 10.0)
+
+
+def tail(flags, steps=STRENGTH_STEPS):
+    """Stars getting fainter and, as the false-alarm estimate, getting brighter, above each multiple of the
+    thresholds (strength), per magnitude range. The thresholds are 0.1% points of quiet stars, so over 10^9
+    stars the lists at strength 1 hold millions of chance passes; where the fading count stands clear of the
+    rising one is where a list is worth reading."""
+    out = {}
+    for grp, d in flags.groupby(mag_group(flags["gbin"])):
+        f, r = d["strength"].to_numpy(), d["rise_strength"].to_numpy()
+        out[grp] = {str(x): {"fading": int(np.sum(f > x)), "rising": int(np.sum(r > x))} for x in steps}
+    return out
+
+
 def summary(flags):
     """Per magnitude range: stars scored, the fading list by score, the `early` list, and the rising mirror."""
     out = {}
+    tails = tail(flags) if "rise_strength" in flags else {}
     for grp, d in flags.groupby(mag_group(flags["gbin"])):
         by = d.loc[d["flagged"], "by"]
         out[grp] = {
@@ -107,7 +141,40 @@ def summary(flags):
             "early": int(d["early"].sum()),
             "rising": int(d["rising"].sum()),
             "rising_rep": int(np.sum(d["rising_rep"])),
-            "shared_fade_set_aside": int(d["shared_fade"].sum()),
-            "shared_rise_set_aside": int(d["shared_rise"].sum()),
+            "fade_set_aside_shared_date": int(d["fade_set_aside"].sum()),
+            "rise_set_aside_shared_date": int(d["rise_set_aside"].sum()),
+            "above_strength": tails.get(grp, {}),
         }
     return out
+
+
+def motion(g):
+    """chi2 of (parallax, pmra, pmdec) against zero with their correlations, and `still` (its 3-degree-of-freedom
+    probability above STILL_P). g: gaia_source rows with MOTION_COLUMNS. Two-parameter solutions (no parallax or
+    proper motion) get NaN and are not still.
+
+    On the DR3 trial's 10,000 strongest fading stars at G >= 19, 9,665 of the 9,688 DPAC calls AGN were still and
+    20 of the other 312; at G < 19, 2,367 of 2,376 and 15 of 7,624."""
+    from scipy.stats import chi2
+
+    cols = ["parallax", "pmra", "pmdec"]
+    x = g[cols].to_numpy(float)
+    e = g[[f"{c}_error" for c in cols]].to_numpy(float)
+    r = {k: np.nan_to_num(g[k].to_numpy(float)) for k in ("parallax_pmra_corr", "parallax_pmdec_corr", "pmra_pmdec_corr")}
+    cov = np.empty((len(g), 3, 3))
+    for i in range(3):
+        cov[:, i, i] = e[:, i] ** 2
+    for (i, j), k in (((0, 1), "parallax_pmra_corr"), ((0, 2), "parallax_pmdec_corr"), ((1, 2), "pmra_pmdec_corr")):
+        cov[:, i, j] = cov[:, j, i] = r[k] * e[:, i] * e[:, j]
+    ok = np.isfinite(x).all(axis=1) & np.isfinite(e).all(axis=1)
+    c2 = np.full(len(g), np.nan)
+    if ok.any():
+        c2[ok] = np.einsum("ni,ni->n", x[ok], np.linalg.solve(cov[ok], x[ok][..., None])[..., 0])
+    with np.errstate(invalid="ignore"):
+        still = ok & (chi2.sf(np.where(ok, c2, np.inf), 3) > STILL_P)
+    return pd.DataFrame({"chi2_motion": c2, "still": still}, index=g.index)
+
+
+def tail_moving(flags, still_ids, steps=STRENGTH_STEPS):
+    """`tail` without the still stars."""
+    return tail(flags[~flags["id"].isin(still_ids)], steps)

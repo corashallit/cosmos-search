@@ -434,8 +434,12 @@ def test_search_flags_fades_and_mirrors_rises():
     assert f["early"].tolist() == [False, True, False, False]
     assert f["rising"].tolist() == [False, True, True, False]
     assert f["strength"].iloc[0] == pytest.approx(9.0 / 6.04, rel=0.01)
+    assert f["rise_strength"].iloc[1] == pytest.approx(9.0 / 6.04, rel=0.01)
     s = search.summary(f)
     assert s["G<19"]["fading"] == 1 and s["G<19"]["rising"] == 2 and s["G>=19"]["fading"] == 0
+    assert s["G<19"]["above_strength"]["1.25"] == {"fading": 1, "rising": 2}  # star 12 rises at 5 / 3.94
+    assert s["G<19"]["above_strength"]["1.5"] == {"fading": 0, "rising": 0}
+    assert s["G<19"]["fade_set_aside_shared_date"] == 0 and s["G<19"]["rise_set_aside_shared_date"] == 0
     assert search.keep_mask(stats, *search.rule_v3.load()[:2]).tolist() == [True, True, True, False]
 
 
@@ -453,3 +457,25 @@ def test_period_search_ignores_one_extreme_bright_visit():
     a, b = period.star_scores(tv, quiet, detect.visit_sigma(quiet)), period.star_scores(
         tv, quiet, detect.visit_sigma(quiet), clip=None)
     assert all(a[k] == b[k] or (np.isnan(a[k]) and np.isnan(b[k])) for k in a)
+
+
+def test_motion_marks_only_stars_without_measurable_motion_as_still():
+    from cosmos_search.slow import search
+
+    g = pd.DataFrame({
+        # a quasar, a nearby star, a star with only proper motion, a two-parameter solution, a correlated pair
+        "parallax": [0.05, 5.0, 0.1, np.nan, 0.3],
+        "parallax_error": [0.2, 0.1, 0.2, np.nan, 0.1],
+        "pmra": [-0.1, 20.0, 0.0, np.nan, 0.3],
+        "pmra_error": [0.2, 0.1, 0.1, np.nan, 0.1],
+        "pmdec": [0.2, -3.0, 2.0, np.nan, 0.0],
+        "pmdec_error": [0.2, 0.1, 0.1, np.nan, 0.1],
+        "pmra_pmdec_corr": [0.1, 0.0, 0.0, np.nan, 0.0],
+        "parallax_pmra_corr": [0.0, 0.0, 0.0, np.nan, 0.95],
+        "parallax_pmdec_corr": [0.0, 0.0, 0.0, np.nan, 0.0],
+    })
+    m = search.motion(g)
+    assert m["still"].tolist() == [True, False, False, False, True]
+    assert np.isnan(m["chi2_motion"].iloc[3])
+    # Parallax and pmra 3 sigma each, but 0.95 correlated: together barely beyond the errors (chi2 ~9.2, not 18).
+    assert 8 < m["chi2_motion"].iloc[4] < 10
