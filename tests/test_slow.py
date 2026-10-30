@@ -493,13 +493,13 @@ def test_band_agreement_passes_any_mix_and_flags_g_alone():
     assert z[:3].tolist() == [0.0, 0.0, 0.0]
     assert z[3] > 30 and z[4] < -30 and np.isnan(z[5])
     rows = pd.DataFrame({"strength_by": ["episode", "trend", "trend", "repeat"],
-                         "dim_depth": [0.05, np.nan, np.nan, np.nan], "dim_depth_err": [0.001] * 4,
+                         "depth_g": [0.05, np.nan, np.nan, np.nan], "depth_g_err": [0.001] * 4,
                          "depth_bp": [0.0] * 4, "depth_bp_err": [0.001] * 4, "depth_rp": [0.0] * 4,
                          "depth_rp_err": [0.001] * 4,
-                         "slope": [np.nan, -0.02, -0.02, np.nan], "slope_z": [np.nan, -20.0, -20.0, np.nan],
+                         "slope_g": [np.nan, -0.02, -0.02, np.nan], "slope_g_err": [0.001] * 4,
                          "slope_bp": [np.nan, 0.0, -0.02, np.nan], "slope_bp_err": [0.001] * 4,
                          "slope_rp": [np.nan, 0.0, -0.02, np.nan], "slope_rp_err": [0.001] * 4,
-                         "rep_depth": [np.nan, np.nan, np.nan, 0.0], "rep_depth_err": [0.001] * 4,
+                         "rep_depth_g": [np.nan, np.nan, np.nan, 0.0], "rep_depth_g_err": [0.001] * 4,
                          "rep_depth_bp": [np.nan, np.nan, np.nan, 0.03], "rep_depth_bp_err": [0.001] * 4,
                          "rep_depth_rp": [np.nan, np.nan, np.nan, 0.03], "rep_depth_rp_err": [0.001] * 4})
     v = checks.band_check(rows, blend=[0.0, 0.5, 0.0, 0.0])["band_verdict"].tolist()
@@ -543,10 +543,30 @@ def test_detector_measures_band_slopes_and_repeat_band_depths():
         rows.append(pd.DataFrame({"source_id": 7, "band": code, "t": t, "frac_corr": y}))
     f = detect.star_features(pd.concat(rows, ignore_index=True)).iloc[0]
     assert f["slope_bp"] == pytest.approx(0.0, abs=0.002) and f["slope_rp"] == pytest.approx(-0.02, abs=0.002)
-    assert 0 < f["slope_bp_err"] < 0.002
+    assert f["slope_g"] == pytest.approx(-0.02, abs=0.002) and 0 < f["slope_bp_err"] < 0.002
     tv = np.arange(0, 1000, 20.0)
     yv = np.where((tv % 100) < 25, -0.05, 0.0) + rng.normal(0, 0.002, len(tv))   # two visits in five, every 100 d
-    bands = [(tv, yv * 0.5, 0.002), (tv, yv, 0.002)]
-    out = period.star_scores(tv, yv, 0.002, bands=bands, band_names=["bp", "rp"])
-    assert out["rep_depth"] == pytest.approx(0.05, abs=0.01)
+    same = [("g", tv, yv, 0.002), ("bp", tv, yv * 0.5, 0.002), ("rp", tv, yv, 0.002)]
+    out = period.star_scores(tv, yv, 0.002, same=same)
+    assert out["rep_depth"] == pytest.approx(0.05, abs=0.01) and out["rep_depth_g"] == pytest.approx(0.05, abs=0.01)
     assert out["rep_depth_bp"] == pytest.approx(0.025, abs=0.005) and out["rep_depth_rp"] == pytest.approx(0.05, abs=0.01)
+
+
+def test_band_depths_use_only_transits_all_three_bands_have():
+    from cosmos_search.slow import checks, detect
+
+    # a grey 30-day dip; DPAC dropped BP and RP on the two deepest transits, which G kept
+    t = np.arange(0.0, 1200.0, 30.0)
+    y = np.where((t >= 600) & (t < 660), -0.10, 0.0)
+    y[t == 630] = -0.30
+    rows = []
+    for code in (0, 1, 2):
+        keep = np.ones(len(t), bool) if code == 0 else t != 630
+        rows.append(pd.DataFrame({"source_id": 3, "band": code, "t": t[keep], "frac_corr": y[keep],
+                                  "transit_id": np.arange(len(t))[keep]}))
+    ep = pd.concat(rows, ignore_index=True)
+    f = detect.star_features(ep).assign(strength_by="episode")
+    assert f["depth_g"].iloc[0] == pytest.approx(f["depth_bp"].iloc[0])
+    assert checks.band_check(f, [0.0])["band_verdict"].iloc[0] == "agree"
+    f = detect.star_features(ep.drop(columns="transit_id")).assign(strength_by="episode")
+    assert f["depth_g"].iloc[0] > f["depth_bp"].iloc[0] + 0.05      # without matching, G alone looks deeper

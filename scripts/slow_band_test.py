@@ -31,7 +31,7 @@ from cosmos_search.vetting import power  # noqa: E402
 AUX_DR3 = "/mnt/project-files/data/gaia-dr3-epoch/aux/aux_gaia_source.parquet"
 BLEND = "/mnt/project-files/data/gaia-dr3-epoch/aux/aux_blend.parquet"
 EXCLUDE = "/mnt/project-files/dayone/rehearsal-inputs/exclude/all_used_ids.txt"
-CLASSES = "/home/user/trial/classes/classes.parquet"
+CLASSES = "/mnt/project-files/data/gaia-dr3-epoch/aux/aux_classes.parquet"  # DR3 vari_classifier_result
 SHAPES = ("long_dip", "ramp_fade", "secular_fade", "staircase_fade", "accelerating_fade", "repeat_long_dip")
 REAL = ("grey", "dust", "reemit", "temperature")
 # (group, flavour, number, hosts, lowest and highest S/N), as written in the doc before the draw

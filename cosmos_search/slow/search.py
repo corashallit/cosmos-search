@@ -27,8 +27,8 @@ from cosmos_search.slow.rule import mag_group
 
 KEEP_FRACTION = 0.8   # light curves are kept when a score reaches this fraction of its threshold, either direction
 # G, BP and RP changes behind `checks.band_check` (dim_depth and the rest of the episode's are copied anyway).
-BAND_COLUMNS = ("dim_depth_err", "slope_bp", "slope_bp_err", "slope_rp", "slope_rp_err", "rep_depth_err",
-                "rep_depth_bp", "rep_depth_bp_err", "rep_depth_rp", "rep_depth_rp_err")
+BAND_COLUMNS = ("dim_depth_err", "rep_depth_err", "depth_g", "depth_g_err",
+                *(f"{k}_{b}{x}" for k in ("slope", "rep_depth") for b in ("g", "bp", "rp") for x in ("", "_err")))
 STILL_P = 1e-3        # parallax and proper motion consistent with zero at this level: `still`
 MOTION_COLUMNS = ("parallax", "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error", "pmra_pmdec_corr",
                   "parallax_pmra_corr", "parallax_pmdec_corr")

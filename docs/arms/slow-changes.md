@@ -235,7 +235,18 @@ answer differently:
 
 ZTF says whether a change went on, stopped or recovered after DR4's span. NEOWISE comes from IRSA's
 `neowiser_p1bs_psd` single exposures (clean frames, one component, no contamination flags), averaged per ~6-month
-visit. Position during the episode (`astrometry.dips`) needs DR4's epoch astrometry and is not in yet.
+visit. Position during the episode (`astrometry.dips`) needs DR4's epoch astrometry and is not in yet. Two more
+checks came later: whether G's change agrees with BP's and RP's (`band_check`, "G against BP and RP" below) and
+whether an eclipsing binary explains the dips (`eclipse`, "Eclipsing binaries among the candidates" below).
+
+**NEOWISE errors (2026-10-30).** Both NEOWISE errors come from the scatter between visits, and DR3's 2.8 years give
+3-6 visits outside a change: too few to measure a scatter. On the 280 calibration stars (vetting.md §14), with no
+change injected, windows of 1-3 visits sat beyond 2 errors 9-12% of the time and beyond 3 errors 2-3% (a Gaussian
+gives 4.6% and 0.3%); W1 trends over 4-8 visits 14-22% and 6-11%. Now the sample scatter is widened by Student's t
+for the visits it rests on, held at or above 1.36 times the scatter within visits (the median ratio over those
+stars, `WISE_FLOOR`), and the change's error counts the baseline's own error. The same windows then sit beyond 2
+errors 2.8% (quiet stars) and 5.2% (variable stars) of the time, and beyond 3 errors 0.5% and 1.1%; trends 1.3% and
+6.1%, 0.03% and 2.5%. Variable stars keep a heavier tail from their own slow variability.
 
 Run on 2026-10-23 on the 40 strongest DR3 candidates at G < 17 (30 dimming episodes with smooth light curves,
 10 fading trends). Every one carries a DPAC variability class: eclipsing binaries, RS CVn and other spotted stars,
@@ -655,9 +666,12 @@ sits on 3 stars beyond the 0.1% point. That is the case for ~25,000 quiet stars 
    galaxies), which are read as a list of their own, and adds whether each fade's G change agrees with BP and RP
    (`band_verdict`, "G against BP and RP" below). `L/cuts_summary.json` has the fading and rising counts above each
    strength without the still stars, and the fading list's band verdicts.
-8. Reading: from the top of the fading list down to where it stops standing clear of the rising list. Eclipsing
-   binaries come out first (DR4's classes, then the eclipsing-binary filter for stars flagged by the repeat score),
-   then the checks: `slow_checks.py --fading L/fading.parquet --out L/checks --skip-still --skip-band --skip-class ECL --n 1000`.
+8. Reading: from the top of the fading list down to where it stops standing clear of the rising list. The checks:
+   `slow_checks.py --fading L/fading.parquet --lightcurves R/lightcurves --out L/checks --skip-still --skip-band
+   --skip-class ECL --n 1000`. DR4's eclipsing-binary class is left out first; `--lightcurves` adds the
+   eclipsing-binary filter on G and ZTF (`eb_explained`), and explained stars move to the eclipsing-binary list.
+   Stars marked `g_only` or `bp_rp_only` are not checked but stay on the fading list with their verdict and are
+   read after the rest, as the still stars are.
 
 ### Trial on all of DR3 (2026-10-30)
 
@@ -747,9 +761,8 @@ north of -30°.
 of the 77 alerts were raised in 2018-2020, after DR3's light curves end (May 2017), so this measures little. DY Per
 stars 6 of 8, R CrB stars 17 of 41 (18 more on the rising list, recovering from a decline), UX Ori stars 12 of 67.
 
-**Still to do before DR4.** A check of G's change against BP's and RP's (docs/vetting.md §14). The
-eclipsing-binary filter run in bulk on stars flagged by the repeat score. Neither blocks the run order above.
-Both are under way (below).
+**Still to do before DR4** (as of the trial). A check of G's change against BP's and RP's (docs/vetting.md §14),
+and the eclipsing-binary filter on the candidates. Both done the same day (below), with NEOWISE's errors (S5).
 
 ## G against BP and RP (written 2026-10-30, before any fake is drawn)
 
@@ -809,6 +822,38 @@ and of the 2,000 strongest (no still stars), by DPAC class.
 **What each outcome leads to.** B1 and B2 pass: `--skip-band` is part of the release-day run before the review.
 B1 fails: the check is shown to reviewers as a number, never used as a cut, and the misses are read. B2 fails with
 B1 passing: the cut is still used (it costs nothing real), with its low recall stated.
+
+**Result (2026-10-30).** Both pass, twice: before and after a fix that DR3's own stars called for.
+
+| Group | Fakes | First run | After the fix |
+|---|---|---|---|
+| Grey, dust, re-emitting dust, a cooling star (S/N ≥ 20) | 300 | 0 cut | 0 cut |
+| Grey, S/N 6-20 | 100 | 1 `g_only` | 0 cut |
+| G alone, unblended host | 100 | 54 `g_only` | 51 `g_only` |
+| G alone, blended host | 50 | 25 `untested`, 25 `agree` | 22 `untested`, 28 `agree` |
+| A neighbour | 50 | 23 `bp_rp_only` | 20 `bp_rp_only` |
+
+B1: 0 of 300 cut, upper bound 1.0% (≤ 2%: pass). B2: 54, then 51, of 100 marked, lower bounds 45% and 42% (≥ 30%:
+pass). G-only fakes are caught 38 of 54 times at G < 17 and 13 of 46 at G ≥ 17, where BP's and RP's own noise
+hides a missing change, and more often for episodes (31 of 53) than trends (17 of 41).
+
+*What DR3's stars showed.* In the first run the check marked 362 of the 2,000 strongest natural fades (18%) and 35
+of 3,000 random ones as G-only, 309 of them DPAC eclipsing binaries. Their raw transits show G, BP and RP falling
+together. Two faults in our measurement made the bands differ. DPAC rejects 2-5% of epochs in one band and not
+the others, no more often in a dip than outside one (measured on 600 of these stars); a dip seen in one or two
+transits that lost its BP or RP epoch then reads as G alone. Fakes cannot show this, since they are injected into
+the epochs that survived. And BP's and RP's visits at an episode's edges fell outside a window set by G's visit
+times, which differ from theirs by minutes, while the repeat score detrended BP and RP without the clipping G
+gets, so deep dips tilted their lines. Now every band comparison (this check and the colour of the change) uses
+only transits that all three bands have (`detect.same_transits`), the window is widened by half the visit gap, and
+BP and RP are detrended as G is. The test then ran again from the same seed (the kept fakes differ a little: each
+slot keeps whichever fake finishes first). Natural fades after the fix: 47 of the strongest 2,000 (2.4%: 32
+eclipsing binaries, 7 long-period variables, 4 cataclysmic variables) and 16 of 3,000 random (0.5%) marked G-only;
+1 and 6 BP/RP-only.
+
+So, as written above, `--skip-band` is part of the release-day run. The stars it skips are at these rates real
+variables as well as instrument faults, so they stay on the fading list with their verdict and are read after the
+rest. Data: `/mnt/project-files/slow-changes/band-test/`.
 
 ## Eclipsing binaries among the candidates (written 2026-10-30, before any fake is drawn)
 

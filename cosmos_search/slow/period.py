@@ -325,13 +325,13 @@ def _detrend(tv, yv, sigma=None, clip=None):
     return yv - yk.mean() - slope * (tv - tk.mean())
 
 
-def star_scores(tv, yv, sigma, top=TOP_PERIODS, bands=(), clip=DETREND_CLIP, band_names=None):
+def star_scores(tv, yv, sigma, top=TOP_PERIODS, bands=(), clip=DETREND_CLIP, same=None):
     """s_rep (best window among the top periods that passes the repeat conditions of `events`), its period, depth,
     length and events, and s_rep_bright (best repeated brightening, no event condition: the false-alarm estimate is
     deliberately conservative). rep_band_z and rep_bright_band_z: the BP and RP visits at the times of the chosen
-    windows (`band_z`), reported for checking a candidate; no rule uses them. rep_depth_err, rep_depth_bp and
-    rep_depth_rp (and errors; `band_depths`, bands named by `band_names`, default bp then rp) are for
-    `checks.band_agreement`.
+    windows (`band_z`), reported for checking a candidate; no rule uses them. rep_depth_g, rep_depth_bp and
+    rep_depth_rp (and errors; `band_depths` on `same`, a list of (name, visit times, visit means, sigma), each band
+    from the transits all three bands have, as `detect.same_transits`) are for `checks.band_agreement`.
 
     The visits are first detrended with a straight line fitted to those within `clip` sigma of the median. On the
     DR3 trial run (2026-10-30) a single visit far above the rest (a flare, an outburst or a bad measurement, up to
@@ -341,7 +341,7 @@ def star_scores(tv, yv, sigma, top=TOP_PERIODS, bands=(), clip=DETREND_CLIP, ban
     out = {"s_rep": np.nan, "rep_period": np.nan, "rep_depth": np.nan, "rep_depth_err": np.nan, "rep_visits": 0,
            "rep_events": 0, "rep_between_z": np.nan, "rep_rest_z": np.nan,
            "s_rep_any": np.nan, "s_rep_bright": np.nan, "rep_band_z": np.nan, "rep_bright_band_z": np.nan,
-           "rep_depth_bp": np.nan, "rep_depth_bp_err": np.nan, "rep_depth_rp": np.nan, "rep_depth_rp_err": np.nan}
+           **{f"rep_depth_{n}{x}": np.nan for n in ("g", "bp", "rp") for x in ("", "_err")}}
     span = tv[-1] - tv[0]
     freqs = freq_grid(span)
     y = _detrend(tv, yv, sigma, clip)
@@ -350,7 +350,8 @@ def star_scores(tv, yv, sigma, top=TOP_PERIODS, bands=(), clip=DETREND_CLIP, ban
         return out
     out["s_rep_any"], out["s_rep_bright"] = float(r["dim"].max()), float(r["bright"].max())
     dev = y - np.median(y)
-    bands = [(tb, _detrend(tb, yb), sb) for tb, yb, sb in bands]
+    bands = [(tb, _detrend(tb, yb, sb, clip), sb) for tb, yb, sb in bands]  # as G, or deep dips tilt the line
+    same = [(n, tb, _detrend(tb, yb, sb, clip), sb) for n, tb, yb, sb in same or ()]
     if bands:
         i = int(np.argmax(r["bright"]))
         out["rep_bright_band_z"] = band_z(tv[_window(r["order"][i], r["b_start"][i], r["b_length"][i])], bands, -1.0)
@@ -365,7 +366,8 @@ def star_scores(tv, yv, sigma, top=TOP_PERIODS, bands=(), clip=DETREND_CLIP, ban
                        rep_depth_err=float(sigma * np.sqrt(1 / len(idx) + np.pi / 2 / max(len(tv) - len(idx), 1))))
             if bands:
                 out["rep_band_z"] = band_z(tv[idx], bands)
-                out.update(band_depths(tv[idx], bands, band_names or ("bp", "rp")[:len(bands)]))
+            if same:
+                out.update(band_depths(tv[idx], [x[1:] for x in same], [x[0] for x in same]))
             break
     return out
 
@@ -374,6 +376,7 @@ def star_features(epochs, col="frac_corr"):
     """One row per star with the period-search scores (G visits, as `detect.star_features`)."""
     e = epochs.sort_values(["source_id", "band", "t"], kind="stable")
     sid, band, t, y = e["source_id"].to_numpy(), e["band"].to_numpy(), e["t"].to_numpy(), e[col].to_numpy()
+    tid = e["transit_id"].to_numpy() if "transit_id" in e else None
     starts = np.flatnonzero(np.r_[True, sid[1:] != sid[:-1]])
     ends = np.r_[starts[1:], len(sid)]
     rows = []
@@ -389,8 +392,12 @@ def star_features(epochs, col="frac_corr"):
         if 0 not in per:
             continue
         tv, yv, sg = per[0]
-        have = [c for c in (1, 2) if c in per]
+        same = []
+        for name, m in detect.same_transits(band[a:b], tid[a:b] if tid is not None else None, a).items():
+            if len(m) >= detect.MIN_VISITS:
+                ts, ys = detect.visits(t[m], y[m])
+                if len(ts) >= detect.MIN_VISITS:
+                    same.append((name, ts, ys, detect.visit_sigma(ys)))
         rows.append({"source_id": int(sid[a]),
-                     **star_scores(tv, yv, sg, bands=[per[c] for c in have],
-                                   band_names=[{1: "bp", 2: "rp"}[c] for c in have])})
+                     **star_scores(tv, yv, sg, bands=[per[c] for c in (1, 2) if c in per], same=same)})
     return pd.DataFrame(rows)

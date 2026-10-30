@@ -21,9 +21,13 @@ pass simply for being variable; it passes only if its slow component stands out 
   distribution is the false-alarm estimate for `s_dim` (statistics.md §2). Runs are capped at
   MAX_EPISODE_FRACTION of the visits so the median stays a baseline.
 - `depth_bp`, `depth_rp` (and errors): the mean BP and RP deficits over the G episode's time window, for the
-  colour of the change. Grey bodies give equal fractional depths; dust gives depth_bp > depth_rp. `dim_depth_err`
-  is G's error on the same footing, and `slope_bp`, `slope_rp` (and errors) the BP and RP trends over their own
-  visits, so G's change can be checked against BP's and RP's (`checks.band_agreement`).
+  colour of the change. Grey bodies give equal fractional depths; dust gives depth_bp > depth_rp. `depth_g` is
+  G's on the same footing, and `slope_g`, `slope_bp`, `slope_rp` (and errors) each band's trend over its own
+  visits, so G's change can be checked against BP's and RP's (`checks.band_agreement`). All of these use only
+  transits measured in all three bands: DPAC rejects 2-5% of epochs in one band and not the others (no more often
+  in a dip than outside one, on the DR3 trial), and for a dip seen in one or two transits a missing BP or RP epoch
+  alone made eclipses read as G-only changes (2026-10-30). `dim_depth_err` is the error of `dim_depth` (all G
+  epochs).
 
 Which level is the star's normal one. `s_dim` measures runs against the median, so it takes the level the star
 spends most of its visits at as normal. A star that brightens for good partway through, and spends more than half
@@ -165,16 +169,29 @@ def _band_slope(t, y):
 
 def _band_depth(t, y, t0, t1):
     """Mean deficit of one band's visits inside [t0, t1] against the median of its visits outside, and its
-    error."""
+    error. t0 and t1 are G visit times; a BP or RP visit's mean time can differ from G's by minutes (an epoch kept
+    in one band and not the other), so the window is widened by half the visit gap. Without that, the DR3 trial's
+    one-visit eclipses lost their first or last visit in BP and RP and read as G-only changes (2026-10-30)."""
     if len(t) < MIN_VISITS:
         return np.nan, np.nan
     tv, yv = visits(t, y)
-    inside = (tv >= t0) & (tv <= t1)
+    inside = (tv >= t0 - VISIT_GAP_DAYS / 2) & (tv <= t1 + VISIT_GAP_DAYS / 2)
     if inside.sum() < 1 or (~inside).sum() < 1:
         return np.nan, np.nan
     sig = visit_sigma(yv)
     return (float(np.median(yv[~inside]) - yv[inside].mean()),
             float(sig * np.sqrt(1 / inside.sum() + np.pi / 2 / (~inside).sum())))
+
+
+def same_transits(bands, transit_ids, offset=0):
+    """Row positions (plus offset) of each band, {"g", "bp", "rp"}, keeping only transits that all three bands
+    have; every row of each band when transit ids are not given."""
+    rows = {name: np.flatnonzero(bands == code) for code, name in ((0, "g"), (1, "bp"), (2, "rp"))}
+    if transit_ids is not None:
+        common = np.intersect1d(np.intersect1d(transit_ids[rows["g"]], transit_ids[rows["bp"]]),
+                                transit_ids[rows["rp"]])
+        rows = {k: r[np.isin(transit_ids[r], common)] for k, r in rows.items()}
+    return {k: r + offset for k, r in rows.items()}
 
 
 def star_features(epochs, col="frac_corr"):
@@ -184,6 +201,7 @@ def star_features(epochs, col="frac_corr"):
     band = e["band"].to_numpy()
     t = e["t"].to_numpy()
     y = e[col].to_numpy()
+    tid = e["transit_id"].to_numpy() if "transit_id" in e else None
     starts = np.flatnonzero(np.r_[True, sid[1:] != sid[:-1]])
     ends = np.r_[starts[1:], len(sid)]
     rows = []
@@ -210,8 +228,8 @@ def star_features(epochs, col="frac_corr"):
                "s_dim": s_dim, "s_bright": s_br, "s_fade": s_fade, "s_rise": s_rise, "fade_kind": kind,
                "rise_kind": rkind, "rise_t0": r0, "rise_t1": r1,
                "dim_depth": np.nan, "dim_depth_err": np.nan, "dim_t0": np.nan, "dim_t1": np.nan, "dim_visits": 0,
-               "depth_bp": np.nan, "depth_bp_err": np.nan, "depth_rp": np.nan, "depth_rp_err": np.nan}
-        band_rows = {name: np.flatnonzero(bb == code) + a for code, name in ((1, "bp"), (2, "rp"))}
+               **{f"depth_{n}{x}": np.nan for n in ("g", "bp", "rp") for x in ("", "_err")}}
+        band_rows = same_transits(bb, tid[a:b] if tid is not None else None, a)
         for name, m in band_rows.items():
             row[f"slope_{name}"], row[f"slope_{name}_err"] = _band_slope(t[m], y[m])
         if kind:
