@@ -33,8 +33,8 @@ and `rule-*/` (release.json, drift_table.parquet, stats.parquet).
 3. Other figures: the plot functions take plain DataFrames, and `style.render(fn, stem, ...)` draws any of them in
    both themes. `sheet.py` shows the calls for the standard set.
 
-The page inlines every figure as SVG in both themes, about 0.2 MB per figure pair and 0.7 MB for the DPAC-class
-figure. Keep a page under about 15 stars (the Artifact limit is 16 MB) or split it.
+The page inlines every figure as SVG in both themes, about 0.5 MB per star (the DR3 gallery is 4.7 MB). Keep a
+page under about 25 stars (the Artifact limit is 16 MB) or split it.
 
 ## Figures
 
