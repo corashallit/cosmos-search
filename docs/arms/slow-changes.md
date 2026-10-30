@@ -810,6 +810,34 @@ and of the 2,000 strongest (no still stars), by DPAC class.
 B1 fails: the check is shown to reviewers as a number, never used as a cut, and the misses are read. B2 fails with
 B1 passing: the cut is still used (it costs nothing real), with its low recall stated.
 
+## Eclipsing binaries among the candidates (written 2026-10-30, before any fake is drawn)
+
+**Why.** On the DR3 trial 82% of the 1,000 strongest fades at G < 19 are DPAC eclipsing binaries, and 11 of the 60
+strongest that DPAC does not call one repeat every 20-42 days with dips of 16-34%, most likely unlabelled
+eclipsing binaries. The project's own filter (`ebfilter`, docs/arms/eb-filter.md) asks whether one strict period
+explains which epochs are in dip, and whether the dips are short enough for two stars at that period. With Gaia's
+~40 DR3 epochs alone it explains almost nothing (≤ 2%, an information limit): it needs ZTF (dec > −30°). So it runs
+inside the candidate checks, which fetch ZTF anyway: `slow_checks.py --lightcurves R/lightcurves` reads each
+candidate's G epochs from the run's kept light curves and adds `eb_explained` (and the period, bits saved and
+whether the period is unphysical for an eclipse) to checks.csv. The selected dip is the deepest G epoch, as in
+the filter's own calibration, and the threshold stays at its frozen 7 bits. Explained stars leave the review for
+the eclipsing-binary list.
+
+**Test.** Fakes in quiet hosts at G < 19 from the DR3 trial's sky patches, north of −30° with at least 100 ZTF
+epochs, each host used once and none used by the G-against-BP-and-RP test: 50 repeating long dips and 50 drawn
+uniformly from the other five shapes (long dip, late-starting fade, steady fade, staircase fade, accelerating
+fade), grey, injected into Gaia's raw epochs and the host's ZTF epochs (repeating dips keep repeating through ZTF's
+years), kept if the trial thresholds flag them at S/N ≥ 20.
+
+- **E1** (keeps real slow changes): fakes explained as eclipsing binaries, upper bound (one-sided 95%) ≤ 5%, i.e.
+  at most 1 of 100.
+
+Reported: explained share of DPAC eclipsing binaries among the strongest fades north of −30° (G < 17, 60 stars,
+with ZTF), and of the 60 strongest non-eclipsing fades already checked in the trial.
+
+**What each outcome leads to.** E1 passes: explained stars leave the review. E1 fails: the verdict is shown to the
+reviewer only, and the fakes it explained are read.
+
 ## Log
 
 - **2026-10-30.** Whole search tried on all 11.6 M DR3 stars with light curves (Release day, end to end; PRs #78,
