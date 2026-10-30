@@ -657,6 +657,7 @@ sits on 3 stars beyond the 0.1% point. That is the case for ~25,000 quiet stars 
 8. Reading: from the top of the fading list down to where it stops standing clear of the rising list. Eclipsing
    binaries come out first (DR4's classes, then the eclipsing-binary filter for stars flagged by the repeat score),
    then the checks: `slow_checks.py --fading L/fading.parquet --out L/checks --skip-still --skip-class ECL --n 1000`.
+9. Figures for the stars worth showing: `viz_candidates.py figures --run ... --ids ...` (docs/viz.md).
 
 ### Trial on all of DR3 (2026-10-30)
 
