@@ -21,7 +21,7 @@ Why slow changes lead: Gaia's ~90 visits over 5.5 years catch a 1-day dip on ~2%
 90-100% of changes longer than ~100 days and measure a star's trend to a few hundredths of a percent per year.
 
 Shared infrastructure: archive client and Gaia access ([docs/infra/](docs/infra/)), injection and blinding
-([docs/blinding.md](docs/blinding.md)), statistics ([docs/statistics.md](docs/statistics.md)), vetting ([docs/vetting.md](docs/vetting.md)).
+([docs/blinding.md](docs/blinding.md)), statistics ([docs/statistics.md](docs/statistics.md)), vetting ([docs/vetting.md](docs/vetting.md)), release-day figures ([docs/viz.md](docs/viz.md)).
 
 ## Start here
 

@@ -673,6 +673,7 @@ sits on 3 stars beyond the 0.1% point. That is the case for ~25,000 quiet stars 
    information (its test failed for repeating long dips, "Eclipsing binaries among the candidates" below).
    Stars marked `g_only` or `bp_rp_only` are not checked but stay on the fading list with their verdict and are
    read after the rest, as the still stars are.
+9. Figures for the stars worth showing: `viz_candidates.py figures --run ... --ids ...` (docs/viz.md).
 
 ### Trial on all of DR3 (2026-10-30)
 
