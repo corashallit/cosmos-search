@@ -1,6 +1,7 @@
 # Release-day figures
 
-Code: `cosmos_search/viz/`, driven by `scripts/viz_candidates.py`. Gallery of DR3 examples: see the log below.
+Code: `cosmos_search/viz/`, driven by `scripts/viz_candidates.py`. Gallery of DR3 examples (private to the
+project): https://claude.ai/artifact/SANH9rfcwL9Gi2XKopRUkQ
 
 The figures answer, for one star at a time, what Gaia saw, how unusual that is among ordinary stars, which known
 kind of variable it resembles, and what the change looks like across wavelengths. They are drawn in the style of
@@ -77,4 +78,6 @@ class. In DR4 every star has a light curve and the comparison sample is the whol
 
 - 2026-10-30: built; gallery of six real DR3 stars (spotted, eclipsing binary, quasar, Be, long-period, R CrB),
   two injected fakes (1% a year grey fade, 2% grey dimming episode over 300 days), a short dip on an eclipsing
-  binary and Gaia BH3 from the DR4 pre-release. Reference data: /mnt/project-files/viz/ref-dr3/.
+  binary and Gaia BH3 from the DR4 pre-release. Reference data: /mnt/project-files/viz/ref-dr3/. Rebuild with
+  `viz_candidates.py gallery --run /mnt/project-files/slow-changes/trial-dr3 --ref /mnt/project-files/viz/ref-dr3
+  --out OUT --features ... --aux ... --orbits /mnt/project-files/astrometry/dr3/orbits_kb.parquet --artifact`.
