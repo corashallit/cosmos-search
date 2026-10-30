@@ -1,14 +1,16 @@
 """Run the per-candidate checks (cosmos_search.slow.checks) on the strongest stars of a search's fading list.
 
     python scripts/slow_checks.py --fading R/fading.parquet --out R/checks [--n 100] [--schema gaiadr4] [--max-g 17]
-        [--skip-class ECL] [--skip-still] [--skip-band] [--workers 6]
+        [--skip-class ECL] [--skip-still] [--skip-band] [--workers 6] [--lightcurves R/lightcurves]
 
 --fading is the list `scripts/slow_search.py flag` writes (ordered by strength). For each of the first --n stars
 (optionally only those brighter than --max-g): gaia_source astrometry and quality columns and DPAC's variability
 class, the colour of the change, NEOWISE W1/W2 against what each explanation predicts (inside the faint window
 against outside for an episode, the slope over the light curve's years for a trend; a repeating dimming has no
 single window and gets neither), and ZTF levels before and after 2020-01-20. Writes checks.csv (one row per star)
-and the raw NEOWISE and ZTF epochs. A failed fetch is recorded and the next star goes on. Stars are checked
+and the raw NEOWISE and ZTF epochs. With --lightcurves, also whether a strict-period eclipsing binary explains the
+dips on G and ZTF together (`checks.eclipse`; `eb_explained` stars leave the review). A failed fetch is recorded and
+the next star goes on. Stars are checked
 --workers at a time: one star's NEOWISE and ZTF fetches take one to two minutes, so 10^3 candidates one after
 another would take over a day.
 """
@@ -27,7 +29,7 @@ from cosmos_search.gaia.archive import tap
 from cosmos_search.net.tap import Tap
 from cosmos_search.slow import checks
 
-GAIA_COLS = ("source_id, ra, dec, pmra, pmdec, parallax, ref_epoch, phot_g_mean_mag, bp_rp, ruwe, "
+GAIA_COLS = ("source_id, ra, dec, pmra, pmdec, parallax, parallax_error, ref_epoch, phot_g_mean_mag, bp_rp, ruwe, "
              "ipd_frac_multi_peak, phot_bp_rp_excess_factor")
 
 
@@ -58,8 +60,32 @@ def at_2019(r):
     return (r.ra + pmra * dt / 3.6e6 / np.cos(np.radians(r.dec)), r.dec + pmdec * dt / 3.6e6)
 
 
-def check_one(r, irsa):
-    """The checks for one candidate: (row, NEOWISE epochs, ZTF epochs or None) with fetch times."""
+def g_epochs(lightcurves, ids):
+    """Good G epochs (source_id, t, flux relative to the median) of the given stars from a directory of light-curve
+    files (epoch.SCHEMA, e.g. the kept light curves of `slow_search.py score`), found by each file's source_id
+    range."""
+    import pyarrow.parquet as pq
+
+    from cosmos_search.slow import drift
+
+    files = sorted(Path(lightcurves).glob("*.parquet"))
+    ids = np.sort(np.asarray(ids, np.int64))
+    out = []
+    for f in files:
+        md = pq.read_metadata(f)
+        col = md.schema.to_arrow_schema().get_field_index("source_id")
+        st = [md.row_group(i).column(col).statistics for i in range(md.num_row_groups)]
+        mine = ids[(ids >= min(x.min for x in st)) & (ids <= max(x.max for x in st))]
+        if len(mine):
+            ep = drift.normalise(pq.read_table(f, filters=[("source_id", "in", [int(x) for x in mine])]))
+            ep = ep[ep["band"] == 0]
+            out.append(pd.DataFrame({"source_id": ep["source_id"], "t": ep["t"], "flux": 1 + ep["frac"]}))
+    return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=["source_id", "t", "flux"])
+
+
+def check_one(r, irsa, g=None):
+    """The checks for one candidate: (row, NEOWISE epochs, ZTF epochs or None) with fetch times. g: its G epochs,
+    for the eclipsing-binary check (`checks.eclipse`, on G and ZTF together)."""
     episode = "episode" in r.by
     row = {"source_id": r.source_id, "by": r.by, "strength": r.strength, "g": r.phot_g_mean_mag,
            "bp_rp": r.bp_rp, "class": r.best_class_name, "ruwe": r.ruwe, "ipd_multi": r.ipd_frac_multi_peak,
@@ -103,6 +129,12 @@ def check_one(r, irsa):
         for b, v in checks.after(z).items():
             row[f"{b}_change_after_2020"] = v["change"]
             row[f"{b}_slope_after_2020"] = v["slope_post_per_yr"]
+    if g is not None and len(g):
+        src = {k: getattr(r, k) for k in ("phot_g_mean_mag", "bp_rp", "parallax", "parallax_error")}
+        try:
+            row.update(checks.eclipse(g, z if z is not None else external._empty(), src))
+        except Exception as e:  # noqa: BLE001
+            row["errors"] += f"eclipse: {e!r:.120}; "
     return row, w.assign(source_id=r.source_id), z
 
 
@@ -120,6 +152,8 @@ def main(argv=None):
     ap.add_argument("--skip-band", action="store_true",
                     help="leave out fades whose G change disagrees with BP and RP (`slow_search.py cuts`)")
     ap.add_argument("--workers", type=int, default=6, help="stars checked at once (IRSA and ZTF fetches)")
+    ap.add_argument("--lightcurves", help="the run's kept light curves (`slow_search.py score` R/lightcurves): adds "
+                                          "the eclipsing-binary check on G and ZTF")
     a = ap.parse_args(argv)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -139,11 +173,13 @@ def main(argv=None):
             break
         pool *= 4
     irsa = Tap(checks.IRSA_TAP, job_slots=a.workers)
+    gep = g_epochs(a.lightcurves, cand["source_id"]) if a.lightcurves else None
+    g_of = dict(tuple(gep.groupby("source_id"))) if gep is not None else {}
 
     rows, wise_all, ztf_all = [], [], []
     t0 = time.time()
     with ThreadPoolExecutor(a.workers) as ex:
-        futs = {ex.submit(check_one, r, irsa): r for r in cand.itertuples(index=False)}
+        futs = {ex.submit(check_one, r, irsa, g_of.get(r.source_id)): r for r in cand.itertuples(index=False)}
         for fut in as_completed(futs):
             r = futs[fut]
             row, w, z = fut.result()

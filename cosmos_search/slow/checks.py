@@ -12,6 +12,8 @@ Each check turns one question into numbers that a natural explanation predicts d
   far less than G (Rayleigh-Jeans side).
 - `wise_slope`: for a steady fade, the W1/W2 trend over the same years, to compare with Gaia's slope.
 - `after`: ZTF from 2018 on, inside and past DR4's end (2020-01-20): did the change go on, stop or recover?
+- `eclipse`: whether a strict-period eclipsing binary explains the dips (`ebfilter`, on G and ZTF together; Gaia
+  alone is too sparse for it).
 - `band_agreement`, `band_check`: whether G's change agrees with BP's and RP's. G's passband spans both, so any
   change in the source's own light changes G by a flux-weighted mix of the BP and RP changes,
   d_G = w d_BP + (1 - w) d_RP with w (BP's share of the G signal) in [0.1, 0.9] from M dwarfs to A stars, whatever
@@ -106,6 +108,29 @@ def band_check(rows, blend, k=BAND_K):
     v[(z > k) & (blend < BLEND_MAX)] = "g_only"
     v[z < -k] = "bp_rp_only"
     return pd.DataFrame({"band_z": z, "band_verdict": v}, index=rows.index)
+
+
+EB_KEYS = ("explained", "periodic_unphysical", "delta_bits", "period", "duration_ok", "n_dip_epochs", "n_epochs")
+
+
+def eclipse(g, ztf, source):
+    """`ebfilter.decide` on a candidate's G epochs (t, flux) and ZTF epochs (band, t, flux, err; each ZTF object at
+    its own median), with the deepest G epoch as the selected dip. source: phot_g_mean_mag, bp_rp, parallax,
+    parallax_error (for the eclipse-duration limit). Returns {"eb_" + key: ...} for EB_KEYS and eb_bands."""
+    from cosmos_search.ebfilter import decide
+    from cosmos_search.vetting.candidate import LightCurve
+
+    gt, gf = np.asarray(g["t"], float), np.asarray(g["flux"], float)
+    lcs = [LightCurve("G", gt, gf, np.zeros(len(gt)))]
+    for b, d in ztf.groupby("band") if len(ztf) else ():
+        d = d.sort_values("t")
+        lcs.append(LightCurve(str(b), d["t"].to_numpy(float), d["flux"].to_numpy(float), d["err"].to_numpy(float)))
+    ok = np.isfinite(gf)
+    t_target = float(gt[ok][np.argmin(gf[ok])]) if ok.any() else None
+    v = decide.decide(lcs, source, t_target)
+    out = {f"eb_{k}": v.get(k) for k in EB_KEYS}
+    out["eb_bands"] = ",".join(v.get("bands", []))
+    return out
 
 
 def neowise_adql(ra, dec, radius_arcsec=NEOWISE_RADIUS_ARCSEC):

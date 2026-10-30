@@ -507,6 +507,31 @@ def test_band_agreement_passes_any_mix_and_flags_g_alone():
     assert v == ["g_only", "untested", "agree", "bp_rp_only"]
 
 
+def test_eclipse_check_explains_a_binary_seen_by_gaia_and_ztf_and_not_one_long_dip():
+    import math
+
+    from cosmos_search.inject.classes.eclipsing_binary import EclipsingBinary
+
+    rng = np.random.default_rng(5)
+    eb = EclipsingBinary(period=2.7, t_peri=0.3, ecc=0.0, omega=math.pi / 2, incl=math.radians(89.0), r1=1.0,
+                         r2=0.8, m1=1.0, m2=0.8, t1=5800.0, t2=5000.0)
+    src = {"phot_g_mean_mag": 9.7, "bp_rp": 0.82, "parallax": 10.0, "parallax_error": 0.02}
+    tg = np.sort(np.r_[rng.uniform(-1000, 0, 70), 0.3 + 2.7 * np.array([-300, -200, -100])])
+    nights = np.sort(rng.choice(1200, 400, replace=False)) + 500.0
+    tz = nights + rng.uniform(0.15, 0.35, 400)
+
+    def obs(k, t, band):
+        return pd.DataFrame({"band": band, "t": t, "flux": k * (1 + 0.005 * rng.standard_normal(len(t))),
+                             "err": 0.005})
+
+    v = checks.eclipse(obs(eb.factor(tg, "G"), tg, "G"), obs(eb.factor(tz, "ztf_r"), tz, "ztf_r"), src)
+    assert v["eb_explained"]
+    assert min(abs(v["eb_period"] / eb.period - 1), abs(v["eb_period"] / eb.period - 0.5)) < 1e-3
+    dip = lambda t: 1 - 0.05 * ((t > -600) & (t < -450))  # noqa: E731
+    v = checks.eclipse(obs(dip(tg), tg, "G"), obs(np.ones(len(tz)), tz, "ztf_r"), src)
+    assert not v["eb_explained"]
+
+
 def test_detector_measures_band_slopes_and_repeat_band_depths():
     from cosmos_search.slow import detect, period
 
