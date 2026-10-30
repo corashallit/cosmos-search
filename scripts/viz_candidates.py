@@ -154,7 +154,7 @@ def context_rows(ids, release):
     return src.merge(cls, on="source_id", how="left").set_index("source_id")
 
 
-def star_section(ctx, sid, row, inp, ctxrow, out, heading=None, text="", name=None, label="this star"):
+def star_section(ctx, sid, row, inp, ctxrow, out, heading=None, text="", name=None, label="candidate"):
     cls = ctxrow.get("best_class_name") if ctxrow is not None else None
     cls = cls if isinstance(cls, str) and cls not in ("nan", "None") else None
     figs = sheet.slow_candidate(ctx, row, inp["epochs"], out, others=inp["others"], checks=inp["checks"],
@@ -183,39 +183,33 @@ def cmd_figures(a):
 
 # --- gallery ---------------------------------------------------------------------------------------------------
 
-GALLERY = [  # (source id, heading, text): real DR3 stars of known kinds from the DR3 trial's fading list
-    (5847323477883945472, "A spotted star (RS CVn type)",
-     "DPAC calls this a spotted star: starspots that grow over months make it fade. It is near the top of the DR3 "
-     "list at G < 17 among stars that are not eclipsing binaries. The change is slow and smooth, and the BP and "
-     "RP panels show it in both of Gaia's colours."),
-    (5885363968852633856, "An eclipsing binary",
-     "The commonest star at the top of the fading list: at G < 19, 82% of the strongest fades in DR3 are "
-     "eclipsing binaries. Gaia catches a few visits inside eclipses, which read as a dimming episode; the "
-     "visits jump about (a high Abbe value) where a real slow fade would be smooth."),
-    (1340986169606559488, "A quasar",
-     "A quasar's brightness wanders by tens of percent over years. At G ≥ 19, 93% of the top of the DR3 list have "
-     "no measurable parallax or proper motion, nearly all quasars, so the search sets them aside to read "
+GALLERY = [  # (source id, heading, text): DR3 stars of known type from the DR3 trial's fading list
+    (5847323477883945472, "RS CVn (spotted) star",
+     "DPAC class RS. Near the top of the DR3 fading list at G < 17 among stars not classed as eclipsing "
+     "binaries. Smooth change, same in BP and RP."),
+    (5885363968852633856, "Eclipsing binary",
+     "82% of the top of the DR3 fading list at G < 19 are eclipsing binaries. Visits in eclipse register as a "
+     "dimming episode; the Abbe value is high (uncorrelated visit to visit), unlike a smooth fade."),
+    (1340986169606559488, "Quasar",
+     "Stochastic variability of tens of percent over years. At G ≥ 19, 93% of the top of the DR3 list have "
+     "parallax and proper motion consistent with zero, nearly all DPAC quasars; the search lists these "
      "separately."),
-    (511239410478024192, "A Be star",
-     "A hot star that throws off a disc of gas. The disc adds light while it lasts, so its fading away reads as "
-     "a slow fade."),
-    (424592431008600704, "A long-period variable",
-     "A cool giant that pulsates over hundreds of days and changes by magnitudes, sampled by Gaia at a few "
-     "dozen points."),
-    (1807455283392608768, "An R CrB star",
-     "R Coronae Borealis stars puff out clouds of carbon dust that hide them for months; the infrared shows "
-     "the warm dust."),
+    (511239410478024192, "Be star",
+     "Emission from a circumstellar gas disc adds flux; dissipation of the disc registers as a slow fade."),
+    (424592431008600704, "Long-period variable",
+     "Pulsating giant: periods of hundreds of days, amplitudes of magnitudes, a few dozen Gaia visits."),
+    (1807455283392608768, "R CrB star",
+     "Carbon dust formation causes declines of several magnitudes lasting months; W1/W2 show the warm dust."),
 ]
 
 FAKES = [  # (key, heading, text, signal factory(t_mid, t_lo, t_hi), host G range)
-    ("fake-grey-fade", "Injected: a steady grey fade of 1% a year",
-     "Not a real star. A quiet G ≈ 15 star with a fade of 1% a year added to every band alike, the way an opaque "
-     "body slowly covering more of it would look. This is the kind of change the search is built to find; it "
-     "shows what such a find would look like in each figure.",
+    ("fake-grey-fade", "Injected grey trend, −1% yr⁻¹",
+     "Synthetic signal: a linear −1% yr⁻¹ trend in G, BP and RP alike (grey), injected into a non-variable "
+     "G ≈ 15 star with no DPAC class. This is the signal type the search targets.",
      lambda tm, lo, hi: __import__("cosmos_search.inject.lightcurve", fromlist=["x"]).SecularTrend(-0.01, tm)),
-    ("fake-grey-dip", "Injected: a grey dimming episode of 2% for 300 days",
-     "Not a real star. A quiet star with a long grey dip added: 2% fainter for about 300 days in every band, "
-     "with 60-day ingress and egress.",
+    ("fake-grey-dip", "Injected grey dip, 2% for 300 d",
+     "Synthetic signal: a 2% grey dip, 300 d long including 60 d ingress and egress, injected into the same "
+     "host star.",
      lambda tm, lo, hi: __import__("cosmos_search.inject.lightcurve", fromlist=["x"]).Dip(
          t0=lo + 0.35 * (hi - lo), covering=0.02, ingress=60.0, egress=60.0, flat=180.0)),
 ]
@@ -282,21 +276,20 @@ def cmd_gallery(a):
         cr = crow.loc[host_id].to_dict() if host_id in crow.index else None
         if cr:
             cr = {**cr, "best_class_name": None}
-        figs = sheet.slow_candidate(ctx, row, ep, out, astro=cr, name=f"injected into Gaia DR3 {host_id}",
-                                    label="the fake")
+        figs = sheet.slow_candidate(ctx, row, ep, out, astro=cr, name=f"Gaia DR3 {host_id} + injected signal",
+                                    label="injected")
         sections.append({"heading": heading, "anchor": key, "text": f"<p>{text}</p>", "figures": figs})
         print("done", key, flush=True)
 
     sections += gallery_extras(a, ctx, out)
-    intro = ("<p>Figures for release day, drawn for real Gaia DR3 stars of known kinds so that we know what each "
-             "figure normally looks like before DR4 comes out on 2 December 2026. Every figure compares one star "
-             "(orange) with ordinary stars (blue) and with the classes Gaia's variability team (DPAC) assigns. "
-             "The comparison stars are a random 300,000 from the DR3 trial run's 1,000 random patches of sky. "
-             "DR3 published light curves only for stars DPAC flagged as variable, so here the ordinary stars are "
-             "those; in DR4 every star has a light curve.</p>"
-             "<p>Two injected fakes show what the search is built to find. Hover over points for their values. "
+    intro = ("<p>Reference figures for Gaia DR4 (release 2026-12-02), drawn for Gaia DR3 stars of known type. "
+             "Orange: the source shown. Blue density: comparison sample, 300,000 random stars from the 1,000 random "
+             "sky patches of the DR3 trial run. Dots: DPAC variability classes. DR3 epoch photometry covers only "
+             "stars DPAC flagged as variable, so the DR3 comparison sample is variable stars; in DR4 it is all "
+             "stars.</p>"
+             "<p>Two injected signals show the target signal types. Hover over points for values. "
              "Code: <code>cosmos_search/viz</code>; this page: <code>scripts/viz_candidates.py gallery</code>; "
-             "how to use it on the day: <code>docs/viz.md</code>.</p>")
+             "release-day use: <code>docs/viz.md</code>.</p>")
     for name, fragment in (("index.html", False), ("artifact.html", True)) if a.artifact else (("index.html", False),):
         p = html.page(TITLE, sections, out / name, intro=intro, meta="Gaia DR3 examples · 2026-10-30",
                       png_links=a.png_links and not fragment, fragment=fragment)
@@ -325,10 +318,10 @@ def gallery_extras(a, ctx, out):
                 r = pd.Series({**r.to_dict(), **aux.iloc[0].to_dict()})
             ep = data.epochs(lc)
             figs = sheet.short_dip_candidate(dctx, r, ep, float(r["t_min"]), out, sid=sid)
-            sections.append({"heading": "A short dip: one visit inside an eclipse", "anchor": "dip",
-                             "text": "<p>The short-dip search looks for dips caught in one or two of Gaia's visits. "
-                                     "This one is an eclipsing binary seen in eclipse; most such dips in DR3 "
-                                     "are.</p>", "figures": figs})
+            sections.append({"heading": "Short dip: eclipsing binary", "anchor": "dip",
+                             "text": "<p>The short-dip search targets dips in one or two Gaia visits. This source is "
+                                     "a DPAC eclipsing binary observed in eclipse, the most common cause of such "
+                                     "dips in DR3.</p>", "figures": figs})
     if a.prerelease:
         pre = pd.read_csv(a.prerelease)
         g = pre[pre["source_id"] == 4318465066420528000]
@@ -338,26 +331,25 @@ def gallery_extras(a, ctx, out):
         fa = physics.mass_function(k1.params["a0_mas"], k1.x[2], k1.params["period_yr"])
         figs = []
         paths = style.render(vast.along_scan, out / "bh3-alongscan", src, k1, name="Gaia BH3 (DR4 pre-release)")
-        figs.append({"key": "alongscan", "title": "Positions against a single star's path", "paths": paths,
-                     "caption": "Gaia BH3's measured positions along each scan after removing its parallax and "
-                                "proper motion, from the 12 DR4 epoch-astrometry sources ESA released early. A single "
-                                "star would scatter about zero; a star orbiting something unseen swings by "
-                                "the orbit (orange, the fitted orbit at each transit)."})
+        figs.append({"key": "alongscan", "title": "Along-scan residuals", "paths": paths,
+                     "caption": "Gaia BH3 per-transit along-scan (AL) positions from the DR4 pre-release epoch "
+                                "astrometry (12 sources), minus the parallax and proper-motion part of the orbit fit. "
+                                "Top: orbit model at each transit (orange). Bottom: residuals after the full fit. A "
+                                "single star scatters about zero in both."})
         if a.orbits:
             orb = pd.read_parquet(a.orbits, columns=["source_id", "period", "f_A", "m1"])
             paths = style.render(vast.kepler_bound, out / "bh3-kepler", orb,
                                  {"period": k1.params["period_yr"] * 365.25, "f_A": fa, "label": "Gaia BH3"})
-            figs.append({"key": "kepler", "title": "Does the orbit need more mass than we can see?", "paths": paths,
-                         "caption": "Every Gaia DR3 orbit by period and mass function, the least mass the unseen "
-                                    "companion can have. Dots need a companion heavier than the star itself that "
-                                    "gives no light; Gaia BH1 and BH2 are black holes found this way. The dots above "
-                                    "100 solar masses are faulty fits, most at periods under 100 days near harmonics "
-                                    "of the 63-day cycle of Gaia's scanning. Orange: BH3 from the DR4 pre-release "
-                                    "data, fitted here."})
+            figs.append({"key": "kepler", "title": "Mass function vs period", "paths": paths,
+                         "caption": "Astrometric mass function f_A (minimum mass of a dark companion) against period "
+                                    "for Gaia DR3 orbital solutions. Dots: f_A > M₁, a dark companion heavier than the "
+                                    "luminous star; Gaia BH1 and BH2 are marked. Solutions above 100 M☉ are spurious, "
+                                    "most at P < 100 d near harmonics of the 63 d scanning period. Orange: BH3, fitted "
+                                    "here to the DR4 pre-release data."})
         sections.append({"heading": "Astrometry: Gaia BH3", "anchor": "astrometry",
-                         "text": "<p>The astrometric search looks for stars whose positions no ordinary model "
-                                 "fits. BH3, a 33-solar-mass black hole, is the clearest known example of a "
-                                 "position track that differs from a single star's.</p>", "figures": figs})
+                         "text": "<p>The astrometric search targets sources whose along-scan positions no standard "
+                                 "model fits. Gaia BH3 (33 M☉ black hole) is the clearest known departure from a "
+                                 "single-star model.</p>", "figures": figs})
     return sections
 
 

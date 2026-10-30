@@ -64,8 +64,8 @@ figcaption { margin-top: 0.5em; color: var(--muted); font-family: Inter, system-
   line-height: 1.5; }
 figcaption b { color: var(--fg); font-family: "Berkeley Mono", ui-monospace, Menlo, monospace; font-weight: 700; }
 figcaption .dl { font-family: "Berkeley Mono", ui-monospace, Menlo, monospace; white-space: nowrap; }
-.viz-hover use { cursor: crosshair; }
-.viz-hover use:hover { stroke: var(--accent) !important; stroke-width: 2.5px !important; }
+.viz-hover use, .viz-hover path { cursor: crosshair; }
+.viz-hover use:hover, .viz-hover path:hover { stroke: var(--accent) !important; stroke-width: 2.5px !important; }
 .star-head { margin-top: 3rem; }
 @media (max-width: 40rem) {
   .site { padding-block: 2rem 4rem; }

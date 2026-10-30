@@ -122,7 +122,7 @@ def strengths(pop, thr, g_col="phot_g_mean_mag"):
 def typical_noise(pop, g_mag, width=0.5, g_col="phot_g_mean_mag", quiet=True, class_col="best_class_name"):
     """Median visit-to-visit scatter (fraction) of comparison stars within +-width mag of g_mag (or in its drift G bin
     when pop has no magnitudes); with quiet=True only stars below the thresholds in both directions and without a
-    DPAC variability class count, so the band shows what an ordinary star does. (DR3 published light curves only
+    DPAC variability class count, so the band shows the scatter of non-variable stars. (DR3 published light curves only
     for stars DPAC flagged as variable: there the classed ones scatter about 3x more than the rest at G = 15.)"""
     if g_col in pop:
         m = np.abs(pop[g_col].to_numpy(float) - g_mag) < width

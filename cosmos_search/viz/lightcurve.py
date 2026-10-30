@@ -1,11 +1,11 @@
-"""What the telescopes saw: a candidate's light curves, with the detected change marked and an ordinary star's
-scatter beside it.
+"""Light curves of one source, with the detected change and the visit-to-visit scatter of non-variable stars of the
+same G marked.
 
     fig = slow_change(epochs, change, others=others, noise=0.002, name="Gaia DR3 1807455283392608768")
     fig = short_dip(epochs, t_dip=1234.5, name=...)
 
-Brightness is shown as the change from the star's normal level in percent, brighter up, against calendar year;
-changes of more than 40% switch the axes to magnitudes (still brighter up).
+Flux is shown as ΔF/F about the median in percent, brighter up, against decimal year; beyond 40% the axes switch to
+magnitudes (brighter up).
 """
 
 import numpy as np
@@ -15,16 +15,16 @@ from cosmos_search.viz import data, style
 from cosmos_search.viz.style import c, px
 
 KIND_TEXT = {
-    "dip": "dimming episode, {days:.0f} days, {depth:.2g}% fainter",
-    "fade": "fading from {start:.1f} to the last visit, {depth:.2g}% fainter",
-    "drop": "fainter from {start:.1f} on, by {depth:.2g}%",
-    "trend": "steady fade of {slope:.2g}% a year",
+    "dip": "dip: {days:.0f} d, depth {depth:.2g}%",
+    "fade": "fade from {start:.1f}: depth {depth:.2g}%",
+    "drop": "drop at {start:.1f}: depth {depth:.2g}%",
+    "trend": "trend: −{slope:.2g}% yr⁻¹",
 }
 KIND_TEXT_MAG = {   # on magnitude axes the depth is read off the plotted visits, in magnitudes
-    "dip": "dimming episode, {days:.0f} days, {depth:.1f} mag fainter",
-    "fade": "fading from {start:.1f} to the last visit, {depth:.1f} mag fainter",
-    "drop": "fainter from {start:.1f} on, by {depth:.1f} mag",
-    "trend": "steady fade of {slope:.2g}% a year",
+    "dip": "dip: {days:.0f} d, ΔG = {depth:.1f} mag",
+    "fade": "fade from {start:.1f}: ΔG = {depth:.1f} mag",
+    "drop": "drop at {start:.1f}: ΔG = {depth:.1f} mag",
+    "trend": "trend: −{slope:.2g}% yr⁻¹",
 }
 
 
@@ -62,7 +62,7 @@ def _depth_in(depth, scale):
     return -100.0 * abs(depth)
 
 
-UNIT = {"percent": "change (%)", "mag": "change (mag)"}
+UNIT = {"percent": "ΔF/F (%)", "mag": "Δmag"}
 
 
 def _limits(values, errs, extra=(), pad=0.12, q=(0.5, 99.5)):
@@ -141,7 +141,7 @@ def slow_change(epochs, change=None, others=None, noise=None, release=None, name
 
     epochs: the star's Gaia epochs (data module); change: dict with kind ('dip', 'fade', 'drop', 'trend'), t0, t1
     (BTJD, the episode window), depth (fraction) and slope (fraction a year) as far as known; others: ZTF and
-    NEOWISE (data.others); noise: an ordinary star's visit-to-visit scatter at this brightness (fraction, from
+    NEOWISE (data.others); noise: visit-to-visit scatter of non-variable stars at this G (fraction, from
     data.typical_noise); release: (label, t_end) for the line where Gaia's data end; facts: a line about the star
     for under the title; scale: 'percent', 'mag' or 'auto' (magnitudes for changes beyond MAG_ABOVE)."""
     gv = data.visits(epochs, "G")
@@ -164,8 +164,8 @@ def slow_change(epochs, change=None, others=None, noise=None, release=None, name
     if scale == "auto":
         scale = choose_scale(gv["y"])
     unit = "%" if scale == "percent" else " mag"
-    style.title(fig, heading or (f"What Gaia saw: {name}" if name else "What Gaia saw"),
-                sub=facts or "each dot is one visit (Gaia's epochs within 2 days, averaged); brighter is up")
+    style.title(fig, heading or (f"{name}: light curves" if name else "Light curves"),
+                sub=facts or "visit means (epochs within 2 d); brighter up")
 
     t_all = [gv["t"].to_numpy()]
     if len(oth):
@@ -194,7 +194,7 @@ def slow_change(epochs, change=None, others=None, noise=None, release=None, name
                 yb, va = (band, "top") if roomy_high else (-band, "bottom")
             else:
                 yb, va = (band, "bottom") if roomy_high else (-band, "top")
-            style.note(ax, 0.995, yb, "ordinary stars this bright stay in the grey band",
+            style.note(ax, 0.995, yb, "grey: ±2σ visit scatter, non-variable stars at this G",
                        transform=ax.get_yaxis_transform(), ha="right", va=va)
     ax.axhline(0, color=c("rule"), lw=px(1), zorder=1)
     if change:
@@ -221,7 +221,7 @@ def slow_change(epochs, change=None, others=None, noise=None, release=None, name
                            transform=ax.get_xaxis_transform(), va="bottom")
     _series(ax, gv["t"].to_numpy(), y, e, c("fg"),
             hover_fmt="{yr:.2f}: {y:+.2f}" + unit + " ± {e:.2f}" + unit + " ({n} epochs)", n=gv["n"].to_numpy())
-    ax.set_ylabel("G " + UNIT[scale])
+    ax.set_ylabel("G, " + UNIT[scale])
 
     # BP and RP
     ax = axes["colour"]
@@ -239,10 +239,10 @@ def slow_change(epochs, change=None, others=None, noise=None, release=None, name
     ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), ncol=2, handletextpad=0.2, columnspacing=1.2,
               borderaxespad=0.1)
     ax.set_ylabel(UNIT[scale])
-    style.panel_label(ax, "Gaia BP and RP: the colour of the change")
+    style.panel_label(ax, "Gaia BP, RP")
 
-    for key, bands, label, days in (("ztf", ("ztf_g", "ztf_r", "ztf_i"), "ZTF, from the ground (15-day means)", 15.0),
-                                    ("wise", ("W1", "W2"), "NEOWISE, infrared (6-month visits)", None)):
+    for key, bands, label, days in (("ztf", ("ztf_g", "ztf_r", "ztf_i"), "ZTF g, r, i (15 d means)", 15.0),
+                                    ("wise", ("W1", "W2"), "NEOWISE W1, W2 (visit means)", None)):
         if key not in axes:
             continue
         ax = axes[key]
@@ -273,7 +273,7 @@ def slow_change(epochs, change=None, others=None, noise=None, release=None, name
     if release and len(oth) and oth["t"].max() > release[1]:
         for a in axes.values():
             a.axvline(style.year(release[1]), color=c("muted"), lw=px(1), ls=(0, (3, 3)), zorder=2)
-        style.note(axes[rows[-1][0]], style.year(release[1]), 0.0, f" {release[0]} ends",
+        style.note(axes[rows[-1][0]], style.year(release[1]), 0.0, f" end of {release[0]}",
                    transform=axes[rows[-1][0]].get_xaxis_transform(), ha="left", va="bottom")
     for key, a in axes.items():
         if key != rows[-1][0]:
@@ -295,8 +295,8 @@ def short_dip(epochs, t_dip, window_hours=30.0, noise=None, name=None, heading=N
     gs = fig.add_gridspec(1, 2, width_ratios=[1.7, 1], left=78 / width, right=1 - 16 / width, top=1 - 92 / height,
                           bottom=52 / height, wspace=0.22)
     a0, a1 = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])
-    style.title(fig, heading or (f"A short dip: {name}" if name else "A short dip"),
-                sub="each dot is one Gaia epoch; brighter is up")
+    style.title(fig, heading or (f"{name}: short dip" if name else "Short dip"),
+                sub="single epochs; brighter up")
     near = np.abs(ep["t"] - t_dip) * 24 < window_hours
     y = _pct(g["frac"])
     a0.set_ylim(*_limits(y, _pct(g["err_frac"]), [0.0, float(_pct(ep.loc[near, "frac"]).min())], q=(0, 100)))
@@ -311,11 +311,11 @@ def short_dip(epochs, t_dip, window_hours=30.0, noise=None, name=None, heading=N
                linewidths=px(1), zorder=6)
     yd = float(y[gm].min()) if gm.any() else 0.0
     late = (style.year(t_dip) - a0.get_xlim()[0]) / np.ptp(a0.get_xlim()) > 0.5
-    style.chip(a0, style.year(t_dip), yd, "the dip", ha="right" if late else "left", va="center",
+    style.chip(a0, style.year(t_dip), yd, "dip", ha="right" if late else "left", va="center",
                dx=-14 if late else 14)
-    a0.set_ylabel("G change (%)")
+    a0.set_ylabel("G, ΔF/F (%)")
     style.year_axis(a0)
-    style.panel_label(a0, "Gaia G, every epoch")
+    style.panel_label(a0, "Gaia G, all epochs")
 
     z = ep[near].copy()
     z["h"] = (z["t"] - t_dip) * 24
@@ -331,7 +331,7 @@ def short_dip(epochs, t_dip, window_hours=30.0, noise=None, name=None, heading=N
         style.hover(p, [f"{band} {a:+.1f} h: {b:+.2f}%" for a, b in zip(d["h"], _pct(d["frac"]))])
     a1.axhline(0, color=c("rule"), lw=px(1), zorder=1)
     a1.set_xlim(-window_hours, window_hours)
-    a1.set_xlabel("hours from the dip")
+    a1.set_xlabel("t − t_dip (h)")
     a1.legend(loc="lower right", handletextpad=0.1, borderaxespad=0.3)
-    style.panel_label(a1, "all three bands, zoomed")
+    style.panel_label(a1, f"G, BP, RP within ±{window_hours:.0f} h")
     return fig

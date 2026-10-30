@@ -6,7 +6,7 @@ sequential ramp from the page colour through `blue`, and `orange` for the thing 
 | Role | Token | Used for |
 |---|---|---|
 | figure surface | `box` | every figure's background, like the site's figure panels |
-| ordinary stars | ramp from `bg` through `blue` | densities of the comparison population |
+| comparison sample | ramp from `bg` through `blue` | densities of the comparison population |
 | the candidate | `orange` (`orange_fg` on it) | the star a figure is about, its episode, its labels |
 | Gaia G / BP / RP | `fg` / `blue` / `red` | light curves, by wavelength |
 | ZTF g / r / i | `blue` / `red` / `amber` | light curves after Gaia |
@@ -56,7 +56,7 @@ THEMES = tuple(TOKENS)
 
 BAND_TOKEN = {"G": "fg", "BP": "blue", "RP": "red", "ztf_g": "blue", "ztf_r": "red", "ztf_i": "amber",
               "W1": "purple", "W2": "amber"}
-BAND_LABEL = {"G": "G", "BP": "BP (blue)", "RP": "RP (red)", "ztf_g": "ZTF g", "ztf_r": "ZTF r", "ztf_i": "ZTF i",
+BAND_LABEL = {"G": "G", "BP": "BP", "RP": "RP", "ztf_g": "ZTF g", "ztf_r": "ZTF r", "ztf_i": "ZTF i",
               "W1": "W1 (3.4 µm)", "W2": "W2 (4.6 µm)"}
 
 MONO = ["Berkeley Mono", "SF Mono", "Menlo", "Cascadia Mono", "DejaVu Sans Mono"]
@@ -325,6 +325,13 @@ def hover(artist, labels):
     return artist
 
 
+def hover_bars(bars, labels):
+    """Hover text for each bar of ax.bar (one SVG group per bar)."""
+    for patch, text in zip(bars, labels):
+        hover(patch, [text])
+    return bars
+
+
 def year(btjd):
     """Decimal year for a BTJD (BJD - 2457000) time, for date axes (J2000.0 = JD 2451545.0)."""
     return 2000.0 + (np.asarray(btjd, float) + 2457000.0 - 2451545.0) / 365.25
@@ -364,7 +371,7 @@ def _svg_with_hover(raw, hover_map):
         if labels is None:
             continue
         g.set("class", "viz-hover")
-        for e, text in zip(g.iter(_SVG + "use"), labels):
+        for e, text in zip(list(g.iter(_SVG + "use")) or list(g.iter(_SVG + "path")), labels):
             t = ET.SubElement(e, _SVG + "title")
             t.text = text
     return ET.tostring(root, encoding="unicode")
