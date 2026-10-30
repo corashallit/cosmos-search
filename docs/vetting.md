@@ -462,6 +462,168 @@ window 0.7 × 2.1, BP/RP 3.5 × 2.1, plus timing and ephemeris slack) and 150 ar
 converted from BJD to observer UTC by removing the barycentric light time towards the source (up to ±8.3 min).
 NEOs within 0.8 au can fall outside the widened cone.
 
+## 14. Calibration run (V3) on slow-change candidates (written 2026-10-30, before the batch is drawn)
+
+**Why on slow changes.** §7 set aside ~400 objects to calibrate the checks. The short-dip review has since had its
+own 376-packet test (docs/dayone.md, "Confirmatory result"), and slow fades and long dimming episodes became the
+main DR4 search (docs/arms/slow-changes.md). Nothing has yet measured how the per-candidate checks (S5) or the
+blind review behave on that search's candidates. This run does, on DR3. Nothing below changes after the draw.
+
+**What is measured.**
+
+1. *The automated checks* (`slow/checks.py`): the colour of the change (BP depth over RP depth), NEOWISE W1/W2
+   over the same dates, and ZTF from 2018 on. For each: how often it can be computed; whether its stated error
+   holds, on fakes with a known answer; and how often natural slow changers of each class look grey or match each
+   explanation's infrared prediction.
+2. *The blind review*: one Claude subagent per object with the frozen Stage A text (`vetting/stage_a.md`,
+   unchanged), told to make one Read of its prompt and one Write of its reply; the frozen shortlist rule (S =
+   P(disk occultation + debris transit + other astrophysical + unexplained) ≥ 0.35, `dayone.vet.S_SHORTLIST`).
+   How often it shortlists natural stars of each class, chance passes, and fakes of each kind.
+
+**Stars.** Shard 4/10 of DR3's epoch photometry (`dr3_pass --shard 4/10`, every light curve kept: 350 bulk files),
+which no slow-change calibration or test has used (shards 0-3 have). Detector, period search, shared-date test,
+thresholds and drift table as frozen in `prereg/rules/slow-v3/`, applied unchanged; a star counts as flagged when
+rule slow-v3 flags it (main list, not `early`). The period search costs ~40 ms a star, so it runs on every star of
+a sampling frame of 120 of the 350 files (chosen with OS randomness before scoring, list kept with the batch) and on
+the quiet stars of all 350. Natural stars are drawn from the frame. Stars in
+`rehearsal-inputs/exclude/all_used_ids.txt` are left out.
+
+*Amendment (2026-10-30 02:20 UTC, after scoring the shard and before any draw).* One bulk file of the shard,
+`EpochPhotometry_041938-042766` (294,954 sources around M31, RA 11.8° Dec 39.8°), is DR3's Andromeda field, where
+DPAC published light curves for every source whatever its variability. It holds 176,545 of the shard's 192,627
+quiet stars, so drawn as written the fakes and chance passes would nearly all sit in one crowded patch of sky. It
+is left out of both (it is not in the frame, so the natural stars are unaffected); its flagged share of quiet
+stars (95 of 176,545) is reported for comparison. Outside it: 42 chance passes and 8,082 eligible hosts.
+
+**Batch (about 410).**
+
+| Group | Objects | Label for scoring | Measures |
+|---|---|---|---|
+| Natural stars flagged by slow-v3, by DPAC class | 280 | DPAC `best_class_name` (the star's own variability) | false shortlist per class; the checks on real slow changers |
+| Quiet stars flagged by slow-v3 (all 350 files) | all of them (expected ~15-30) | no real change | false shortlist on chance passes |
+| Fakes, grey (every band dims by the same fraction) | 25 | should be shortlisted | recall |
+| Fakes, dust in front (fraction ∝ λ^−β, β 1-2.5; W1/W2 a few % of G) | 15 | should be shortlisted | recall |
+| Fakes, dust that absorbs and re-emits (optical as dust; W1/W2 brighten at 300, 600 or 1000 K, `checks.reemission`) | 10 | should be shortlisted | recall |
+| Fakes, change in the star's temperature (band ratios of a cooling blackbody at the host's Teff) | 25 | natural | reported only |
+| Fakes, G alone (BP, RP, ZTF, W1, W2 unchanged) | 25 | instrumental | reported only (confabulation) |
+| Fakes, grey, signal-to-noise 6-20 | 10 | — | reported only (recall near the threshold) |
+
+- *Natural strata*: DPAC classes with at least 10 flagged stars in the frame get their own stratum, the rest are
+  pooled as "other". The 280 are split by `design.neyman_allocation` with floor 10 (or all of a stratum, if fewer),
+  mix = each stratum's share of flagged frame stars, and guessed false-pass rates 0.02 for LPV and ECL, 0.10 for RS,
+  SOLAR_LIKE, YSO and "other", 0.05 for the rest. Drawn with OS randomness. Rates are reported per stratum, pooled,
+  and weighted back to the frame's flagged mix (bootstrap within strata).
+- *Fakes*: shapes drawn uniformly from long dip, late-starting fade, steady fade, staircase fade, accelerating fade
+  and repeating long dip (`inject.lightcurve`; calibrated or spent shapes, none held out), made achromatic, then
+  given the flavour's fraction of the G change in each band (G, BP, RP, ztf_g/r/i, W1, W2). Each goes into its own
+  quiet star at G < 19 from the 230 files outside the frame (never also a natural star), injected into the raw
+  epochs before normalisation and drift correction, and the same signal into that star's ZTF and NEOWISE exposures.
+  A fake is kept only if slow-v3 flags it, with the host's real neighbours in the shared-date test, and if its
+  signal-to-noise (S3: deepest G deficit at the visits × √(visits below half that depth) ÷ the host's visit noise)
+  is at least 20 (6-20 for the last row). Hosts are visited in a shuffled order; a host whose draw fails passes to
+  the next draw. The plan (hosts, signals, flavours) is sealed with age to Cora's key and the reveal key.
+
+**Packets** (`vetting.packet.build`, no holdout). Drift-corrected G, BP and RP epochs; ZTF epochs (IRSA, catflags 0,
+each ZTF object renormalised to its median after any injection); NEOWISE visit means as bands W1 and W2 (clean single
+exposures from `neowiser_p1bs_psd`, `checks.neowise_clean`, averaged per ~6-month visit). The detected change goes in
+as the packet's one detected dip (start, end, deepest visit, depth). Tests: the detector's scores, the colour of the
+change, the NEOWISE change (or slope, for trends) beside what grey blocking, dust in front, and re-emission at 300 and
+1000 K predict, and ZTF's level after 2020-01-20 against 2018-19; each test carries a description of what it
+computes and what each explanation predicts, and none quotes a calibration figure. Context: AllWISE W1-W4 and 2MASS
+Ks through `cosmos_search.xmatch` (limits renamed as in `dayone.vet.wise_limits`). The short-dip pipeline tests
+(recurrence, single event) are not shown: they answer a different question. No variable-star catalogue type is shown,
+because VSX carries Gaia DR3's own classes.
+
+**Pass criteria** (one-sided 95% Clopper–Pearson, `vetting.power`):
+
+| | Criterion | Passes a good rule | Passes a bad one |
+|---|---|---|---|
+| R1 | Grey, dust and re-emitting fakes at signal-to-noise ≥ 20 shortlisted: lower bound ≥ 50% (≥ 32 of 50) | 0.86 at recall 0.7 | 0.03 at 0.5 |
+| R2 | Natural and chance-pass stars shortlisted, pooled: upper bound ≤ 10% (≤ 21 of 300; ≤ 23 of the 322 after the amendment) | 0.95 at 0.05 | 0.05 at 0.10 |
+| C1 | Colour of the change on fakes: (BP/RP ratio − injected ratio) within 2 stated errors for ≥ 85% | | |
+| C2 | NEOWISE change on fakes with a visit inside the change: (W1 change − injected) within 2 stated errors for ≥ 85% | | |
+
+C1 and C2 are of the error bars: a Gaussian error gives 95%; errors that are half the true scatter give ~68%.
+
+**Reported whatever the outcome**: per-stratum and frame-weighted shortlist rates; recall by flavour, shape and
+signal-to-noise; the shortlist rate of temperature-change and G-only fakes; top classes; coverage of each check;
+how many natural stars of each class look grey (|z_grey| < 2) or match the dust or grey infrared prediction within
+2σ, which sets how far the checks alone could cut DR4's list; Brier score and recognition rate; transcript audit.
+
+**What each outcome leads to.**
+
+- R1 and R2 pass: the blind review with the frozen rule is the review step for DR4's slow-change candidates, and
+  these rates are the ones quoted for it.
+- R1 fails: the review misses anomalous slow changes. The misses are read after the reveal, and the choice (a
+  slow-specific rule, which then needs its own fresh blind batch, or the rule as is with the lower recall stated)
+  goes to Cora.
+- R2 fails: likewise for false entries; DR4's review then has to come after automated cuts that keep the
+  expected false entries within the ~10³ budget.
+- C1 or C2 fails: the error of that check is fixed (for example from the star's own scatter), and the fix is
+  checked on new fakes before DR4.
+
+**Procedure.** `scripts/slow_cal.py`: `draw` (strata, natural ids, sealed fake plan), `build` (fetch NEOWISE,
+ZTF and context; packets, prompts, sealed key), Stage A subagents (transcripts audited: a packet whose transcript is
+not clean, or whose reply does not parse, is re-run once with a fresh agent; if it still fails it counts against the
+rule: a fake not shortlisted, a natural star shortlisted), `vetting commit --archive prereg/verdicts/slow-cal-1`,
+`git push`, then `score` (refuses unless the archive commit is on origin).
+
+### Result (2026-10-30)
+
+432 objects reviewed (280 natural, 42 chance passes, 110 fakes), one subagent each. Every reply parsed and every
+transcript was one Read of its prompt and one Write of its reply (`audit.json`: 432 clean), so nothing was re-run.
+The verdicts went to `prereg/verdicts/slow-cal-1` (commit 83b887f, pushed) before the key was opened.
+
+| | Criterion | Result | |
+|---|---|---|---|
+| R1 | Grey, dust and re-emitting fakes at S/N ≥ 20 shortlisted, lower bound ≥ 50% | 44/50 (88%; one-sided bounds 78-95%) | pass |
+| R2 | Natural and chance-pass stars shortlisted, upper bound ≤ 10% | 26/322 (8.1%; one-sided bounds 5.7-11.0%) | **fail** |
+| C1 | Colour of the change within 2 stated errors of the injected ratio, ≥ 85% | 76/79 (96%) | pass |
+| C2 | NEOWISE W1 change within 2 stated errors of the injected change, ≥ 85% | 72/78 (92%) | pass |
+
+So, as written above: the review finds anomalous slow changes, but on DR4 it has to come after automated cuts that
+keep its false entries within the ~10³ expert budget. The rates to quote for it are recall 88% (78-95%) at S/N ≥ 20
+and 5/10 at S/N 6-20, and a false shortlist of 5.0% of flagged stars (2.8-7.5%, bootstrap) once the natural rates
+are weighted back to the frame's mix of flagged stars; the pooled 8.1% is higher because the draw oversampled the
+classes expected to be hard. At 5%, at most ~2×10⁴ flagged stars can reach the review.
+
+*Natural stars.* None of the 128 AGN, ECL, ELL, LPV, RR and S stars was shortlisted. The 26 are CV 5/10, YSO
+3/13, BE|GCAS|SDOR|WR 2/11, DSCT|GDOR|SXPHE 2/11, RS 5/41, SOLAR_LIKE 6/52, other 2/14 and chance passes 1/42.
+Stars flagged by an episode are shortlisted more often (episode alone 7/81, with a trend 9/39, with a repeat 4/31)
+than those flagged by a trend alone (4/109) or a repeat alone (2/60). 15 of the 26 sit at S 0.35-0.45.
+Exploratory, chosen after the reveal and not adoptable without a fresh batch: at S ≥ 0.40 the same verdicts give
+43/50 (lower bound 75%) and 16/322 (upper bound 7.4%).
+
+*Detector artefact.* PR #78 found that the period search's straight-line detrend can be pulled by one visit far
+above the rest, which makes spurious repeat flags with s_rep in the hundreds. Three natural stars here have that
+signature (repeat only, s_rep 72-314, Abbé ≈ 1.1), all cataclysmic variables in outburst; one was shortlisted.
+Without them R2 is 25/319 (upper bound 10.8%), still a fail.
+
+*Fakes reported only.* Temperature changes were shortlisted 19/25, mostly as dust occultation (9) or unexplained
+(5). At these depths (G 0.6-9%, median 3%) the infrared difference between dust in front and a cooling star is below NEOWISE's
+errors (injected W1 changes ≤ 0.03, stated errors 0.002-0.05), so neither the checks nor the reviewer can tell
+them apart. G-only changes were shortlisted 13/25, 12 of them as unexplained: the review takes a change seen in G
+alone as unexplained rather than instrumental. The colour test gives the BP/RP ratio, which is undefined when
+neither band moves, and no test says whether G's change agrees with BP's and RP's. Exploratory: G's depth lying
+outside the range of the BP and RP depths by more than 3 combined errors marks 14 of the 25 G-only fakes (8 of the
+13 shortlisted), none of the 85 other fakes and 3 of the 315 natural and chance stars with all three depths. That
+would be a cheap automated cut before the review; it needs fresh fakes before it is used.
+
+*The checks on natural stars.* Coverage over the whole batch: colour 346/432, a NEOWISE visit inside the change
+253/432, ZTF in at least one band 238/432. The checks alone would cut DR4's list very little: of the 253 natural and
+chance stars with a measured colour, 235 are grey within 2σ and 207 dust-like, and only 13 are neither; of the 104
+episodes with an infrared prediction, 6 match neither grey nor dust. C1's three misses are two temperature fakes
+and a grey fake at S/N 18. Of C2's six, two grey fakes sit just outside (z 2.01) and four are hosts whose own W1
+moved by 1.7-10% where almost nothing was injected (three temperature fakes, one G-only); one of those has a stated
+W1 error of 0.002, too small for NEOWISE, so the error from visit scatter needs a look before DR4.
+
+*Review quality.* Brier score of S against "should be shortlisted" over R1's fakes and the natural stars 0.064
+(0.116 for always giving the base rate); AUC 0.977. One star (of 432) was named from its light curve and colours,
+correctly (an eclipsing symbiotic star), and not shortlisted. Each review took 60-100 thousand tokens.
+
+Data: `/mnt/project-files/slow-cal/` (sealed plan and key, review files, prompts, replies, transcripts, audit,
+`verdicts_table.csv`, `report.json`).
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -526,3 +688,8 @@ NEOs within 0.8 au can fall outside the widened cone.
   packets: held-out recall 22/48 (one-sided lower bound 33% vs the 30% criterion), reserved controls 3/135 (all
   RS or SOLAR_LIKE), queue sample 1/100. Rule v3b on the same packets: 28/48, 20/135, 8/100. Hiding the pipeline
   tests cut recall to 18/48. Most misses (15 of 26) and most of the queue (69 of 100) read as EBs (docs/dayone.md).
+- 2026-10-30. Calibration run on slow-change candidates (§14), 432 objects from DR3 shard 4, verdicts pushed before
+  the reveal. Recall of anomalous fakes 44/50 (pass), natural and chance-pass stars shortlisted 26/322 (upper bound
+  11.0% against 10%: fail), colour and NEOWISE errors hold (96%, 92%). Weighted to the mix of flagged stars the
+  false shortlist is 5.0% (2.8-7.5%). On DR4 the review comes after automated cuts. The review reads 12 of 25
+  G-only changes as unexplained; no test compares G's change with BP's and RP's.
