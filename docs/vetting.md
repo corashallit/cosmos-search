@@ -607,7 +607,8 @@ alone as unexplained rather than instrumental. The colour test gives the BP/RP r
 neither band moves, and no test says whether G's change agrees with BP's and RP's. Exploratory: G's depth lying
 outside the range of the BP and RP depths by more than 3 combined errors marks 14 of the 25 G-only fakes (8 of the
 13 shortlisted), none of the 85 other fakes and 3 of the 315 natural and chance stars with all three depths. That
-would be a cheap automated cut before the review; it needs fresh fakes before it is used.
+would be a cheap automated cut before the review; it needs fresh fakes before it is used (done 2026-10-30:
+docs/arms/slow-changes.md, "G against BP and RP").
 
 *The checks on natural stars.* Coverage over the whole batch: colour 346/432, a NEOWISE visit inside the change
 253/432, ZTF in at least one band 238/432. The checks alone would cut DR4's list very little: of the 253 natural and
@@ -615,7 +616,8 @@ chance stars with a measured colour, 235 are grey within 2σ and 207 dust-like, 
 episodes with an infrared prediction, 6 match neither grey nor dust. C1's three misses are two temperature fakes
 and a grey fake at S/N 18. Of C2's six, two grey fakes sit just outside (z 2.01) and four are hosts whose own W1
 moved by 1.7-10% where almost nothing was injected (three temperature fakes, one G-only); one of those has a stated
-W1 error of 0.002, too small for NEOWISE, so the error from visit scatter needs a look before DR4.
+W1 error of 0.002, too small for NEOWISE, so the error from visit scatter needs a look before DR4 (done
+2026-10-30: docs/arms/slow-changes.md, "NEOWISE errors").
 
 *Review quality.* Brier score of S against "should be shortlisted" over R1's fakes and the natural stars 0.064
 (0.116 for always giving the base rate); AUC 0.977. One star (of 432) was named from its light curve and colours,

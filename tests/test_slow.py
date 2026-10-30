@@ -479,3 +479,94 @@ def test_motion_marks_only_stars_without_measurable_motion_as_still():
     assert np.isnan(m["chi2_motion"].iloc[3])
     # Parallax and pmra 3 sigma each, but 0.95 correlated: together barely beyond the errors (chi2 ~9.2, not 18).
     assert 8 < m["chi2_motion"].iloc[4] < 10
+
+
+def test_band_agreement_passes_any_mix_and_flags_g_alone():
+    from cosmos_search.slow import checks
+
+    one = np.full(6, 0.001)
+    # grey, dust (BP deeper), a cooler star with RP up, G alone, BP/RP alone, BP missing
+    d_g = np.array([0.05, 0.05, 0.02, 0.05, 0.0, 0.05])
+    d_bp = np.array([0.05, 0.07, 0.04, 0.0, 0.05, np.nan])
+    d_rp = np.array([0.05, 0.04, -0.01, 0.0, 0.05, 0.05])
+    z = checks.band_agreement(d_g, one, d_bp, one, d_rp, one)
+    assert z[:3].tolist() == [0.0, 0.0, 0.0]
+    assert z[3] > 30 and z[4] < -30 and np.isnan(z[5])
+    rows = pd.DataFrame({"strength_by": ["episode", "trend", "trend", "repeat"],
+                         "depth_g": [0.05, np.nan, np.nan, np.nan], "depth_g_err": [0.001] * 4,
+                         "depth_bp": [0.0] * 4, "depth_bp_err": [0.001] * 4, "depth_rp": [0.0] * 4,
+                         "depth_rp_err": [0.001] * 4,
+                         "slope_g": [np.nan, -0.02, -0.02, np.nan], "slope_g_err": [0.001] * 4,
+                         "slope_bp": [np.nan, 0.0, -0.02, np.nan], "slope_bp_err": [0.001] * 4,
+                         "slope_rp": [np.nan, 0.0, -0.02, np.nan], "slope_rp_err": [0.001] * 4,
+                         "rep_depth_g": [np.nan, np.nan, np.nan, 0.0], "rep_depth_g_err": [0.001] * 4,
+                         "rep_depth_bp": [np.nan, np.nan, np.nan, 0.03], "rep_depth_bp_err": [0.001] * 4,
+                         "rep_depth_rp": [np.nan, np.nan, np.nan, 0.03], "rep_depth_rp_err": [0.001] * 4})
+    v = checks.band_check(rows, blend=[0.0, 0.5, 0.0, 0.0])["band_verdict"].tolist()
+    # G alone on an unblended star; the same on a blended one is untested (dilution); a grey trend; BP/RP alone
+    assert v == ["g_only", "untested", "agree", "bp_rp_only"]
+
+
+def test_eclipse_check_explains_a_binary_seen_by_gaia_and_ztf_and_not_one_long_dip():
+    import math
+
+    from cosmos_search.inject.classes.eclipsing_binary import EclipsingBinary
+
+    rng = np.random.default_rng(5)
+    eb = EclipsingBinary(period=2.7, t_peri=0.3, ecc=0.0, omega=math.pi / 2, incl=math.radians(89.0), r1=1.0,
+                         r2=0.8, m1=1.0, m2=0.8, t1=5800.0, t2=5000.0)
+    src = {"phot_g_mean_mag": 9.7, "bp_rp": 0.82, "parallax": 10.0, "parallax_error": 0.02}
+    tg = np.sort(np.r_[rng.uniform(-1000, 0, 70), 0.3 + 2.7 * np.array([-300, -200, -100])])
+    nights = np.sort(rng.choice(1200, 400, replace=False)) + 500.0
+    tz = nights + rng.uniform(0.15, 0.35, 400)
+
+    def obs(k, t, band):
+        return pd.DataFrame({"band": band, "t": t, "flux": k * (1 + 0.005 * rng.standard_normal(len(t))),
+                             "err": 0.005})
+
+    v = checks.eclipse(obs(eb.factor(tg, "G"), tg, "G"), obs(eb.factor(tz, "ztf_r"), tz, "ztf_r"), src)
+    assert v["eb_explained"]
+    assert min(abs(v["eb_period"] / eb.period - 1), abs(v["eb_period"] / eb.period - 0.5)) < 1e-3
+    dip = lambda t: 1 - 0.05 * ((t > -600) & (t < -450))  # noqa: E731
+    v = checks.eclipse(obs(dip(tg), tg, "G"), obs(np.ones(len(tz)), tz, "ztf_r"), src)
+    assert not v["eb_explained"]
+
+
+def test_detector_measures_band_slopes_and_repeat_band_depths():
+    from cosmos_search.slow import detect, period
+
+    rng = np.random.default_rng(3)
+    t = np.sort(rng.uniform(0, 1000, 60))
+    rows = []
+    for code, slope in ((0, -0.02), (1, 0.0), (2, -0.02)):
+        y = slope * (t - t.mean()) / 365.25 + rng.normal(0, 0.001, len(t))
+        rows.append(pd.DataFrame({"source_id": 7, "band": code, "t": t, "frac_corr": y}))
+    f = detect.star_features(pd.concat(rows, ignore_index=True)).iloc[0]
+    assert f["slope_bp"] == pytest.approx(0.0, abs=0.002) and f["slope_rp"] == pytest.approx(-0.02, abs=0.002)
+    assert f["slope_g"] == pytest.approx(-0.02, abs=0.002) and 0 < f["slope_bp_err"] < 0.002
+    tv = np.arange(0, 1000, 20.0)
+    yv = np.where((tv % 100) < 25, -0.05, 0.0) + rng.normal(0, 0.002, len(tv))   # two visits in five, every 100 d
+    same = [("g", tv, yv, 0.002), ("bp", tv, yv * 0.5, 0.002), ("rp", tv, yv, 0.002)]
+    out = period.star_scores(tv, yv, 0.002, same=same)
+    assert out["rep_depth"] == pytest.approx(0.05, abs=0.01) and out["rep_depth_g"] == pytest.approx(0.05, abs=0.01)
+    assert out["rep_depth_bp"] == pytest.approx(0.025, abs=0.005) and out["rep_depth_rp"] == pytest.approx(0.05, abs=0.01)
+
+
+def test_band_depths_use_only_transits_all_three_bands_have():
+    from cosmos_search.slow import checks, detect
+
+    # a grey 30-day dip; DPAC dropped BP and RP on the two deepest transits, which G kept
+    t = np.arange(0.0, 1200.0, 30.0)
+    y = np.where((t >= 600) & (t < 660), -0.10, 0.0)
+    y[t == 630] = -0.30
+    rows = []
+    for code in (0, 1, 2):
+        keep = np.ones(len(t), bool) if code == 0 else t != 630
+        rows.append(pd.DataFrame({"source_id": 3, "band": code, "t": t[keep], "frac_corr": y[keep],
+                                  "transit_id": np.arange(len(t))[keep]}))
+    ep = pd.concat(rows, ignore_index=True)
+    f = detect.star_features(ep).assign(strength_by="episode")
+    assert f["depth_g"].iloc[0] == pytest.approx(f["depth_bp"].iloc[0])
+    assert checks.band_check(f, [0.0])["band_verdict"].iloc[0] == "agree"
+    f = detect.star_features(ep.drop(columns="transit_id")).assign(strength_by="episode")
+    assert f["depth_g"].iloc[0] > f["depth_bp"].iloc[0] + 0.05      # without matching, G alone looks deeper

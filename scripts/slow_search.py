@@ -5,8 +5,8 @@
         --check-against prereg/rules/slow-v3
     python scripts/slow_search.py score --lightcurves DIR --aux AUX --rule RULE --out R
     python scripts/slow_search.py flag --run R --aux AUX --rule RULE --out L
-    python scripts/slow_search.py motion --run L
-    python scripts/slow_checks.py --fading L/fading.parquet --out L/checks --skip-still --skip-class ECL
+    python scripts/slow_search.py cuts --run L
+    python scripts/slow_checks.py --fading L/fading.parquet --out L/checks --skip-still --skip-band --skip-class ECL
 
 `sample`: light curves of every star in random small sky patches (`release.patch_ranges`) from a mirror's
 epoch-photometry table, with each star's G and BP-RP, for the release-day thresholds. `score`: every star of a
@@ -14,8 +14,9 @@ directory of light-curve files (a `dr4_bulk pull`, mirror fetches or DataLink re
 `--dr3-bulk` every star of DR3's bulk files streamed from ESA's CDN (the trial run); writes scores per file and keeps
 the light curves of stars near a threshold, with done-markers so a second run resumes. `flag`: the shared-date test
 over the whole run, then the fading list, the `early` list and their rising mirrors (`search.flag`), each ordered
-by strength, and summary.json. `motion`: parallax and proper motion of the listed stars, setting aside those
-consistent with zero (quasars, galaxies, stars in other galaxies) as `still`.
+by strength, and summary.json. `cuts`: parallax and proper motion of the listed stars, setting aside those
+consistent with zero (quasars, galaxies, stars in other galaxies) as `still`, and whether each fade's G change
+agrees with its BP and RP changes (`band_verdict`).
 """
 
 import argparse
@@ -40,11 +41,11 @@ _STATE = {}
 STATS_COLUMNS = {"source_id", "gbin", "n_visits", "sigma_visit", "abbe", "s_fade", "s_rise", "fade_kind", "rise_kind",
                  "slope_z", "slope", "s_rep", "s_rep_bright", "rep_period", "rep_depth", "rep_band_z", "dim_t0",
                  "dim_t1", "dim_visits", "dim_depth", "depth_bp", "depth_bp_err", "depth_rp", "depth_rp_err",
-                 "rise_t0", "slow_z", "t_first", "t_last"}
+                 "rise_t0", "slow_z", "t_first", "t_last", "s_rep", *search.BAND_COLUMNS}
 LIST_COLUMNS = ["id", "phot_g_mean_mag", "bp_rp", "gbin", "by", "strength", "rise_strength", "n_visits", "sigma_visit", "abbe",
                 "s_fade", "fade_kind", "slope_z", "slope", "s_rep", "rep_period", "s_rise", "rise_kind", "slow_z",
                 "dim_depth", "dim_t0", "dim_t1", "dim_visits", "depth_bp", "depth_bp_err", "depth_rp",
-                "depth_rp_err", "rep_depth", "rep_band_z", "t_first", "t_last"]
+                "depth_rp_err", "rep_depth", "rep_band_z", "t_first", "t_last", "strength_by", *search.BAND_COLUMNS]
 
 
 # -- sample -----------------------------------------------------------------------------------------------------
@@ -267,8 +268,9 @@ def _read_stats(files, ranges, lo, hi):
     use = [f for f, (a, b) in zip(files, ranges) if a < hi and b >= lo]
     if not use:
         return pd.DataFrame()
-    t = ds.dataset(use, format="parquet").to_table(
-        columns=sorted(STATS_COLUMNS), filter=(ds.field("source_id") >= lo) & (ds.field("source_id") < hi))
+    d = ds.dataset(use, format="parquet")
+    t = d.to_table(columns=sorted(STATS_COLUMNS & set(d.schema.names)),
+                   filter=(ds.field("source_id") >= lo) & (ds.field("source_id") < hi))
     return t.to_pandas().astype({"fade_kind": "category", "rise_kind": "category"})
 
 
@@ -315,22 +317,30 @@ def flag(a):
     print(json.dumps(summ, indent=1))
 
 
-# -- motion -----------------------------------------------------------------------------------------------------
+# -- cuts -------------------------------------------------------------------------------------------------------
 
-def motion_cmd(a):
-    """Parallax and proper motion of every star above strength 1 either way (gaia_source, by uploaded source_id),
-    `still` for those consistent with zero (`search.motion`), added to the three lists; motion_summary.json gives
-    the fading and rising counts above each strength without the still stars, which is the comparison to read."""
+def cuts_cmd(a):
+    """Automated cuts before anyone reads the lists, added to them as columns:
+
+    - `still`: parallax and proper motion consistent with zero (`search.motion`), for every star above strength 1
+      either way: quasars, galaxies and stars in other galaxies, read as a list of their own;
+    - `band_verdict` on the fading list (`checks.band_check`): whether G's change agrees with BP's and RP's, with
+      each star's BP/RP blended-transit fraction (`blend`) from the same gaia_source rows.
+
+    cuts_summary.json gives the fading and rising counts above each strength without the still stars, and the
+    fading counts by band verdict."""
     from concurrent.futures import ThreadPoolExecutor
 
     from astropy.table import Table
 
     from cosmos_search.gaia.archive import tap
+    from cosmos_search.slow import checks
+    from cosmos_search.vetting.stage0 import BLEND_COLS
 
     run = Path(a.run)
     flags = pd.read_parquet(run / "flags.parquet", columns=["id", "gbin", "strength", "rise_strength"])
     ids = flags.loc[(flags["strength"] > 1) | (flags["rise_strength"] > 1), "id"].to_numpy()
-    cols = ", ".join(f"g.{c}" for c in ("source_id", "astrometric_params_solved") + search.MOTION_COLUMNS)
+    cols = ", ".join(f"g.{c}" for c in ("source_id", "astrometric_params_solved") + search.MOTION_COLUMNS + BLEND_COLS)
     t, t0 = tap(), time.time()
 
     def fetch(chunk):
@@ -348,18 +358,29 @@ def motion_cmd(a):
     chunks = [ids[i:i + a.chunk] for i in range(0, len(ids), a.chunk)]
     with ThreadPoolExecutor(a.workers) as ex:
         g = pd.concat(list(ex.map(fetch, chunks)), ignore_index=True)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        blend = np.fmax(g["phot_bp_n_blended_transits"] / g["phot_bp_n_obs"],
+                        g["phot_rp_n_blended_transits"] / g["phot_rp_n_obs"])
     m = pd.concat([g[["source_id"]], search.motion(g)], axis=1).rename(columns={"source_id": "id"})
-    m.to_parquet(run / "motion.parquet", index=False)
-    print(f"{len(g)} of {len(ids)} stars' astrometry in {time.time() - t0:.0f} s ({len(chunks)} queries); "
+    m["blend"] = blend.to_numpy(float)
+    m.to_parquet(run / "cuts.parquet", index=False)
+    print(f"{len(g)} of {len(ids)} stars' gaia_source rows in {time.time() - t0:.0f} s ({len(chunks)} queries); "
           f"still {int(m['still'].sum())}", flush=True)
+    summ = {"still": int(m["still"].sum()), "looked_up": int(len(ids)), "found": int(len(g))}
     for name in ("fading", "early", "rising"):
-        d = pd.read_parquet(run / f"{name}.parquet").drop(columns=["chi2_motion", "still"], errors="ignore")
+        d = pd.read_parquet(run / f"{name}.parquet").drop(
+            columns=["chi2_motion", "still", "blend", "band_z", "band_verdict"], errors="ignore")
         d = d.merge(m, on="id", how="left")
         d["still"] = d["still"].fillna(False).astype(bool)
+        if name == "fading" and "strength_by" in d:
+            d = pd.concat([d, checks.band_check(d, d["blend"])], axis=1)
+            moving = d[~d["still"]]
+            summ["fading_band_verdicts_moving"] = {
+                grp: x["band_verdict"].value_counts().to_dict()
+                for grp, x in moving.groupby(np.where(moving["gbin"] <= 7, "G<19", "G>=19"))}
         d.to_parquet(run / f"{name}.parquet", index=False)
-    summ = {"still": int(m["still"].sum()), "looked_up": int(len(ids)), "found": int(len(g)),
-            "above_strength_moving": search.tail_moving(flags, m.loc[m["still"], "id"])}
-    (run / "motion_summary.json").write_text(json.dumps(summ, indent=1))
+    summ["above_strength_moving"] = search.tail_moving(flags, m.loc[m["still"], "id"])
+    (run / "cuts_summary.json").write_text(json.dumps(summ, indent=1))
     print(json.dumps(summ, indent=1))
 
 
@@ -410,12 +431,12 @@ def main(argv=None):
     f.add_argument("--out")
     f.add_argument("--chunk-level", type=int, default=1, help="HEALPix level of the sky regions flagged one at a time")
     f.set_defaults(func=flag)
-    m = sub.add_parser("motion", help="parallax and proper motion of listed stars; set aside the still ones")
+    m = sub.add_parser("cuts", help="still stars (no measurable motion) and G against BP and RP, on the lists")
     m.add_argument("--run", required=True, help="the flag step's output directory")
     m.add_argument("--schema", default="gaiadr4")
     m.add_argument("--chunk", type=int, default=50_000, help="source_ids per uploaded query")
     m.add_argument("--workers", type=int, default=4)
-    m.set_defaults(func=motion_cmd)
+    m.set_defaults(func=cuts_cmd)
     a = ap.parse_args(argv)
     if a.cmd == "score" and not (a.lightcurves or a.dr3_bulk):
         ap.error("score needs --lightcurves or --dr3-bulk")

@@ -31,24 +31,31 @@ POOLED = -1  # colour bin code for the all-colour fallback cells
 BANDS = {0: "G", 1: "BP", 2: "RP"}
 
 
+def _columns(lc):
+    return lc.column_names if hasattr(lc, "column_names") else list(lc.columns)
+
+
 def normalise(lc):
     """Good epochs of a long light-curve table (epoch.SCHEMA) as fractional flux about each star's median.
 
-    Returns source_id, band (0 G, 1 BP, 2 RP), t (days), frac, err_frac and fov. Epochs DPAC rejected, with
-    non-positive flux or without an error are dropped.
+    Returns source_id, band (0 G, 1 BP, 2 RP), t (days), frac, err_frac, fov and transit_id. Epochs DPAC
+    rejected, with non-positive flux or without an error are dropped.
     """
     band = np.asarray(lc["band"].combine_chunks().indices) if hasattr(lc["band"], "combine_chunks") \
         else np.asarray(lc["band"])
     df = pd.DataFrame({"source_id": np.asarray(lc["source_id"]), "band": band.astype(np.int8),
                        "t": np.asarray(lc["t"]), "flux": np.asarray(lc["flux"]), "err": np.asarray(lc["err"]),
-                       "flags": np.asarray(lc["flags"]), "fov": np.asarray(lc["fov"])})
+                       "flags": np.asarray(lc["flags"]), "fov": np.asarray(lc["fov"]),
+                       "transit_id": np.asarray(lc["transit_id"]) if "transit_id" in _columns(lc)
+                       else np.zeros(len(band), np.int64)})
     good = ((df["flags"] & features.FLAG_VARI_REJECT) == 0) & (df["flux"] > 0) & (df["err"] > 0) \
         & np.isfinite(df["err"])
     df = df[good]
     med = df.groupby(["source_id", "band"])["flux"].transform("median")
     return pd.DataFrame({"source_id": df["source_id"].to_numpy(), "band": df["band"].to_numpy(),
                          "t": df["t"].to_numpy(), "frac": (df["flux"] / med - 1).to_numpy(),
-                         "err_frac": (df["err"] / med).to_numpy(), "fov": df["fov"].to_numpy()})
+                         "err_frac": (df["err"] / med).to_numpy(), "fov": df["fov"].to_numpy(),
+                         "transit_id": df["transit_id"].to_numpy()})
 
 
 def star_cells(aux):

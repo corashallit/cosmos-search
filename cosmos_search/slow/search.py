@@ -26,6 +26,9 @@ from cosmos_search.slow import detect, drift, period, rule_v3, select
 from cosmos_search.slow.rule import mag_group
 
 KEEP_FRACTION = 0.8   # light curves are kept when a score reaches this fraction of its threshold, either direction
+# G, BP and RP changes behind `checks.band_check` (dim_depth and the rest of the episode's are copied anyway).
+BAND_COLUMNS = ("dim_depth_err", "rep_depth_err", "depth_g", "depth_g_err",
+                *(f"{k}_{b}{x}" for k in ("slope", "rep_depth") for b in ("g", "bp", "rp") for x in ("", "_err")))
 STILL_P = 1e-3        # parallax and proper motion consistent with zero at this level: `still`
 MOTION_COLUMNS = ("parallax", "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error", "pmra_pmdec_corr",
                   "parallax_pmra_corr", "parallax_pmdec_corr")
@@ -96,13 +99,23 @@ def flag(stats, rule_dir=rule_v3.RULE_DIR, shared_flags=None):
     out["rise_set_aside"] = (s_rise > s_th) & out["shared_rise"].to_numpy()
     s_rise_ns = np.where(out["shared_rise"].to_numpy(), np.nan, s_rise)
     rep_b = stats["s_rep_bright"].to_numpy() if "s_rep_bright" in stats else np.full(len(stats), np.nan)
-    out["strength"] = _strength(stats["s_fade"].to_numpy() / s_th, -slope_z / z_th, stats["s_rep"].to_numpy() / rep_th)
+    fade_ratios = (stats["s_fade"].to_numpy() / s_th, -slope_z / z_th, stats["s_rep"].to_numpy() / rep_th)
+    out["strength"] = _strength(*fade_ratios)
+    out["strength_by"] = _strength_by(*fade_ratios)
     out["rise_strength"] = _strength(s_rise_ns / s_th, slope_z / z_th, rep_b / rep_th)
     for c in ("slow_z", "slope", "dim_depth", "dim_t0", "dim_t1", "dim_visits", "depth_bp", "depth_bp_err",
-              "depth_rp", "depth_rp_err", "rep_period", "rep_depth", "rep_band_z", "t_first", "t_last"):
+              "depth_rp", "depth_rp_err", "rep_period", "rep_depth", "rep_band_z", "t_first", "t_last") + BAND_COLUMNS:
         if c in stats:
             out[c] = stats[c].to_numpy()
     return out
+
+
+def _strength_by(*ratios):
+    """Which of episode, trend and repeat gives the strength (NaN ratios never win; "" when none is finite)."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        parts = np.vstack(ratios)
+    parts = np.where(np.isfinite(parts), parts, -np.inf)
+    return np.where(np.isfinite(parts.max(axis=0)), np.array(["episode", "trend", "repeat"])[parts.argmax(axis=0)], "")
 
 
 def _strength(*ratios):

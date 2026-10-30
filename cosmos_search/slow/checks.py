@@ -11,13 +11,28 @@ Each check turns one question into numbers that a natural explanation predicts d
   and re-emits it at a few hundred kelvin brightens them (`reemission`). A change in the star itself dims W1/W2
   far less than G (Rayleigh-Jeans side).
 - `wise_slope`: for a steady fade, the W1/W2 trend over the same years, to compare with Gaia's slope.
+  Both NEOWISE errors come from the scatter between visits, which a handful of visits measures poorly: it is
+  widened by Student's t for the visits it rests on, and held at or above WISE_FLOOR times the scatter within
+  visits.
 - `after`: ZTF from 2018 on, inside and past DR4's end (2020-01-20): did the change go on, stop or recover?
+- `eclipse`: whether a strict-period eclipsing binary explains the dips (`ebfilter`, on G and ZTF together; Gaia
+  alone is too sparse for it).
+- `band_agreement`, `band_check`: whether G's change agrees with BP's and RP's. G's passband spans both, so any
+  change in the source's own light changes G by a flux-weighted mix of the BP and RP changes,
+  d_G = w d_BP + (1 - w) d_RP with w (BP's share of the G signal) in [0.1, 0.9] from M dwarfs to A stars, whatever
+  the colour of the change (grey, dust, a cooler star, even BP down and RP up). G outside that range means the
+  change is not in the source's light: either G alone moved (an instrument fault; a neighbour inside G's narrow
+  window is inside BP and RP's too, so it cannot do this), or BP and RP moved and G did not (a neighbour inside BP
+  and RP's 3.5 x 2.1 arcsec window but outside G's 0.7 x 2.1). The one real case that puts G outside is dilution:
+  a constant neighbour in the BP/RP window shrinks their fractional changes, so G looks deeper. Stars with blended
+  BP/RP transits are therefore not judged on that side (as `vetting.stage0`, docs/vetting.md §12).
 
 Inputs are plain tables so each check can be fed from whichever archive answers on the day.
 """
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 from cosmos_search.energy import budget
 
@@ -27,6 +42,8 @@ DUST_BP_RP = 1.7               # A_BP / A_RP for interstellar-like dust and a Su
 WISE_OVER_G_DUST = {"W1": 0.07, "W2": 0.05}   # A_W / A_G for interstellar-like dust, approximately
 IRSA_TAP = "https://irsa.ipac.caltech.edu/TAP"
 NEOWISE_RADIUS_ARCSEC = 3.0
+WISE_FLOOR = 1.36    # scatter of NEOWISE visit means over their error from the exposures within each visit,
+                     # median of 280 calibration stars (2026-10-30, docs/arms/slow-changes.md)
 
 
 def colour(depth_bp, err_bp, depth_rp, err_rp):
@@ -38,6 +55,84 @@ def colour(depth_bp, err_bp, depth_rp, err_rp):
     e = abs(r) * np.hypot(err_bp / max(abs(depth_bp), 1e-12), err_rp / depth_rp)
     return {"ratio": float(r), "ratio_err": float(e), "z_grey": float((r - 1) / e) if e > 0 else np.nan,
             "z_dust": float((r - DUST_BP_RP) / e) if e > 0 else np.nan}
+
+
+W_RANGE = (0.1, 0.9)    # BP's share of the G signal, M dwarfs to A stars (vetting.stage0)
+BAND_K = 3.0            # errors outside the mixing range that make a verdict
+BLEND_MAX = 0.05        # BP/RP blended-transit fraction below which a star counts as unblended (vetting.stage0)
+
+
+def band_agreement(d_g, e_g, d_bp, e_bp, d_rp, e_rp, w_range=W_RANGE):
+    """How far G's change lies outside the range of w d_BP + (1 - w) d_RP for w in w_range, in units of the
+    combined error at the nearer end: positive when G changed more than any mix of BP and RP allows, negative when
+    less, 0 inside, NaN when an input is missing. Changes in any consistent unit (depths, or minus slopes)."""
+    d_g, e_g, d_bp, e_bp, d_rp, e_rp = (np.asarray(x, float) for x in (d_g, e_g, d_bp, e_bp, d_rp, e_rp))
+    w0, w1 = w_range
+    m0, m1 = w0 * d_bp + (1 - w0) * d_rp, w1 * d_bp + (1 - w1) * d_rp
+    s0 = np.sqrt(e_g ** 2 + (w0 * e_bp) ** 2 + ((1 - w0) * e_rp) ** 2)
+    s1 = np.sqrt(e_g ** 2 + (w1 * e_bp) ** 2 + ((1 - w1) * e_rp) ** 2)
+    hi, s_hi = np.where(m0 >= m1, m0, m1), np.where(m0 >= m1, s0, s1)
+    lo, s_lo = np.where(m0 >= m1, m1, m0), np.where(m0 >= m1, s1, s0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        z = np.where(d_g > hi, (d_g - hi) / s_hi, np.where(d_g < lo, (d_g - lo) / s_lo, 0.0))
+    bad = ~(np.isfinite(d_g) & np.isfinite(d_bp) & np.isfinite(d_rp) & (s0 > 0) & (s1 > 0))
+    return np.where(bad, np.nan, z)
+
+
+def band_inputs(rows):
+    """G, BP and RP changes and errors for each listed star, from the score that set its strength
+    (`strength_by`): the episode's depths, minus the trends' slopes, or the repeated dip's depths, each over the
+    transits measured in all three bands (`detect.same_transits`)."""
+    by = rows["strength_by"].to_numpy()
+    col = lambda c: rows[c].to_numpy(float) if c in rows else np.full(len(rows), np.nan)  # noqa: E731
+    pick = {"episode": [(col(f"depth_{b}"), col(f"depth_{b}_err")) for b in ("g", "bp", "rp")],
+            "trend": [(-col(f"slope_{b}"), col(f"slope_{b}_err")) for b in ("g", "bp", "rp")],
+            "repeat": [(col(f"rep_depth_{b}"), col(f"rep_depth_{b}_err")) for b in ("g", "bp", "rp")]}
+    pick = {k: [a for pair in v for a in pair] for k, v in pick.items()}
+    out = [np.full(len(rows), np.nan) for _ in range(6)]
+    for k, arrays in pick.items():
+        m = by == k
+        for o, a in zip(out, arrays):
+            o[m] = a[m]
+    return out
+
+
+def band_check(rows, blend, k=BAND_K):
+    """Per listed star: band_z (`band_agreement` on `band_inputs`) and band_verdict: "agree"; "g_only" (G changed
+    more than BP and RP allow, on a star whose BP/RP transits are unblended: blend < BLEND_MAX); "bp_rp_only" (G
+    changed less: the change is in BP and RP's wider window, a neighbour); "untested" (a band missing, or G
+    deeper on a blended star or one with no blend count, where dilution can do that)."""
+    z = band_agreement(*band_inputs(rows))
+    blend = np.asarray(blend, float)
+    v = np.full(len(z), "untested", dtype=object)
+    v[np.abs(z) <= k] = "agree"
+    v[(z > k) & (blend < BLEND_MAX)] = "g_only"
+    v[z < -k] = "bp_rp_only"
+    return pd.DataFrame({"band_z": z, "band_verdict": v}, index=rows.index)
+
+
+EB_KEYS = ("explained", "periodic_unphysical", "delta_bits", "period", "duration_ok", "target_covered", "n_dip_epochs",
+           "n_epochs")
+
+
+def eclipse(g, ztf, source):
+    """`ebfilter.decide` on a candidate's G epochs (t, flux) and ZTF epochs (band, t, flux, err; each ZTF object at
+    its own median), with the deepest G epoch as the selected dip. source: phot_g_mean_mag, bp_rp, parallax,
+    parallax_error (for the eclipse-duration limit). Returns {"eb_" + key: ...} for EB_KEYS and eb_bands."""
+    from cosmos_search.ebfilter import decide
+    from cosmos_search.vetting.candidate import LightCurve
+
+    gt, gf = np.asarray(g["t"], float), np.asarray(g["flux"], float)
+    lcs = [LightCurve("G", gt, gf, np.zeros(len(gt)))]
+    for b, d in ztf.groupby("band") if len(ztf) else ():
+        d = d.sort_values("t")
+        lcs.append(LightCurve(str(b), d["t"].to_numpy(float), d["flux"].to_numpy(float), d["err"].to_numpy(float)))
+    ok = np.isfinite(gf)
+    t_target = float(gt[ok][np.argmin(gf[ok])]) if ok.any() else None
+    v = decide.decide(lcs, source, t_target)
+    out = {f"eb_{k}": v.get(k) for k in EB_KEYS}
+    out["eb_bands"] = ",".join(v.get("bands", []))
+    return out
 
 
 def neowise_adql(ra, dec, radius_arcsec=NEOWISE_RADIUS_ARCSEC):
@@ -80,9 +175,17 @@ def _visits(mjd, flux, gap=30.0):
     return s[s["n"] >= 3].reset_index(drop=True)
 
 
+def _scatter(sample_sd, visit_err, dof):
+    """Visit-to-visit scatter: the sample's (from dof degrees of freedom), widened so that its 95% coverage is
+    Gaussian's, but not below WISE_FLOOR times the typical within-visit error (which rests on every exposure)."""
+    t_wide = float(stats.t.ppf(0.975, dof) / stats.norm.ppf(0.975))
+    return max(float(sample_sd) * t_wide, WISE_FLOOR * float(np.median(visit_err)))
+
+
 def wise_change(lc, t0_mjd, t1_mjd):
-    """Per band: fractional change of the mean visit flux inside [t0, t1] against the visits outside, with its
-    error (from the visit-to-visit scatter outside, so it includes the star's own slow variability)."""
+    """Per band: fractional change of the mean visit flux inside [t0, t1] against the median visit outside, with
+    its error (from the visit-to-visit scatter outside, so it includes the star's own slow variability; floored and
+    widened as in the module notes, and counting the outside median's own error)."""
     out = {}
     for b in ("W1", "W2"):
         d = lc[lc["band"] == b]
@@ -94,16 +197,17 @@ def wise_change(lc, t0_mjd, t1_mjd):
         if inside.sum() < 1 or (~inside).sum() < 3:
             out[b] = (np.nan, np.nan, int(inside.sum()))
             continue
+        n_in, n_out = int(inside.sum()), int((~inside).sum())
         base = float(np.median(v.loc[~inside, "flux"]))
-        scatter = float(np.std(v.loc[~inside, "flux"], ddof=1))
-        out[b] = (float(v.loc[inside, "flux"].mean() / base - 1), scatter / base / np.sqrt(inside.sum()),
-                  int(inside.sum()))
+        scatter = _scatter(np.std(v.loc[~inside, "flux"], ddof=1), v.loc[~inside, "err"], n_out - 1)
+        err = scatter / base * np.sqrt(1 / n_in + np.pi / 2 / n_out)
+        out[b] = (float(v.loc[inside, "flux"].mean() / base - 1), float(err), n_in)
     return out
 
 
 def wise_slope(lc, t0_mjd, t1_mjd):
     """Per band: linear trend of the visit means inside [t0, t1], in fraction of the median per year, with its
-    error from the residual scatter (None below 4 visits). For a steady fade, compare with Gaia's slope: grey
+    error from the residual scatter (floored and widened as in the module notes; None below 4 visits). For a steady fade, compare with Gaia's slope: grey
     blocking gives the same slope, dust in front WISE_OVER_G_DUST of it, a re-emitting shell the opposite sign."""
     out = {}
     for b in ("W1", "W2"):
@@ -113,10 +217,12 @@ def wise_slope(lc, t0_mjd, t1_mjd):
             out[b] = (np.nan, np.nan, len(v))
             continue
         x = (v["mjd"].to_numpy() - v["mjd"].mean()) / 365.25
-        y = v["flux"].to_numpy() / np.median(v["flux"])
+        med = np.median(v["flux"])
+        y = v["flux"].to_numpy() / med
         slope, icpt = np.polyfit(x, y, 1)
         res = y - (slope * x + icpt)
-        err = np.sqrt(np.sum(res ** 2) / (len(x) - 2) / np.sum(x ** 2))
+        sd = _scatter(np.sqrt(np.sum(res ** 2) / (len(x) - 2)), v["err"] / med, len(x) - 2)
+        err = sd / np.sqrt(np.sum(x ** 2))
         out[b] = (float(slope), float(err), len(v))
     return out
 

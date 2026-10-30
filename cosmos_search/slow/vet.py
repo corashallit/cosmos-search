@@ -155,11 +155,14 @@ def change_window(row):
 def band_changes(epochs, row):
     """Fractional G, BP and RP deficit of the detected change and its error, per band: for an episode the mean
     deficit of the visits inside its window against the median of those outside (`detect._band_depth`); for a
-    trend, minus the OLS slope of the visit means times the span, with the slope's error from the residuals."""
+    trend, minus the OLS slope of the visit means times the span, with the slope's error from the residuals. Only
+    transits that all three bands have are used (`detect.same_transits`)."""
     t0, t1, kind = change_window(row)
     out = {}
+    tid = epochs["transit_id"].to_numpy() if "transit_id" in epochs else None
+    same = detect.same_transits(epochs["band"].to_numpy(), tid)
     for code, name in ((0, "G"), (1, "BP"), (2, "RP")):
-        e = epochs[epochs["band"] == code].sort_values("t")
+        e = epochs.iloc[same[name.lower()]].sort_values("t")
         t, y = e["t"].to_numpy(float), e["frac_corr"].to_numpy(float)
         if kind != "trend":
             out[name] = detect._band_depth(t, y, t0, t1)
