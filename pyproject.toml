@@ -3,6 +3,9 @@ name = "cosmos-search"
 version = "0.0.1"
 description = "First look at Gaia DR4 for technosignature-style anomalies"
 requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+authors = [{name = "Cora Shallit"}]
 dependencies = ["numpy", "pyyaml", "pyrage", "requests", "pyvo", "astroquery", "astropy", "pyarrow", "pandas", "scipy", "scikit-learn", "lsdb", "numba", "healpy"]
 
 [project.optional-dependencies]
