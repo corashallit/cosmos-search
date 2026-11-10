@@ -1,16 +1,21 @@
 """Release-day slow-change search over light curves: score every star, then flag it with rule slow-v3 (or with the
 thresholds `release` sets from DR4's own stars, written in the same format).
 
-    stats = score(lc, cells, table)   # one light-curve table at a time (a bulk file, a mirror fetch), in parallel
-    flags = flag(stats, rule_dir)     # once every file is scored: the shared-date test needs whole sky patches
+    summ, stats, keep = score_all(lc, table, thr, thr_p)   # one light-curve table at a time (a chunk of a bulk file)
+    flags = flag(merge(summ, stats), rule_dir)             # once every file is scored, one sky region at a time
     summary(flags)                    # list sizes per magnitude range, and the mirror (getting brighter) beside them
 
-`score` gives each star the detector's scores (`detect`), the period search's (`period`) and the summary DR4
-publishes for every source in `all_source_photometry` (n, unit-weight variance and Abbé value of the uncorrected
-G fluxes, and `select.slow_z` from them), so a run over every star also shows what the whole-sky selection would
-have kept. `flag` adds the rising mirror of each list: getting brighter by the same scores and thresholds, the
-false-alarm estimate the thresholds were set from. `strength` (each score over its threshold, the largest)
-orders the lists; it is not a ranking by value.
+`score_all` summarises every star of the table (`summary.star_summary`: trend, episode scores and their windows,
+the same numbers as the detector's), so the trend and episode parts of the rule are tested on every star at every
+magnitude and no star is chosen before its light curve is read. The detector itself (`detect`, for the episode's
+depth in each band) then runs only on stars within KEEP_FRACTION of a threshold, and the period search (`period`)
+only on stars whose bound on its score (`summary`, rep_bound) allows a pass, down to PERIOD_G_MAX. Neither choice
+can lose a star the rule would flag. `score` is the earlier form: detector and period search on every star given.
+
+`flag` takes the trend measured against neighbours of similar brightness (`summary.apply_reference`) and adds the
+rising mirror of each list: getting brighter by the same scores and thresholds, the false-alarm estimate the
+thresholds were set from. `strength` (each score over its threshold, the largest) says how far past a threshold a
+star is; reading order comes from `kinds.rank`, within kind of star.
 
 `still` marks stars whose parallax and proper motion are both consistent with zero: on the DR3 trial run nearly
 all were quasars (and DR3's AGN class nearly all still), which crowd the top of every list at G >= 19. They go to a
@@ -22,10 +27,15 @@ list of their own, read separately, since stars in other galaxies are still too.
 import numpy as np
 import pandas as pd
 
+from cosmos_search.gaia import features
 from cosmos_search.slow import detect, drift, period, rule_v3, select
+from cosmos_search.slow import summary as per_star  # `summary` below is the lists' summary
 from cosmos_search.slow.rule import mag_group
 
 KEEP_FRACTION = 0.8   # light curves are kept when a score reaches this fraction of its threshold, either direction
+PERIOD_G_MAX = 16.0   # the period search runs on stars brighter than this whose bound allows a pass
+LC_FRACTION = 0.9     # light curves kept from this fraction of a threshold up, on the fading side
+LC_G_MAX = 19.0       # and only for stars brighter than this
 # G, BP and RP changes behind `checks.band_check` (dim_depth and the rest of the episode's are copied anyway).
 BAND_COLUMNS = ("dim_depth_err", "rep_depth_err", "depth_g", "depth_g_err",
                 *(f"{k}_{b}{x}" for k in ("slope", "rep_depth") for b in ("g", "bp", "rp") for x in ("", "_err")))
@@ -78,14 +88,86 @@ def keep_mask(stats, thr, thr_p, fraction=KEEP_FRACTION):
     return np.nan_to_num(m, nan=False).astype(bool)
 
 
+def score_all(lc, table, thr, thr_p, cells=None, period_search=True, period_g_max=PERIOD_G_MAX, random_share=0.0,
+              fraction=KEEP_FRACTION, keep_fraction=LC_FRACTION, keep_g_max=LC_G_MAX):
+    """Every star of a light-curve table (epoch.SCHEMA, whole stars, ideally one compact patch of sky).
+
+    Returns (summ, stats, keep):
+    - summ: `summary.star_summary` for every star, with `slope_z_local`, the trend against the table's own stars
+      of similar brightness (the whole run's reference is applied later, by `flag`), and `full`, whether the star
+      is in stats;
+    - stats: `score`'s columns for the stars that need more than the summary: those within `fraction` of the
+      episode or trend threshold either way (by the unreferenced or the local trend), those brighter than
+      period_g_max whose bound allows a repeat score past its threshold (the period search runs on these only),
+      and a random share (`summary.random_share`). With them the archive-style summary of the uncorrected G
+      epochs (n_g, uwv_g, abbe_g, slow_z) and the two bounds;
+    - keep: source_ids whose light curves are worth keeping: stars brighter than keep_g_max within keep_fraction
+      of a threshold on the fading side, and the random share."""
+    ep, stars = per_star.corrected_epochs(lc, table, cells)
+    summ = per_star.star_summary(lc, epochs=(ep, stars))
+    if not len(summ):
+        return summ.assign(slope_z_local=np.nan, full=False), pd.DataFrame(), np.array([], np.int64)
+    summ["slope_z_local"] = per_star.apply_reference(summ, per_star.reference_table(summ))["slope_z"].to_numpy()
+    s_th, z_th, rep_th = thresholds_for(summ["gbin"], thr, thr_p)
+    z, zl, g = summ["slope_z"].to_numpy(), summ["slope_z_local"].to_numpy(), summ["g_mag"].to_numpy()
+    with np.errstate(invalid="ignore"):
+        near = (summ["s_fade"].to_numpy() > fraction * s_th) | (summ["s_rise"].to_numpy() > fraction * s_th) \
+            | (np.abs(z) > fraction * z_th) | (np.abs(zl) > fraction * z_th)
+        rep = (np.fmax(summ["rep_bound"].to_numpy(), summ["rep_bound_bright"].to_numpy()) > rep_th) \
+            & (g < period_g_max) & bool(period_search)
+    sid = summ["source_id"].to_numpy()
+    scored = np.isfinite(summ["sigma_visit"].to_numpy())
+    random = per_star.random_share(sid, random_share) & scored if random_share > 0 else np.zeros(len(sid), bool)
+    need = (near | rep | random) & scored
+    summ["full"] = need
+    if not need.any():
+        return summ, pd.DataFrame(), np.array([], np.int64)
+    sub = ep[ep["source_id"].isin(sid[need])]
+    stats = detect.star_features(sub)
+    if rep.any():
+        stats = stats.merge(period.star_features(sub[sub["source_id"].isin(sid[rep & scored])]), on="source_id",
+                            how="left")
+    extra = summ.loc[need, ["source_id", "gbin", "cbin", "g_mag", "bp_rp", "n_g", "uwv_g", "abbe_g",
+                            "slope_z_local", "rep_bound", "rep_bound_bright"]]
+    extra = extra.assign(slow_z=select.slow_z(extra["n_g"], extra["uwv_g"], extra["abbe_g"]))
+    stats = stats.merge(extra, on="source_id", how="left")
+    th = thresholds_for(stats["gbin"], thr, thr_p)
+    with np.errstate(invalid="ignore"):
+        fade = _strength(stats["s_fade"].to_numpy() / th[0], -stats["slope_z"].to_numpy() / th[1],
+                         -stats["slope_z_local"].to_numpy() / th[1],
+                         (stats["s_rep"].to_numpy() if "s_rep" in stats else np.full(len(stats), np.nan)) / th[2])
+        keep = stats.loc[(fade > keep_fraction) & (stats["g_mag"].to_numpy() < keep_g_max), "source_id"].to_numpy()
+    return summ, stats, np.union1d(keep, sid[random])
+
+
+# Columns `flag` takes from the full scores when a star has them (the summary holds the rest for every star).
+STATS_ONLY = ("s_rep", "s_rep_bright", "rep_period", "rep_depth", "rep_band_z", "dim_visits", "depth_bp",
+              "depth_bp_err", "depth_rp", "depth_rp_err", "dim_depth_err", "rep_depth_err", "depth_g", "depth_g_err",
+              *(f"rep_depth_{b}{x}" for b in ("g", "bp", "rp") for x in ("", "_err")))
+
+
+def merge(summ, stats):
+    """One row per star for `flag`: the summary of every star with the full scores' extra columns where a star has
+    them (NaN elsewhere: a star without a period-search score cannot pass the repeat threshold)."""
+    out = summ.copy()
+    cols = [c for c in STATS_ONLY if stats is not None and c in stats]
+    if cols:
+        out = out.merge(stats[["source_id", *cols]], on="source_id", how="left")
+    for c in ("s_rep", "s_rep_bright"):
+        if c not in out:
+            out[c] = np.nan
+    return out
+
+
 def flag(stats, rule_dir=rule_v3.RULE_DIR, shared_flags=None):
     """rule_v3.apply on every scored star, plus the mirror: `rising` (getting brighter by the episode score, its
     change date not shared, or by the trend), `rising_rep` (repeated brightening, which has no repeat conditions
     and so over-counts), `strength` (largest of each fading score over its threshold) and `rise_strength` (the same
     for getting brighter, repeated brightening included).
 
-    stats: `score` output for whole sky patches (every scored star of a level-6 HEALPix pixel at once), joined
-    with the cells (gbin)."""
+    stats: one row per star for whole sky patches (every star of a level-6 HEALPix pixel at once) with gbin:
+    `merge(summ, stats)` with the neighbour reference applied (`summary.apply_reference`), or `score` output
+    joined with the cells."""
     thr, thr_p, _ = rule_v3.load(rule_dir)
     sh = rule_v3.shared(stats) if shared_flags is None else shared_flags
     out = rule_v3.apply(stats, thr, thr_p, sh)
@@ -104,7 +186,9 @@ def flag(stats, rule_dir=rule_v3.RULE_DIR, shared_flags=None):
     out["strength_by"] = _strength_by(*fade_ratios)
     out["rise_strength"] = _strength(s_rise_ns / s_th, slope_z / z_th, rep_b / rep_th)
     for c in ("slow_z", "slope", "dim_depth", "dim_t0", "dim_t1", "dim_visits", "depth_bp", "depth_bp_err",
-              "depth_rp", "depth_rp_err", "rep_period", "rep_depth", "rep_band_z", "t_first", "t_last") + BAND_COLUMNS:
+              "depth_rp", "depth_rp_err", "rep_period", "rep_depth", "rep_band_z", "t_first", "t_last", "rise_t0",
+              "g_mag", "bp_rp", "slope_err", "slope_z_raw", "slope_ref", "slope_ref_err", "n_ref", "ref_level",
+              "quiet", "abbe_bp", "abbe_rp") + BAND_COLUMNS:
         if c in stats:
             out[c] = stats[c].to_numpy()
     return out

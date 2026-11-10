@@ -35,11 +35,12 @@ def _columns(lc):
     return lc.column_names if hasattr(lc, "column_names") else list(lc.columns)
 
 
-def normalise(lc):
+def normalise(lc, with_median=False):
     """Good epochs of a long light-curve table (epoch.SCHEMA) as fractional flux about each star's median.
 
     Returns source_id, band (0 G, 1 BP, 2 RP), t (days), frac, err_frac, fov and transit_id. Epochs DPAC
-    rejected, with non-positive flux or without an error are dropped.
+    rejected, with non-positive flux or without an error are dropped. with_median adds med_flux, the median flux
+    of the star in that band (e-/s), which gives its magnitude without a catalogue (`summary.magnitudes`).
     """
     band = np.asarray(lc["band"].combine_chunks().indices) if hasattr(lc["band"], "combine_chunks") \
         else np.asarray(lc["band"])
@@ -52,10 +53,13 @@ def normalise(lc):
         & np.isfinite(df["err"])
     df = df[good]
     med = df.groupby(["source_id", "band"])["flux"].transform("median")
-    return pd.DataFrame({"source_id": df["source_id"].to_numpy(), "band": df["band"].to_numpy(),
-                         "t": df["t"].to_numpy(), "frac": (df["flux"] / med - 1).to_numpy(),
-                         "err_frac": (df["err"] / med).to_numpy(), "fov": df["fov"].to_numpy(),
-                         "transit_id": df["transit_id"].to_numpy()})
+    out = pd.DataFrame({"source_id": df["source_id"].to_numpy(), "band": df["band"].to_numpy(),
+                        "t": df["t"].to_numpy(), "frac": (df["flux"] / med - 1).to_numpy(),
+                        "err_frac": (df["err"] / med).to_numpy(), "fov": df["fov"].to_numpy(),
+                        "transit_id": df["transit_id"].to_numpy()})
+    if with_median:
+        out["med_flux"] = med.to_numpy()
+    return out
 
 
 def star_cells(aux):
