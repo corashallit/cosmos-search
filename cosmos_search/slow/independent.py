@@ -35,9 +35,13 @@ SEASON_FLOOR added in quadrature: the scatter of such bin means on constant star
 between cameras, fields or filters. If the bins scatter about the fit by more than their errors (the star's own
 variability), the error of k is scaled up by that factor, and widened by Student's t for the few bins it rests on.
 
+A trend's error also carries TREND_FLOOR, the survey's own drift over years: ZTF's trends on constant stars
+scatter by more than their bin errors predict once six years of data bring those down to 0.05% per year.
+
 Verdicts leave a margin for the band factor and the dilution, neither of which is known to better than tens of
-percent: "seen" needs k above 0 by K_SIGMA errors; "not_seen" needs the survey to rule out even half of Gaia's
-change (k + K_SIGMA errors < HALF); "opposite" is a change of the other sign; the rest is "undecided".
+percent: "opposite" is a change of the other sign; "not_seen" needs the survey to rule out even half of Gaia's
+change (k + K_SIGMA errors < HALF), which includes a well-measured change in Gaia's direction that is much
+smaller than Gaia's; "seen" needs k above 0 by K_SIGMA errors; the rest is "undecided".
 """
 
 import numpy as np
@@ -56,12 +60,18 @@ HALF = 0.5
 CLIP_SIGMA = 5.0
 BAND_FACTOR_RANGE = (0.25, 4.0)
 NEIGHBOUR_ARCSEC = 32.0    # twice the widest beam read here (ASAS-SN's 16 arcsec)
+# What a survey's own photometry drifts by over years, as a fraction of the flux per year, added to the error of
+# every trend. On constant stars ZTF's trends after 2020 scatter by 0.12% per year where the bin errors predict
+# 0.08, and their median is a fade of 0.04% per year (2026-11-10, 88 stars of G 12.5-18.5).
+TREND_FLOOR = 0.001
 BP_UM, RP_UM, G_UM = BAND_WAVELENGTH_UM["BP"], BAND_WAVELENGTH_UM["RP"], BAND_WAVELENGTH_UM["G"]
 
-# Scatter of 180-day bin means on constant stars beyond their quoted errors, as a fraction of the flux
-# (scripts/survey_calibrate.py, docs/arms/slow-changes.md "Other surveys"). PROVISIONAL marks surveys not yet
-# reachable for that measurement: their value is the largest measured one, until the script is run on them.
-SEASON_FLOOR = {"ztf": 0.010, "skymapper": 0.015, "noirlab": 0.015, "asassn": 0.015, "atlas": 0.015}
+# Scatter of 180-day bin means on constant stars beyond their quoted errors, as a fraction of the flux, measured
+# 2026-11-10 with scripts/survey_calibrate.py (docs/arms/slow-changes.md "Other surveys"): SkyMapper 0.0044 on
+# 316 stars, NOIRLab 0.0057 on 167, ZTF ZTF_MEASURED. PROVISIONAL marks surveys not yet read for that
+# measurement; their value is a guess set well above every measured one, to be replaced when the script has run
+# on them.
+SEASON_FLOOR = {"ztf": 0.004, "skymapper": 0.0045, "noirlab": 0.006, "asassn": 0.015, "atlas": 0.015}
 PROVISIONAL = ("asassn", "atlas")
 
 
@@ -205,16 +215,26 @@ def fit(b, x, min_bins=MIN_BINS):
 
 
 def verdict(k, k_err, k_sigma=K_SIGMA, half=HALF):
-    """ "seen", "not_seen", "opposite" or "undecided" (module notes); "no_data" when k is missing."""
+    """ "seen", "not_seen", "opposite" or "undecided" (module notes); "no_data" when k is missing. What the
+    survey rules out is asked first: a change in Gaia's direction that is measured well but is under half of
+    Gaia's is "not_seen", however many errors it stands above zero."""
     if not (np.isfinite(k) and np.isfinite(k_err) and k_err > 0):
         return "no_data"
-    if k - k_sigma * k_err > 0:
-        return "seen"
     if k + k_sigma * k_err < 0:
         return "opposite"
     if k + k_sigma * k_err < half:
         return "not_seen"
+    if k - k_sigma * k_err > 0:
+        return "seen"
     return "undecided"
+
+
+def _with_trend_floor(r, slope):
+    """A fit result with the survey's own slow drift (TREND_FLOOR, a fraction per year) added to the error of k,
+    which is in units of Gaia's slope."""
+    if np.isfinite(r["k_err"]) and np.isfinite(slope) and slope != 0:
+        r = {**r, "k_err": float(np.hypot(r["k_err"], TREND_FLOOR / abs(slope)))}
+    return r
 
 
 def combine(parts):
@@ -282,6 +302,8 @@ def same_years(lc, change, c=None, floors=SEASON_FLOOR):
     for s in pd.unique(b["survey"]):
         m = (b["survey"] == s).to_numpy()
         r = fit(b[m], x[m])
+        if change["kind"] == "trend":
+            r = _with_trend_floor(r, change["slope"])
         r["verdict"] = verdict(r["k"], r["k_err"])
         out[str(s)] = r
     k, e = combine([(r["k"], r["k_err"]) for r in out.values()])
@@ -316,7 +338,7 @@ def after(lc, change, c=None, floors=SEASON_FLOOR):
         out = {}
         for s in pd.unique(b["survey"]):
             m = (b["survey"] == s).to_numpy()
-            r = fit(b[m], x[m])
+            r = _with_trend_floor(fit(b[m], x[m]), change["slope"])
             out[str(s)] = {"ratio": r["k"], "ratio_err": r["k_err"], "slope": r["k"] * change["slope"],
                            "slope_err": r["k_err"] * abs(change["slope"]), "n_bins": r["n_bins"],
                            "t_end": float(b.loc[m, "t"].max()) if m.any() else np.nan,

@@ -131,7 +131,7 @@ def other_surveys(r, z, names, schema, with_tess):
     lc, failed = surveys.fetch_all(r, [s for s in names if s != "ztf"])
     for s, e in failed.items():
         err += f"{s}: {e:.120}; "
-    if "ztf" in names and z is not None and len(z):
+    if "ztf" in names and z is not None and len(z) and surveys.covers("ztf", r.dec, r.phot_g_mean_mag):
         lc = pd.concat([lc, z.assign(survey="ztf", mag=np.nan)[surveys.COLUMNS]], ignore_index=True)
     change = ind.gaia_change(r)
     c = {}

@@ -232,6 +232,7 @@ answer differently:
 | BP depth / RP depth (`colour`) | 1 | ~1.7 | ~1.7 | > 1 for cooling |
 | NEOWISE W1/W2 change over the episode, or W1/W2 slope against Gaia's (`wise_change`, `wise_slope`) | same as G | ~0.05-0.07 of G | brighter (+5% in W2 per 1% of G at 300 K; far more if hotter) | well below G (Rayleigh-Jeans side) |
 | ZTF after 2020-01-20 (`after`) | — | — | — | — |
+| Other surveys over Gaia's dates and since, TESS variability ("Other surveys" below) | same change | same change, redder | same change, redder | same change; spotted stars vary within a month |
 
 ZTF says whether a change went on, stopped or recovered after DR4's span. NEOWISE comes from IRSA's
 `neowiser_p1bs_psd` single exposures (clean frames, one component, no contamination flags), averaged per ~6-month
@@ -902,6 +903,112 @@ So `eb_explained` goes into `checks.csv` and the review packet as information, a
 it. A strictly periodic long dip and a long-period eclipsing binary differ only in how long the dips last, which is
 the kind of object this search is for. Measuring duration from the folded light curve, rather than from unbroken
 runs of epochs, would tell them apart; it would need its own test. Data: `/mnt/project-files/slow-changes/eb-test/`.
+
+## Other surveys (2026-11-10)
+
+A fade in Gaia can be Gaia's own doing (an instrument or calibration effect, or a neighbour that only Gaia's
+window separates), and DR4 stops on 2020-01-20. Other telescopes answer three questions that Gaia cannot answer
+about itself. `cosmos_search/surveys/` reads them, `slow/independent.py` compares, and `scripts/slow_checks.py`
+adds the result to every candidate's row.
+
+| Question | Column | Reading |
+|---|---|---|
+| Did another telescope see the same change over Gaia's own dates? | `same_k` ± `same_k_err`, `same_years` | k is the survey's change as a multiple of what Gaia's predicts for its band: 1 the same change, 0 none. `seen` (k above 0 by 3 errors), `not_seen` (even half of Gaia's change ruled out), `opposite`, `undecided`, `no_data` |
+| What happened after Gaia's last visit? | `after`, `after_ratio` or `after_recovered` | A trend: its rate since, as a multiple of Gaia's (`went_on`, `stopped`, `reversed`). An episode still under way at Gaia's last visit: the share of its depth recovered since (`fainter`, `still_faint`, `recovered`) |
+| Is the star active enough for spots to do it? | `tess_amp`, `tess_quiet`, `activity_ratio` | Gaia's change as a multiple of the star's variability within a month in TESS |
+
+Each also comes per survey (`skymapper_k`, `ztf_after`, ...), with `<survey>_dilution`: the light of Gaia
+neighbours inside that survey's beam over the star's own, by which the expected change is reduced.
+
+**How the comparison is made.** Epochs are averaged into visits, then into 180-day bins inside each group that
+has its own zero point (a filter and image type, a camera, a ZTF field and CCD quadrant). The fit gives every
+group its own level and one k for the survey, so nothing depends on zero points between groups, and a camera
+change cannot read as a step. Gaia's change is scaled to each band from its BP and RP values (a change twice as
+deep in BP as in RP is expected deeper in u and shallower in z). A bin's error is its formal error plus a floor
+measured on constant stars, in quadrature; if the bins scatter about the fit by more than that, the error of k
+grows by the same factor, and it is widened by Student's t for the few bins it rests on.
+
+**Measured on constant stars.** 640 Gaia DR3 stars that DPAC does not call variable, with RUWE < 1.4 and a G
+scatter below the median of their magnitude, |b| > 10°, in four G ranges from 11 to 18.5
+(`configs/surveys/constants-*.csv`; `scripts/survey_calibrate.py`). The floor is the scatter of 180-day bin means
+beyond their quoted errors. The test compares each constant star with a made-up Gaia trend of −2% per year over
+DR4's dates, and again with that trend injected into the survey's epochs.
+
+| Survey | Years | Sky | Stars it can test | Floor | Trend error over DR4's dates (median, % per year) | Injected trend seen | Constant star read as seen / opposite |
+|---|---|---|---|---|---|---|---|
+| SkyMapper DR4 | 2014-03 to 2021-09 | δ < +16° | 279 of 316 | 0.44% | 0.22 (G 11-13), 0.21 (13-15), 0.33 (15-17), 0.97 (17-18.5) | 86%, 93%, 79%, 33% | 0 / 1 of 279 |
+| NOIRLab NSC DR2 | 2012-09 to 2019-11 | mostly δ < +30°, G > 14.5 | 62 of 167 | 0.57% | 0.35 (G 15-17), 1.9 (17-18.5) | 64%, 42% | 0 / 0 of 62 |
+| ZTF (IRSA) | 2018-03 on | δ > −30°, G > 12.5 | TBD-ZTF | TBD-ZTF | TBD-ZTF | TBD-ZTF | TBD-ZTF |
+| ATLAS | 2015-07 on | all (south of −50° from 2022) | not measured | provisional 1.5% | | | |
+| ASAS-SN | 2012 on | all, G 10.5-16.5 | not measured | provisional 1.5% | | | |
+
+The ratio of k to its error has a scatter of 0.9 on SkyMapper's constants, so its errors are about right.
+NOIRLab's are too large by about half (scatter 0.5): with a median of five bins per star the widening for few
+bins dominates, which errs on the safe side. So SkyMapper confirms a trend of 0.7% per year at G < 15 and 1% per
+year at G 15-17 over DR4's dates, for nearly every star south of +16°. NOIRLab has enough exposures for one faint
+star in three. Of 341 constant stars tested in the two surveys, none read as `seen` and one as `opposite`.
+
+Every trend error includes 0.1% per year for the survey's own drift (`TREND_FLOOR`). ZTF showed why: with six
+years of data after 2020 its bin errors predict a trend error of 0.08% per year, while the trends of constant
+stars scatter by 0.12% per year around a median fade of 0.04% per year. Before the floor, 3 of 114 constant stars
+read as `went_on` and 4 as `reversed`. The verdicts also ask first what a survey rules out: a change in Gaia's
+direction that is measured well but is under half of Gaia's is `not_seen`, however far it stands above zero.
+
+After DR4's last visit SkyMapper has at most 1.6 years, so its trend error there is 1.2 to 7% per year and it can
+only say `went_on` for fast fades. ZTF carries the years since for the northern sky; south of −30° that rests on
+ATLAS, and for stars brighter than G 12.5 on ASAS-SN.
+
+SkyMapper needed one change from the first version: with one group per filter, constant stars of G 17-18.5 read
+as fading (median k / error +0.5, 4 of 62 `seen`), because the short early exposures catch a faint star only when
+noise lifts it. With one group per filter and image type the bias is gone (+0.1, 0 of 61).
+
+**On stars with a known Gaia change.** The DR3 watch-list (`configs/surveys/known-dr3.csv`: 2,849 stars with a
+fade in DR3, four in five of them DPAC-classed spotted stars) over DR3's dates, 2014-07 to 2017-05:
+TBD-KNOWN
+
+**TESS variability as a measure of activity.** `surveys/tess_activity.py` measures the 5th to 95th percentile
+range of each sector's light curve in 3-hour bins, noise removed, from TGLC's undetrended fluxes (sectors 1-55,
+Tmag < 16), after dropping the first day of each orbit and dividing each orbit by a fitted line. Without the line
+constant stars show a median of 1% at G 11-13 and 3% at G 14.5-16, nearly all of it drift over an orbit. With it:
+
+| G | Constant stars with a sector | Median | 90% below (`quiet_floor`) |
+|---|---|---|---|
+| 11-13 | 96 | 0.34% | 1.6% |
+| 13-14.5 | 58 | 0.54% | 2.9% |
+| 14.5-16.5 | 107 | 1.5% | 9.5% |
+
+63% of the constant stars asked for had a TGLC light curve. The line costs any rotation slower than an orbit
+(about 13 days).
+
+This check turned out weaker than hoped. Of 975 DPAC-classed RS CVn stars on the watch-list with a TGLC sector,
+81% show no more variability within a month than constant stars do (68% at G 13-14.5), although Gaia saw them
+change by a median of 7%. Their spots change the mean level over years far more than they modulate it over days,
+or they rotate slower than an orbit. So a quiet TESS light curve does not rule activity out. What the check can
+say: an amplitude above the floor is direct evidence of spots (1 RS CVn star in 5 shows it, 1 in 3 at G 13-14.5,
+against 1 constant star in 10 by construction), and Gaia's change over the TESS amplitude (`activity_ratio`, with the floor standing in for
+a quiet star) has a known range for spotted stars: median 0.9, 90% below 2.9, 99% below 7.0. A candidate far
+above that range is unlike nearly all known spotted stars; with floors this high that takes a change of more than
+about 15% at G < 13 and 30% at G 13-14.5. Gaia's own rotation-modulation and Ca II activity tables are likely a
+better measure of activity and are not read yet.
+
+**Not yet tested against the live service.**
+
+- ATLAS needs an account's token (`ATLAS_TOKEN`). The reader runs a job on reduced images (difference images
+  step when ATLAS replaced its reference images in 2018-10 and 2020-02, inside Gaia's last years), and its
+  protocol is tested against a local server. The first session started after the token was added runs
+  `survey_calibrate.py fetch --surveys atlas`, `floors` and `null` on the constant stars and replaces the
+  provisional floor.
+- ASAS-SN answers only on port 9006, which cloud containers cannot open. On 2026-11-10 the first try from kore
+  ended within two minutes with the whole hawaii.edu network dropping kore's address, most likely because the
+  reachability check opened two empty connections that looked like a port scan. The check is now one ordinary
+  request, retries are limited to two, and ASAS-SN is read only when named (`--surveys ...,asassn`). Its floor is
+  provisional and its reader has not seen live data.
+
+**Running it.** `scripts/slow_checks.py` reads ZTF, ATLAS, SkyMapper and NOIRLab by default and names once any
+survey it cannot reach; `--surveys none` turns the comparison off and `--no-tess` the TESS step. SkyMapper takes
+about 3 s a star, NOIRLab 15-25 s, TESS a few seconds. Gaia neighbours for the dilution come from ESA's archive,
+or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet` and the TESS rows per sector to
+`tess.parquet`.
 
 ## Log
 

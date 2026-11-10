@@ -89,7 +89,7 @@ def read_stars(path):
 
 
 def _fetch_one(survey, star):
-    if not surveys.covers(survey, star["dec"]):
+    if not surveys.covers(survey, star["dec"], star.get("phot_g_mean_mag")):
         return surveys.empty(), "outside"
     ra, dec = surveys.at_year(star["ra"], star["dec"], star.get("pmra"), star.get("pmdec"),
                               star.get("ref_epoch") or 2016.0, surveys.MEAN_YEAR[survey])

@@ -88,6 +88,11 @@ def test_fetch_all_skips_uncovered_sky_and_reports_failures(monkeypatch):
     assert "skymapper" not in seen                          # dec +40 is north of SkyMapper's sky
     assert set(lc["survey"]) == {"ztf"} and list(errors) == ["noirlab"] and "down" in errors["noirlab"]
     assert seen["ztf"][1] == pytest.approx(40.0 + 5.5 * 3.6 / 3600)    # at ZTF's mean year, 2021.5
+    # A star ZTF saturates on is not asked for either; without a magnitude only the sky decides.
+    assert not surveys.covers("ztf", 40.0, 12.0) and surveys.covers("ztf", 40.0, 13.5) and surveys.covers("ztf", 40.0)
+    assert not surveys.covers("noirlab", -40.0, 12.0) and surveys.covers("skymapper", -40.0, 12.0)
+    lc, errors = surveys.fetch_all({**star, "phot_g_mean_mag": 11.5}, ("ztf", "noirlab"))
+    assert len(lc) == 0 and errors == {}
 
 
 # ---- SkyMapper and NOIRLab ---------------------------------------------------------------------------------------
@@ -409,6 +414,25 @@ def test_a_survey_sees_gaias_trend_and_a_constant_star_rules_it_out():
     assert up["verdict"] == "opposite"
     few = ind.same_years(epochs(rng, [100.0, 400.0, 900.0], 1.0), TREND, floors=FLOORS)
     assert few["skymapper"]["verdict"] == "no_data" and few["all"]["verdict"] == "no_data"
+
+
+def test_verdicts_ask_first_what_the_survey_rules_out():
+    assert ind.verdict(1.0, 0.2) == "seen" and ind.verdict(0.6, 0.3) == "undecided"
+    assert ind.verdict(0.0, 0.1) == "not_seen" and ind.verdict(-0.5, 0.1) == "opposite"
+    assert ind.verdict(0.03, 0.005) == "not_seen"          # six errors above zero, and a thirtieth of Gaia's change
+    assert ind.verdict(np.nan, 0.1) == "no_data" and ind.verdict(1.0, 0.0) == "no_data"
+
+
+def test_a_trends_error_never_falls_below_the_surveys_own_drift():
+    rng = np.random.default_rng(13)
+    t = np.arange(-100.0, 1900.0, 1.0)
+    small = {**TREND, "slope": -0.002}                                  # Gaia: 0.2% per year
+    lc = pd.concat([epochs(rng, t, 1.0, group=f"g{i}", err=0.001) for i in range(4)])
+    r = ind.same_years(lc, small, floors={"skymapper": 0.0005})["skymapper"]
+    assert r["k_err"] >= ind.TREND_FLOOR / 0.002                        # 0.1% per year over a 0.2% per year trend
+    assert r["verdict"] == "undecided"                                  # too close to the drift to rule out
+    big = ind.same_years(lc, TREND, floors={"skymapper": 0.0005})["skymapper"]
+    assert big["k_err"] < 0.05 and big["verdict"] == "not_seen"
 
 
 def test_a_step_between_cameras_is_not_a_trend():

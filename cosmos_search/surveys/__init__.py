@@ -24,11 +24,11 @@ Every reader returns COLUMNS:
 
 | Survey | Years | Sky | Useful G | Where it answers from |
 |---|---|---|---|---|
-| ztf (IRSA) | 2018-03 on | dec > -30 | 13-20 | anywhere |
+| ztf (IRSA) | 2018-03 on | dec > -30 | 13-20.5 | anywhere |
 | asassn (Sky Patrol v2) | 2012 on (V to 2018, g from 2017) | all | 10.5-16.5 | only where port 9006 is open: not cloud containers |
 | atlas (forced photometry) | 2015-07 on; south of -50 from 2022 | all | 12.5-19 | anywhere, with ATLAS_TOKEN |
-| skymapper (DR4) | 2014-03 to 2021-09 | dec < +16 | 9-18 | anywhere |
-| noirlab (NSC DR2) | 2012-09 to 2019-11 | mostly dec < +30 | 15.5-21 | anywhere |
+| skymapper (DR4) | 2014-03 to 2021-09 | dec < +16 | 9-18.5 | anywhere |
+| noirlab (NSC DR2) | 2012-09 to 2019-11 | mostly dec < +30 | 14.5-21 | anywhere |
 
 TESS is read separately (`surveys.tess_activity`): its light curves are normalised sector by sector, so they say
 how variable a star is within a month, not whether it faded over years.
@@ -48,6 +48,11 @@ FWHM_ARCSEC = {"ztf": 2.0, "asassn": 16.0, "atlas": 5.0, "skymapper": 2.9, "noir
 # Declination range (deg) each survey observes; a star outside it is not asked for.
 DEC_RANGE = {"ztf": (-30.0, 90.0), "asassn": (-90.0, 90.0), "atlas": (-90.0, 90.0), "skymapper": (-90.0, 16.0),
              "noirlab": (-90.0, 90.0)}
+# G range in which each survey's photometry of a star is usable: brighter stars saturate, fainter ones are below
+# its limit. ZTF's bright end is measured: of 56 constant stars of G 11-13, 4 read as changing against a made-up
+# trend where at most 1 in 100 should (2026-11-10). The others are the surveys' own stated limits.
+G_RANGE = {"ztf": (13.0, 20.5), "asassn": (10.5, 16.5), "atlas": (12.5, 19.0), "skymapper": (9.0, 18.5),
+           "noirlab": (14.5, 21.0)}
 ALL = ("ztf", "asassn", "atlas", "skymapper", "noirlab")
 # Read unless asked otherwise. ASAS-SN is left out until its reader has run against the live service (asassn.py).
 DEFAULT = ("ztf", "atlas", "skymapper", "noirlab")
@@ -97,9 +102,15 @@ def at_year(ra, dec, pmra, pmdec, ref_epoch, year):
     return (float(ra) + pmra * dt / 3.6e6 / np.cos(np.radians(float(dec)))) % 360.0, float(dec) + pmdec * dt / 3.6e6
 
 
-def covers(survey, dec):
+def covers(survey, dec, g_mag=None):
+    """Whether the survey observes this declination and, when g_mag is given and finite, a star this bright."""
     lo, hi = DEC_RANGE[survey]
-    return lo <= float(dec) <= hi
+    if not lo <= float(dec) <= hi:
+        return False
+    if g_mag is None or not np.isfinite(g_mag):
+        return True
+    bright, faint = G_RANGE[survey]
+    return bright <= float(g_mag) <= faint
 
 
 def reader(survey):
@@ -146,13 +157,13 @@ def fetch(survey, source_id, ra, dec, **options):
 
 def fetch_all(star, surveys=DEFAULT, log=None, **options):
     """Every listed survey for one star. star: a mapping or row with source_id, ra, dec and, where known, pmra,
-    pmdec and ref_epoch. A survey that does not cover the star's declination is skipped; one that fails is
-    reported in the returned errors and the rest go on. Returns (table, {survey: error text}).
-    options: {survey: {keyword: value}} passed to that survey's reader."""
+    pmdec, ref_epoch and phot_g_mean_mag. A survey that does not cover the star's declination or brightness is
+    skipped; one that fails is reported in the returned errors and the rest go on. Returns (table, {survey:
+    error text}). options: {survey: {keyword: value}} passed to that survey's reader."""
     get = (lambda k, d=None: star.get(k, d)) if hasattr(star, "get") else (lambda k, d=None: getattr(star, k, d))
     parts, errors = [], {}
     for s in surveys:
-        if not covers(s, get("dec")):
+        if not covers(s, get("dec"), get("phot_g_mean_mag")):
             continue
         ra, dec = at_year(get("ra"), get("dec"), get("pmra"), get("pmdec"), get("ref_epoch", 2016.0) or 2016.0,
                           MEAN_YEAR[s])
