@@ -43,23 +43,17 @@ def rule_dir(run):
     return dirs[0]
 
 
-def tap_upload(tap, ids, adql, chunk=50000):
-    """Run an upload query over ids in chunks (the ESA archive refuses very large uploads)."""
-    from astropy.table import Table
-    parts = []
-    ids = np.asarray(ids, np.int64)
-    for i in range(0, len(ids), chunk):
-        up = {"ids": Table({"source_id": ids[i:i + chunk]})}
-        parts.append(tap.query(adql, uploads=up).to_pandas())
-    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+def star_rows(tap, ids, release, columns):
+    """Per-star archive columns under DR3's names, from whichever tables the release keeps them in."""
+    from cosmos_search.targets import releases
+    return releases.fetch_star_rows(tap, ids, release, columns)
 
 
-def dpac_classes(tap, ids, schema):
-    """best_class_name from vari_classifier_result for the ids that have one."""
-    cls = tap_upload(tap, ids, "SELECT u.source_id, c.best_class_name FROM TAP_UPLOAD.ids AS u "
-                     f"JOIN {schema}.vari_classifier_result AS c ON c.source_id = u.source_id")
+def dpac_classes(tap, ids, release):
+    """DPAC's best variability class for the ids that have one (source_id, best_class_name)."""
+    cls = star_rows(tap, ids, release, ("best_class_name",)).dropna(subset=["best_class_name"])
     cls["best_class_name"] = cls["best_class_name"].astype(str)
-    return cls
+    return cls.reset_index(drop=True)
 
 
 def cmd_reference(a):
@@ -73,9 +67,8 @@ def cmd_reference(a):
         stats = pd.read_parquet(rd / "stats.parquet")
         stats = stats[[c for c in POP_COLUMNS if c in stats]]
         stats = stats.sample(min(a.sample, len(stats)), random_state=a.seed).reset_index(drop=True)
-        src = tap_upload(tap, stats["source_id"], "SELECT u.source_id, s.phot_g_mean_mag, s.bp_rp FROM TAP_UPLOAD.ids "
-                         f"AS u JOIN {schema}.gaia_source AS s ON s.source_id = u.source_id")
-        cls = dpac_classes(tap, stats["source_id"], schema)
+        src = star_rows(tap, stats["source_id"], a.release, ("phot_g_mean_mag", "bp_rp"))
+        cls = dpac_classes(tap, stats["source_id"], a.release)
         pop = stats.merge(src, on="source_id", how="left").merge(cls, on="source_id", how="left")
         pop = pd.concat([pop, data.strengths(pop, data.thresholds(rd / "release.json"))], axis=1)
         pop.to_parquet(out / "pop.parquet")
@@ -88,10 +81,9 @@ def cmd_reference(a):
         print(f"HR reference: {len(hr):,} stars")
     if "top" in a.parts:
         top = pd.read_parquet(Path(a.run) / "lists" / "fading.parquet").nlargest(a.top, "strength")
-        ast = tap_upload(tap, top["id"], "SELECT u.source_id AS id, s.parallax, s.parallax_error, s.pmra, "
-                         "s.pmra_error, s.pmdec, s.pmdec_error FROM TAP_UPLOAD.ids AS u "
-                         f"JOIN {schema}.gaia_source AS s ON s.source_id = u.source_id")
-        cls = dpac_classes(tap, top["id"], schema).rename(columns={"source_id": "id"})
+        ast = star_rows(tap, top["id"], a.release, ("parallax", "parallax_error", "pmra", "pmra_error", "pmdec",
+                                                     "pmdec_error")).rename(columns={"source_id": "id"})
+        cls = dpac_classes(tap, top["id"], a.release).rename(columns={"source_id": "id"})
         top = top.merge(ast, on="id", how="left").merge(cls, on="id", how="left")
         top.to_parquet(out / "top.parquet")
         print(f"strongest fades: {len(top):,}, {top['best_class_name'].notna().sum():,} with a DPAC class")
@@ -163,12 +155,11 @@ def star_inputs(run, rows, lc):
 def context_rows(ids, release):
     """gaia_source parallax, proper motion and DPAC class for a few stars (TAP)."""
     from cosmos_search.gaia import archive
-    schema = TABLES[release]
     tap = archive.tap()
-    src = tap_upload(tap, ids, "SELECT u.source_id, s.parallax, s.parallax_error, s.pmra, s.pmra_error, s.pmdec, "
-                     f"s.pmdec_error, s.ruwe FROM TAP_UPLOAD.ids AS u JOIN {schema}.gaia_source AS s "
-                     "ON s.source_id = u.source_id")
-    return src.merge(dpac_classes(tap, ids, schema), on="source_id", how="left").set_index("source_id")
+    src = star_rows(tap, ids, release, ("parallax", "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error",
+                                        "ruwe", "best_class_name"))
+    src["best_class_name"] = src["best_class_name"].where(src["best_class_name"].notna(), None)
+    return src.set_index("source_id")
 
 
 def star_section(ctx, sid, row, inp, ctxrow, out, heading=None, text="", name=None, label="candidate"):

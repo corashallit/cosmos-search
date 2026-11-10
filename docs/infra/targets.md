@@ -88,8 +88,32 @@ that changed, so a pre-registered DR4 run can prove it ran the frozen queries. E
 `manifest.json` with the rendered ADQL, its hash, the thresholds and row counts; the DR3 rehearsal manifest
 is in `configs/targets/runs/`.
 
-`python -m cosmos_search.targets check --release dr4` lists any required `vari_summary` column missing from
-the archive; run it the moment DR4 is live. If the schema is not `gaiadr4`, change `targets/releases.py`.
+`python -m cosmos_search.targets check --release dr4` lists every table and column the release-day queries need
+that the archive lacks; run it the moment DR4 is live. If the schema is not `gaiadr4`, or a name differs, change
+`targets/releases.py`: it is the one place that holds them.
+
+## Table and column names per release (`targets/releases.py`)
+
+Checked against the draft data model of 2026-06-26, whose tables and columns are in
+`configs/dr4/draft-data-model-2026-06-26.json` (`tests/test_releases.py` fails if a release-day query names a column
+the draft lacks). What moved since DR3:
+
+| DR3 | DR4 draft |
+|---|---|
+| `gaia_source` has every source | `gaia_source` has only sources with good astrometry and photometry; every source is in `all_source_astrometry`, `all_source_photometry`, `all_source_flags` |
+| `gaia_source.astrometric_params_solved` | `all_source_astrometry.astrometric_params` (3 = position only, 95 = six parameters) |
+| `gaia_source.phot_bp_n_blended_transits`, `phot_rp_n_blended_transits` | `all_source_photometry` only |
+| `gaia_source.phot_bp_rp_excess_factor` | not published; (BP + RP mean flux) / G mean flux from `all_source_photometry` |
+| `gaia_source.has_epoch_photometry` | `all_source_flags.has_epoch_photometry` |
+| `vari_classifier_result.best_class_name`, `best_class_score` (one row per source) | `all_source_flags.phot_variable_best_class` (merged over classifiers and the specific-object tables); `vari_classifier_result` has one row per classifier with `classifier_best_class_name`, `classifier_best_class_prob` |
+| `dr2_neighbourhood` | `dr3_neighbourhood` (`dr3_source_id`, `angular_distance`, `probable_match`) |
+
+Per-star lookups ask for DR3's names and get them from wherever the release keeps them:
+`releases.fetch_star_rows(tap, ids, "dr4", ("parallax", "parallax_error", "best_class_name"))` uploads the ids in
+chunks, runs one query per table and merges on `source_id` (`releases.star_queries` gives the ADQL).
+`scripts/slow_checks.py` and `scripts/viz_candidates.py` use it. DR4's class names may differ from DR3's in spelling
+and case (the draft lists probabilities for `ecl`, `ea_eb`, `ew`, `ell`, `solarlike`, `rs`, ...), so list the
+values present on release day before choosing which classes to leave out.
 
 ## DR4 adapters (`cosmos_search.gaia.dr4`)
 
