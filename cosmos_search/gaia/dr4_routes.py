@@ -58,6 +58,14 @@ def check_tables(schema="gaiadr4", client=None):
             out[name] = {"tables": sorted(_sync_first_column(url, adql, client))}
         except Exception as exc:  # report and go on; one service down must not hide the others
             out[name] = {"error": repr(exc)[:300]}
+    # The schema name is an assumption until release: list ESA's schemas that look like this release, so a
+    # different name (to put in targets.releases) is seen at once.
+    tag = schema.removeprefix("gaia")
+    try:
+        names = _sync_first_column(MIRRORS["esa"], "SELECT schema_name FROM tap_schema.schemas", client)
+        out["esa"]["schemas"] = sorted(n for n in names if tag in n.lower())
+    except Exception as exc:
+        out["esa"].setdefault("schemas_error", repr(exc)[:300])
     return out
 
 
@@ -121,7 +129,8 @@ def check(release="Gaia DR4", schema="gaiadr4", cdn_prefix=dr4_bulk.PREFIX, data
     r = {"checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
          "cdn": check_cdn(cdn_prefix, client), "tables": check_tables(schema, client),
          "datalink": check_datalink(release, schema, datalink_n, client) if datalink_n else {}}
-    r["released"] = bool(r["cdn"].get("top_level") or r["tables"].get("esa", {}).get("tables")
+    esa = r["tables"].get("esa", {})
+    r["released"] = bool(r["cdn"].get("top_level") or esa.get("tables") or esa.get("schemas")
                          or r["datalink"].get("lightcurve_rows"))
     if r["tables"].get("esa", {}).get("tables"):  # the archive has the schema: are the columns our queries name there?
         try:
