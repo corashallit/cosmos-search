@@ -674,6 +674,12 @@ sits on 3 stars beyond the 0.1% point. That is the case for ~25,000 quiet stars 
    Stars marked `g_only` or `bp_rp_only` are not checked but stay on the fading list with their verdict and are
    read after the rest, as the still stars are.
 9. Figures for the stars worth showing: `viz_candidates.py figures --run ... --ids ...` (docs/viz.md).
+10. Blind review of the stars the checks leave (docs/vetting.md §14-§15). Launch, audit and archive exist:
+    `cosmos_search.vetting.reviewer.launch_args(dir, ids)` gives the arguments for `scripts/stage_a_reviews.js`
+    (the model and effort of `prereg/reviewers/slow-cal-1.json`), `stage_a_audit.py --reviewer
+    prereg/reviewers/slow-cal-1.json` refuses reviews served by anything else, and `vetting commit --audit
+    --archive` records the verdicts. **Not built yet:** the step that turns `L/checks` into review files. Only
+    `slow_cal.py build` makes them, for the calibration's own stars and fakes.
 
 ### Trial on all of DR3 (2026-10-30)
 

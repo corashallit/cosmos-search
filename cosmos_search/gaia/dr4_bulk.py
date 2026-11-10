@@ -30,6 +30,7 @@ import argparse
 import hashlib
 import json
 import re
+import resource
 import shutil
 import sys
 import time
@@ -53,10 +54,10 @@ _PRODUCT = re.compile(r"(^|/)epoch_?photometry(/|_|\.|$)", re.IGNORECASE)
 _EXCLUDE = re.compile(r"ccd|crowded", re.IGNORECASE)
 _MD5 = re.compile(r"md5", re.IGNORECASE)
 
-# Columns read from each file: what dr4.epoch_photometry_to_lc uses. Missing optional ones are skipped.
-READ_COLUMNS = ("source_id", "transit_id", "g_n_obs", "transit_proc_flags", "phot_ccd_proc_flags",
-                *(c for cols in dr4.COLUMNS.values() for c in cols))
-REQUIRED = ("source_id", "transit_id", *dr4.COLUMNS["G"])
+# Columns read from each file: what dr4.epoch_photometry_to_lc uses. Missing optional ones are skipped, and other
+# spellings are accepted (dr4.resolve).
+READ_COLUMNS = dr4.READ_COLUMNS
+REQUIRED = dr4.REQUIRED
 
 
 def is_epoch_photometry(key):
@@ -96,14 +97,23 @@ def find_files(prefix=PREFIX, client=None):
 
 
 def summary(prefix=PREFIX, client=None):
-    """What DR4 has on the CDN: top-level folders and the epoch photometry files found (count, bytes)."""
+    """What DR4 has on the CDN: top-level folders, the epoch photometry files found (count, bytes), and files whose
+    path names epoch photometry but which this reader does not take (`other_files`, counted by suffix: catalogue
+    metadata, or light curves in a format other than Parquet)."""
     client = client or get_client()
     top = [e.key for e in s3_list(archive.CDN_LIST_URL, prefix, delimiter="/", client=client)]
     files = find_files(prefix, client)
+    other = {}
+    for e in s3_list(archive.CDN_LIST_URL, prefix, client=client):
+        if _PRODUCT.search(e.key) and not _EXCLUDE.search(e.key) and not e.key.endswith(".parquet") \
+                and not _MD5.search(e.key.rsplit("/", 1)[-1]):
+            name = e.key.rsplit("/", 1)[-1]
+            suffix = name[name.index("."):] if "." in name else "(none)"
+            other[suffix] = other.get(suffix, 0) + 1
     return {"prefix": prefix, "top_level": top, "epoch_photometry_files": len(files),
             "epoch_photometry_bytes": int(sum(f["size"] for f in files)),
             "with_md5": int(sum(f["md5"] is not None for f in files)),
-            "examples": [f["key"] for f in files[:3]]}
+            "examples": [f["key"] for f in files[:3]], "other_files": other}
 
 
 _SELECT = {}
@@ -132,22 +142,117 @@ def keep_mask(source_id, select=None, random_share=0.0, keep_all=False):
     return mask
 
 
-def read_kept(path, select=None, random_share=0.0, keep_all=False, batch_rows=1 << 20):
-    """Transit rows of the kept stars from one bulk Parquet file, as a pyarrow Table (READ_COLUMNS present)."""
-    f = pq.ParquetFile(path)
-    names = set(f.schema_arrow.names)
+def _file_columns(f, path):
+    """(names read from the file, dr4.resolve map), or KeyError naming what is missing."""
+    names = dr4.resolve(f.schema_arrow.names)
     missing = [c for c in REQUIRED if c not in names]
     if missing:
-        raise KeyError(f"{path}: no column(s) {missing}; columns are {sorted(names)} (update gaia.dr4.COLUMNS)")
-    cols = [c for c in READ_COLUMNS if c in names]
+        raise KeyError(f"{path}: no column(s) {missing}; columns are {sorted(f.schema_arrow.names)} "
+                       "(update gaia.dr4.COLUMNS or ALIASES)")
+    return [names[c] for c in READ_COLUMNS if c in names], names
+
+
+def read_kept(path, select=None, random_share=0.0, keep_all=False, batch_rows=1 << 20):
+    """Transit rows of the kept stars from one bulk Parquet file, as one pyarrow Table (READ_COLUMNS present). Holds
+    every kept row in memory: for a whole file use `iter_lightcurves`."""
+    f = pq.ParquetFile(path)
+    cols, names = _file_columns(f, path)
     parts = []
     for batch in f.iter_batches(batch_size=batch_rows, columns=cols):
-        m = keep_mask(batch.column("source_id"), select, random_share, keep_all)
+        m = keep_mask(batch.column(names["source_id"]), select, random_share, keep_all)
         if m.any():
             parts.append(pa.Table.from_batches([batch]).filter(pa.array(m)))
     if not parts:
         return f.schema_arrow.empty_table().select(cols)
     return pa.concat_tables(parts)
+
+
+def stars_contiguous(path, column="source_id", batch_rows=1 << 21):
+    """Whether every star's rows sit together in the file (in any star order), from one pass over the source_id
+    column alone. A file sorted by sky position or by source_id is; rows in time order are not."""
+    f = pq.ParquetFile(path)
+    starts, last, rows = [], None, 0
+    for batch in f.iter_batches(batch_size=batch_rows, columns=[column]):
+        sid = np.asarray(batch.column(0).cast(pa.int64()))
+        if not len(sid):
+            continue
+        new = np.r_[last is None or sid[0] != last, sid[1:] != sid[:-1]]
+        starts.append(sid[new])
+        last, rows = sid[-1], rows + len(sid)
+        if sum(len(x) for x in starts) > max(1000, rows // 2):  # runs of under two rows: not grouped by star
+            return False
+    ids = np.concatenate(starts) if starts else np.empty(0, np.int64)
+    return len(np.unique(ids)) == len(ids)
+
+
+def _n_stars(sid):
+    return int(1 + np.count_nonzero(sid[1:] != sid[:-1])) if len(sid) else 0
+
+
+def iter_rows(path, select=None, random_share=0.0, keep_all=False, stars=30_000, batch_rows=1 << 18):
+    """Transit rows of the kept stars of one bulk file, as pyarrow Tables of about `stars` whole stars each, in file
+    order. A star is never split between tables.
+
+    Memory stays near one table when each star's rows sit together in the file (checked first, `stars_contiguous`);
+    otherwise the kept rows of the whole file are read and sorted by source_id, which for a keep-everything pass
+    needs the file's whole uncompressed size in memory."""
+    f = pq.ParquetFile(path)
+    cols, names = _file_columns(f, path)
+    sid_col = names["source_id"]
+    nested = any(dr4._is_list(f.schema_arrow.empty_table(), names[c]) for c in ("transit_id", "g_flux"))
+
+    def kept(batch):
+        m = keep_mask(batch.column(sid_col), select, random_share, keep_all)
+        if m.all():
+            return pa.Table.from_batches([batch])
+        return pa.Table.from_batches([batch]).filter(pa.array(m)) if m.any() else None
+
+    if nested or stars_contiguous(path, sid_col):
+        pending, n_pending, carry = [], 0, None
+        for batch in f.iter_batches(batch_size=batch_rows, columns=cols):
+            t = kept(batch)
+            if t is None:
+                continue
+            if not nested:  # hold back the last star: its rows may continue in the next batch
+                if carry is not None:
+                    t = pa.concat_tables([carry, t])
+                sid = np.asarray(t[sid_col].combine_chunks().cast(pa.int64()))
+                edges = np.flatnonzero(sid[1:] != sid[:-1])
+                cut = int(edges[-1]) + 1 if len(edges) else 0
+                carry, t = t.slice(cut), t.slice(0, cut)
+                n = _n_stars(sid[:cut])
+            else:
+                n = t.num_rows
+            if t.num_rows:
+                pending.append(t)
+                n_pending += n
+            if n_pending >= stars:
+                yield pa.concat_tables(pending)
+                pending, n_pending = [], 0
+        if carry is not None and carry.num_rows:
+            pending.append(carry)
+        if pending:
+            yield pa.concat_tables(pending)
+        return
+    parts = [t for t in map(kept, f.iter_batches(batch_size=batch_rows, columns=cols)) if t is not None]
+    if not parts:
+        return
+    rows = pa.concat_tables(parts)
+    del parts
+    rows = rows.take(pc.sort_indices(rows, sort_keys=[(sid_col, "ascending")]))
+    sid = np.asarray(rows[sid_col].combine_chunks().cast(pa.int64()))
+    edges = np.r_[0, np.flatnonzero(sid[1:] != sid[:-1]) + 1, len(sid)]
+    for a in range(0, len(edges) - 1, stars):
+        b = min(a + stars, len(edges) - 1)
+        yield rows.slice(int(edges[a]), int(edges[b] - edges[a]))
+
+
+def iter_lightcurves(path, select=None, random_share=0.0, keep_all=False, stars=30_000, batch_rows=1 << 18):
+    """Light curves (epoch.SCHEMA, transit_id kept) of the kept stars of one bulk file, about `stars` whole stars
+    at a time. Each table is sorted by source_id, band and time; tables follow the file's order, so each covers one
+    compact patch of sky when the file is ordered by position. See `iter_rows` for memory."""
+    for rows in iter_rows(path, select, random_share, keep_all, stars, batch_rows):
+        yield dr4.epoch_photometry_to_lc(rows)
 
 
 # Free space a download needs beyond the file itself, so a full disk fails the file cleanly instead of mid-write.
@@ -224,38 +329,60 @@ def fetched(url, dest, size=None, md5=None, streams=STREAMS, client=None):
         dest.unlink(missing_ok=True)
 
 
+def _write_lightcurves(pieces, dest, meta):
+    """Stream light-curve tables into one Parquet file; returns (transit rows in, stars, rows out)."""
+    tmp = dest.with_suffix(".tmp")
+    stars = rows = 0
+    with pq.ParquetWriter(tmp, epoch.SCHEMA.with_metadata(meta), compression="zstd") as w:
+        for lc in pieces:
+            if lc.num_rows:
+                w.write_table(lc.replace_schema_metadata(meta))
+                rows += lc.num_rows
+                stars += _n_stars(np.asarray(lc["source_id"]))
+    tmp.replace(dest)
+    return stars, rows
+
+
 def process_file(info, out, select_path=None, random_share=0.0, keep_all=False, durable=None, local=None,
-                 streams=STREAMS):
+                 streams=STREAMS, stars=30_000):
     """Download one bulk file (or read `local`), keep the chosen stars, write their light curves (epoch.SCHEMA).
 
     The raw file lives in out/tmp only while it is read and is deleted afterwards, also on errors, so a machine
-    holds at most one raw file per worker."""
+    holds at most one raw file per worker. The file is read and written a piece at a time (`iter_lightcurves`)."""
     out = Path(out)
     t0 = time.time()
     dest = out / "lightcurves" / f"{info['name']}.parquet"
     dest.parent.mkdir(parents=True, exist_ok=True)
     select = _load_select(select_path)
+    meta = {b"source_file": info.get("key", info["name"]).encode(), b"md5": (info.get("md5") or "").encode(),
+            b"select": (str(select_path) if select_path else "").encode(), b"random_share": str(random_share).encode(),
+            b"keep_all": str(bool(keep_all)).encode()}
+
+    transits = [0]
+
+    def pieces(path):
+        for rows in iter_rows(path, select, random_share, keep_all, stars):
+            transits[0] += rows.num_rows
+            yield dr4.epoch_photometry_to_lc(rows)
+
+    def work(path):
+        return _write_lightcurves(pieces(path), dest, meta)
+
     if local:
-        rows, t_dl = read_kept(local, select, random_share, keep_all), 0.0
+        t_dl = 0.0
+        n_stars, n_rows = work(local)
     else:
         tmp_dir = out / "tmp"
         tmp_dir.mkdir(exist_ok=True)
         check_space(tmp_dir, info.get("size"))
         with fetched(info["url"], tmp_dir / f"{info['name']}.parquet", info.get("size"), info.get("md5"), streams) as path:
             t_dl = time.time() - t0
-            rows = read_kept(path, select, random_share, keep_all)
-    t1 = time.time()
-    lc = dr4.epoch_photometry_to_lc(rows) if rows.num_rows else epoch.SCHEMA.empty_table()
-    meta = {b"source_file": info.get("key", info["name"]).encode(), b"md5": (info.get("md5") or "").encode(),
-            b"select": (str(select_path) if select_path else "").encode(), b"random_share": str(random_share).encode(),
-            b"keep_all": str(bool(keep_all)).encode()}
-    tmp = dest.with_suffix(".tmp")
-    pq.write_table(lc.replace_schema_metadata(meta), tmp, compression="zstd")
-    tmp.replace(dest)
+            n_stars, n_rows = work(path)
     rec = {"name": info["name"], "key": info.get("key"), "bytes": info.get("size"), "md5": info.get("md5"),
-           "transits_kept": rows.num_rows, "stars_kept": len(pc.unique(rows["source_id"])) if rows.num_rows else 0,
-           "rows": lc.num_rows, "download_s": round(t_dl, 1), "process_s": round(time.time() - t1, 1),
-           "seconds": round(time.time() - t0, 1)}
+           "transits_kept": transits[0], "stars_kept": n_stars, "rows": n_rows, "download_s": round(t_dl, 1),
+           "process_s": round(time.time() - t0 - t_dl, 1), "seconds": round(time.time() - t0, 1),
+           # The worker's largest memory so far (Linux reports kB), for choosing --workers on a new machine.
+           "worker_peak_rss_gb": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6, 2)}
     if durable:
         dr3_pass._publish({"lightcurves": dest}, Path(durable), info["name"], rec)
     else:
