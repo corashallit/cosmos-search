@@ -626,6 +626,101 @@ correctly (an eclipsing symbiotic star), and not shortlisted. Each review took 6
 Data: `/mnt/project-files/slow-cal/` (sealed plan and key, review files, prompts, replies, transcripts, audit,
 `verdicts_table.csv`, `report.json`).
 
+## 15. The same review files on a new model (written 2026-11-10, before any review is run)
+
+**Why.** §7: a reviewer is a model, a reasoning effort, a prompt and a packet format, and any change to one of
+them is a new reviewer whose recall and false-shortlist rate have to be measured again. Nothing in the repository
+said which model reviews. A review is a general-purpose subagent, and a subagent runs on the model and effort of
+the thread that starts it unless the launch names them. By their transcripts, every review so far ran on
+`claude-opus-5-5`: the 376 of the confirmatory batch at effort `high` (harness 2.1.307), the 432 of §14 at effort
+`xhigh` (harness 2.1.312). On 2026-11-10 the project's threads moved to `claude-fable-5-2`, so a review started
+today would be a reviewer nobody has measured. This run measures it on §14's 432 review files, and from here on
+the launch names the model and the audit checks it.
+
+**What the transcripts and four test launches on dummy files showed (2026-11-10, before the run).**
+
+- A transcript records, for every model turn, the model that served it, the model asked for, the effort and the
+  agent type. The harness can serve a turn with another model when the one asked for is unavailable; only the
+  transcript shows that.
+- A launch can name the model (a full id is accepted) and the effort; both were honoured in the test launches,
+  for `claude-fable-5-2` and for `claude-opus-5-5`.
+- Subagents started with the Agent tool can get the thread's recent messages from the person copied into their
+  context. It happened to the first 18 reviews of §14 (three of Cora's messages to the thread, the project's
+  opening brief among them) and to today's Agent-tool test launch. None of those messages says anything about a
+  packet, but they are input that the calibration did not control and that would differ on release day.
+  Subagents started from a workflow script did not get them (4 of 4), and a script takes its packet ids from a
+  list instead of having them typed 432 times.
+- The general-purpose agent's system text is the one of 2026-10-30 plus a privacy note; a workflow adds a note
+  that the final text goes back to a script. The harness is 2.1.322 and offers the subagent 41 tools, not 50.
+
+So the reviewer cannot be launched exactly as on 2026-10-30 any more, and this run differs from §14 in the model
+and in the launch path. What it measures is the reviewer as it would be launched on release day.
+
+**Reviewer under test.** A general-purpose subagent on `claude-fable-5-2` at effort `xhigh`, started by
+`scripts/stage_a_reviews.js` (Workflow tool) with the launch text of every earlier batch, one per prompt file,
+told to make one Read of its prompt and one Write of its reply. The 432 prompt files are §14's, byte for byte
+(regenerated from `products.json` with today's `vetting/stage_a.md` they are identical; sha256 of the files
+concatenated in id order `772063800d06df8eb401306de41197cb436cb0eccd15b2ef3a276e437a543059`). The shortlist rule
+is unchanged (S ≥ 0.35).
+
+**Batches.**
+
+- `slow-cal-2`: all 432 files, one review each.
+- `slow-cal-2-repeat`: a second, independent review by the same reviewer of 87 of them (the first fifth of the
+  ids in order of sha256("slow-cal-2-repeat:" + id), `slow_cal.repeat_ids`; ids are random labels). §7 planned
+  such a repeat and none has been run. It says how often the same reviewer changes its shortlist decision on the
+  same file and how far S moves, which is the yardstick for reading differences between two reviewers.
+
+**Audit** (`scripts/stage_a_audit.py --model claude-fable-5-2 --effort xhigh --agent-type general-purpose`). A
+review counts when its tool calls are the one Read and the one Write, one model served every turn, that model is
+the one named, no turn is an API error and no message from the thread was copied in. A review the harness served
+with another model, or that died on an API error, is not a review by this reviewer: it is run again until the
+named model serves it, and both transcripts are kept. A review with other tool calls, or a reply that does not
+parse, is run again once; if that fails too it counts against the rule (a fake not shortlisted, a natural star
+shortlisted), as in §14. `vetting commit --audit` commits only counted reviews as verdicts and writes the model,
+effort and agent type into `commit.json`.
+
+**Blinding.** §14's key was opened on 2026-10-30, and its totals are in this document. The reviewers see none of
+that: each gets the launch text and its own prompt file, and the audit checks it read nothing else. The thread
+that launches them has read §14's totals and has not opened the key, the plan, `verdicts_table.csv` or
+`report.json`; it does not open them, or any reply, until both verdict archives (`prereg/verdicts/slow-cal-2`
+and `slow-cal-2-repeat`) are pushed, which `slow_cal.py score` enforces as before.
+
+**Criteria**, on the new verdicts, as in §14 with the same bars:
+
+| | Criterion |
+|---|---|
+| R1 | Grey, dust and re-emitting fakes at signal-to-noise ≥ 20 shortlisted: one-sided 95% lower bound ≥ 50% (≥ 32 of 50) |
+| R2 | Natural and chance-pass stars shortlisted: one-sided 95% upper bound ≤ 10% (≤ 23 of 322) |
+
+**Comparison with the 2026-10-30 verdicts**, file by file (`slow_cal.py compare`). For the 322 natural and
+chance-pass stars and for R1's 50 fakes: the 2×2 table of the two reviewers' shortlist decisions and exact
+McNemar tests (if the two shortlist each file with the same probability, a file only one of them shortlists is
+equally likely to be either's). One-sided at 0.05, these see roughly a rise in false shortlists from 26 to 40 of
+322, or a fall in recall from 44 to 36 of 50; smaller changes pass as no difference, and each test trips 1 time
+in 20 when the reviewers are the same. The same figures are repeated without the 18 files whose 2026-10-30
+review had thread messages in its context.
+
+**What each outcome leads to.**
+
+1. The new model fails R1, or passes it but is worse than the old one on the same files (either one-sided test
+   below 0.05: more natural and chance-pass stars shortlisted, or fewer of R1's fakes found). Then the 432 files
+   are also reviewed on `claude-opus-5-5` as launched today (batch `slow-cal-3`, same procedure), because its
+   2026-10-30 figures belong to a launch that can no longer be repeated. Release-day reviews use whichever of
+   the two runs passes R1 and shortlists fewer natural and chance-pass stars (the newer model if they tie).
+2. Otherwise release-day reviews use `claude-fable-5-2`, and its figures from this run are the ones quoted for
+   the review. No run on the old model is needed: it would not change the choice.
+
+Either way the chosen model and effort are written into the reviewing agents' files and into
+`prereg/reviewers/<batch>.json`, release-day launches name them, and the audit refuses reviews served by
+anything else. R2 passing or failing does not change the order of work (the review comes after the automated
+cuts, as decided in §14); it changes how many flagged stars can reach the review within the ~10³ budget.
+
+**Reported whatever the outcome**: both reviewers' R1, R2, per-class and frame-weighted false-shortlist rates;
+recall by flavour, including the temperature and G-only fakes; the paired tables; the change in S per group;
+Brier score and AUC; how often the top class agrees; named objects; the repeat's flips and S scatter; failed
+reviews, re-runs and tokens per review.
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run

@@ -47,4 +47,15 @@ precede the verdicts in each PR's history. Batch 1's rule was set in the pilots 
 |---|---|---|---|
 | 5 | v4, in `docs/dayone.md` | `verdicts/dayone-batch5` cf60d94 | v4 not adopted |
 | confirm-main, confirm-hidden | v5: d167af0 (PR #53) | `verdicts/confirm-main` e3ea437, `verdicts/confirm-hidden` 7d23f83, pushed 2026-10-22 ~03:07 UTC | v5 adopted (`docs/dayone.md`, "Confirmatory result") |
+| slow-cal-1 | `docs/vetting.md` §14: 9b88faf (PR #77) | `verdicts/slow-cal-1` 83b887f | recall passes, false shortlist fails (§14, "Result") |
 
+
+## Which reviewer made the verdicts (from 2026-11-10)
+
+A reviewer is a model, a reasoning effort and an agent type; a subagent takes the first two from the thread that
+starts it unless the launch names them. From batch `slow-cal-2` on, `scripts/stage_a_audit.py` reads them from
+every review's transcript, a review served by anything but the named model does not count, and `vetting commit
+--audit` writes them into `commit.json` beside the verdicts' hash. `reviewers/<batch>.json` is the record of a
+calibration batch's reviewer; the audit of a later batch takes it with `--reviewer` (`docs/vetting.md` §15).
+Earlier batches carry no such record: by their transcripts all ran on `claude-opus-5-5`, the confirmatory
+batches at effort `high` and `slow-cal-1` at `xhigh`.

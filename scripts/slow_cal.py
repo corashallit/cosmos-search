@@ -8,6 +8,7 @@
         --batch D/batch --archive prereg/verdicts/slow-cal-1
     git push
     python scripts/slow_cal.py score --dir D                                                             # reveal
+    python scripts/slow_cal.py compare --dir D2 --against D [--repeat D3]      # another reviewer, the same packets
 
 score-shard runs rule slow-v3 (frozen files in prereg/rules/slow-v3/) over a dr3_pass output that kept every light
 curve: the detector for every star, the period search for every star of the sampling frame (a list of bulk-file
@@ -613,7 +614,9 @@ def table(verdicts, keys):
         k = keys[v.packet_id]
         t, m = k.get("truth") or {}, k["measured"]
         s = sum(v.class_probs.get(c, 0.0) for c in INTERESTING) if v.ok else float("nan")
-        hit = bool(v.ok and s >= S_SHORTLIST)
+        # A review that failed twice counts against the rule (§14, Procedure): a fake not shortlisted, a natural
+        # or chance-pass star shortlisted.
+        hit = bool(s >= S_SHORTLIST) if v.ok else k["kind"] != "fake"
         col, nw = m["colour"], m["neowise"]
         trend = "W1_slope_per_yr" in nw
         meas_w1 = nw.get("W1_slope_per_yr" if trend else "W1_change")
@@ -705,12 +708,173 @@ def report(df, strata):
     return out
 
 
+# --- a second reviewer on the same review files (docs/vetting.md §15) --------------------------------------------
+
+
+def repeat_ids(ids, share=0.2, salt="slow-cal-2-repeat"):
+    """The packets reviewed a second time: the first `share` of the ids in order of sha256(salt:id). Packet ids are
+    random labels, so the choice cannot depend on what a packet holds, and anyone can redo it."""
+    import hashlib
+
+    ranked = sorted(ids, key=lambda i: hashlib.sha256(f"{salt}:{i}".encode()).hexdigest())
+    return sorted(ranked[:int(np.ceil(share * len(ids)))])
+
+
+def _paired(old, new):
+    """Shortlist decisions of two reviewers on the same packets: the 2x2 table and exact McNemar tests (under
+    "the two shortlist each packet with the same probability", a packet only one of them shortlists is equally
+    likely to be either's)."""
+    from scipy.stats import binomtest
+
+    old, new = np.asarray(old, bool), np.asarray(new, bool)
+    only_old, only_new = int((old & ~new).sum()), int((~old & new).sum())
+    n = only_old + only_new
+    p = lambda k, alt: float(binomtest(k, n, 0.5, alternative=alt).pvalue) if n else 1.0
+    return {"n": int(len(old)), "old": int(old.sum()), "new": int(new.sum()), "both": int((old & new).sum()),
+            "only_old": only_old, "only_new": only_new, "neither": int((~old & ~new).sum()),
+            "p_two_sided": p(min(only_old, only_new), "two-sided"), "p_new_more": p(only_new, "greater"),
+            "p_new_fewer": p(only_new, "less")}
+
+
+def _s_change(old, new):
+    from scipy.stats import spearmanr, wilcoxon
+
+    old, new = np.asarray(old, float), np.asarray(new, float)
+    ok = np.isfinite(old) & np.isfinite(new)
+    d = new[ok] - old[ok]
+    if not len(d):
+        return {"n": 0}
+    return {"n": int(len(d)), "mean_old": float(old[ok].mean()), "mean_new": float(new[ok].mean()),
+            "mean_change": float(d.mean()), "median_change": float(np.median(d)),
+            "mean_abs_change": float(np.abs(d).mean()), "sd_change": float(d.std(ddof=1)) if len(d) > 1 else 0.0,
+            "wilcoxon_p": float(wilcoxon(d).pvalue) if np.any(d != 0) else 1.0,
+            "spearman": float(spearmanr(old[ok], new[ok])[0]) if len(d) > 2 else float("nan")}
+
+
+def groups(df):
+    fake = df["kind"] == "fake"
+    strong = df["snr"] >= 20
+    return {"fakes_r1": fake & df["flavour"].isin(INTERESTING_FLAVOURS) & strong,
+            "natural_and_chance": df["kind"].isin(["natural", "chance"]),
+            "fakes_temperature": fake & (df["flavour"] == "temperature"),
+            "fakes_g_only": fake & (df["flavour"] == "g_only"),
+            "fakes_grey_weak": fake & (df["flavour"] == "grey") & ~strong}
+
+
+def compare(old, new, strata, without=()):
+    """The same packets reviewed by two reviewers: `old` and `new` are the scored tables (`table`). Returns each
+    one's criteria, the paired comparison per group, and which outcome of docs/vetting.md §15 applies. `without`:
+    packet ids left out of a second, sensitivity copy of the paired figures."""
+    m = old.merge(new, on="packet_id", suffixes=("_old", "_new"), validate="one_to_one")
+    if len(m) != len(old) or len(m) != len(new):
+        raise ValueError("the two tables do not hold the same packets")
+    if not (m["kind_old"] == m["kind_new"]).all():
+        raise ValueError("the two tables disagree on what the packets are")
+    key = m.rename(columns={"kind_old": "kind", "flavour_old": "flavour", "snr_old": "snr"})
+
+    def paired(rows):
+        out = {}
+        for name, sel in groups(key).items():
+            g = m[sel & rows]
+            out[name] = {"shortlist": _paired(g["shortlisted_old"], g["shortlisted_new"]),
+                         "s": _s_change(g["s_old"], g["s_new"]),
+                         "same_top_class": int((g["top_old"] == g["top_new"]).sum())}
+        return out
+
+    everything = pd.Series(True, index=m.index)
+    out = {"old": _criteria(old, strata), "new": _criteria(new, strata), "paired": paired(everything)}
+    if len(without):
+        keep = ~m["packet_id"].isin(set(without))
+        sub = lambda df: df[~df["packet_id"].isin(set(without))]
+        out["without"] = {"left_out": int((~keep).sum()), "old": _criteria(sub(old), None),
+                          "new": _criteria(sub(new), None), "paired": paired(keep)}
+    out["outcome"] = outcome(out["new"], out["paired"])
+    return out
+
+
+def _criteria(df, strata):
+    rep = report(df, strata) if strata is not None else None
+    g = groups(df)
+    good, nat = df[g["fakes_r1"]], df[g["natural_and_chance"]]
+    r1, r2 = _cp(good["shortlisted"].sum(), len(good)), _cp(nat["shortlisted"].sum(), len(nat))
+    truth = np.r_[np.ones(len(good)), np.zeros(len(nat))]
+    s = np.r_[good["s"].to_numpy(float), nat["s"].to_numpy(float)]
+    ok = np.isfinite(s)
+    out = {"R1_recall": {**r1, "pass": bool(r1["lower_95_one_sided"] >= 0.5)},
+           "R2_natural_false_shortlist": {**r2, "pass": bool(r2["upper_95_one_sided"] <= 0.10)},
+           "brier": float(np.mean((s[ok] - truth[ok]) ** 2)) if ok.any() else None,
+           "failed_reviews": int((~df["ok"].astype(bool)).sum()),
+           "recognised": int(df["recognised_as"].notna().sum())}
+    if rep is not None:
+        out.update(natural_weighted_to_frame=rep["natural_weighted_to_frame"],
+                   auc=rep["auc_s_interesting_fakes_vs_natural"], natural_by_stratum=rep["natural_by_stratum"],
+                   fakes_by_flavour=rep["fakes_by_flavour"])
+    return out
+
+
+def outcome(new, paired, alpha=0.05):
+    """Which of §15's outcomes applies (written before the reviews ran)."""
+    more_false = paired["natural_and_chance"]["shortlist"]["p_new_more"] < alpha
+    fewer_found = paired["fakes_r1"]["shortlist"]["p_new_fewer"] < alpha
+    if not new["R1_recall"]["pass"]:
+        code, text = "old_model_rerun", "the new model fails R1: re-run the files on the old model as launched today"
+    elif more_false or fewer_found:
+        code = "old_model_rerun"
+        text = ("the new model passes R1 but is worse than the old one on the same files ("
+                + " and ".join(x for x, y in (("more natural stars shortlisted", more_false),
+                                               ("fewer fakes found", fewer_found)) if y)
+                + "): re-run the files on the old model as launched today and choose between the two runs")
+    else:
+        code, text = "new_model", "the new model passes R1 and is not worse than the old one on either count: use it"
+    return {"code": code, "text": text, "new_passes_R1": bool(new["R1_recall"]["pass"]),
+            "new_passes_R2": bool(new["R2_natural_false_shortlist"]["pass"]),
+            "more_natural_shortlisted": bool(more_false), "fewer_fakes_found": bool(fewer_found), "alpha": alpha}
+
+
+def repeat_scatter(first, second, other=None):
+    """The same reviewer twice on the same packets (`first`, `second`: scored tables; `second` may hold a subset):
+    how often its shortlist decision changes and how far S moves. `other`: another reviewer's table, compared with
+    `first` on the same subset."""
+    m = first.merge(second, on="packet_id", suffixes=("_old", "_new"), validate="one_to_one")
+    out = {"packets": int(len(m)), "shortlist": _paired(m["shortlisted_old"], m["shortlisted_new"]),
+           "s": _s_change(m["s_old"], m["s_new"]), "same_top_class": int((m["top_old"] == m["top_new"]).sum())}
+    out["s_scatter_per_review"] = out["s"]["sd_change"] / np.sqrt(2) if out["s"].get("n", 0) > 1 else None
+    if other is not None:
+        o = other[other["packet_id"].isin(m["packet_id"])].merge(first, on="packet_id", suffixes=("_old", "_new"))
+        out["other_reviewer_same_packets"] = {"shortlist": _paired(o["shortlisted_old"], o["shortlisted_new"]),
+                                              "s": _s_change(o["s_old"], o["s_new"]),
+                                              "same_top_class": int((o["top_old"] == o["top_new"]).sum())}
+    return out
+
+
+def cmd_compare(a):
+    d = Path(a.dir)
+    new, old = pd.read_csv(d / "verdicts_table.csv"), pd.read_csv(Path(a.against) / "verdicts_table.csv")
+    strata = pd.read_csv(d / "strata.csv", index_col=0)
+    without = Path(a.without).read_text().split() if a.without else ()
+    out = compare(old, new, strata, without)
+    if a.repeat:
+        out["repeat"] = repeat_scatter(new, pd.read_csv(Path(a.repeat) / "verdicts_table.csv"), other=old)
+    (d / "compare.json").write_text(json.dumps(out, indent=1, default=_json))
+    brief = {k: {c: out[k][c] for c in ("R1_recall", "R2_natural_false_shortlist", "natural_weighted_to_frame")}
+             for k in ("old", "new")}
+    print(json.dumps({**brief, "paired": {g: v["shortlist"] for g, v in out["paired"].items()},
+                      "outcome": out["outcome"]}, indent=1, default=_json))
+
+
 def cmd_score(a):
     from cosmos_search.vetting.commit import load_verdicts, reveal
 
     d = Path(a.dir)
     keys = reveal(d / "batch", d / "key.json.age", remote=None if a.unpublished else "origin")
-    df = table(load_verdicts(d / "batch"), keys)
+    verdicts = load_verdicts(d / "batch")
+    if a.subset:           # a batch that re-reviews some of the packets (§15's repeat): the key covers them all
+        keys = {v.packet_id: keys[v.packet_id] for v in verdicts}
+    df = table(verdicts, keys)
+    if a.subset:
+        df.to_csv(d / "verdicts_table.csv", index=False)
+        print(f"{len(df)} verdicts scored; table at {d / 'verdicts_table.csv'}")
+        return
     strata = pd.read_csv(d / "strata.csv", index_col=0)
     rep = report(df, strata)
     df.to_csv(d / "verdicts_table.csv", index=False)
@@ -743,7 +907,14 @@ def main(argv=None):
     s = sub.add_parser("score")
     s.add_argument("--dir", required=True)
     s.add_argument("--unpublished", action="store_true", help="tuning only: skip the check that verdicts are on origin")
+    s.add_argument("--subset", action="store_true", help="the batch re-reviews some of the key's packets: table only")
     s.set_defaults(fn=cmd_score)
+    s = sub.add_parser("compare")
+    s.add_argument("--dir", required=True, help="scored batch of the new reviewer")
+    s.add_argument("--against", required=True, help="scored batch of the old reviewer, same packets")
+    s.add_argument("--repeat", help="scored batch of the new reviewer's second pass over some of the packets")
+    s.add_argument("--without", help="file of packet ids to leave out of a sensitivity copy of the paired figures")
+    s.set_defaults(fn=cmd_compare)
     a = ap.parse_args(argv)
     a.fn(a)
 

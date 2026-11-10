@@ -7,9 +7,18 @@
     python -m cosmos_search.vetting api --packets products.json --replies run/replies --model <model id>
     # 2b. ...or have an orchestrating session's no-tool subagents write run/replies/<packet_id>.txt
 
-    # 3. Parse and commit (verdicts become immutable), archive them in the repo as a git commit, and push it
+    # 2c. ...or scripts/stage_a_reviews.js (Workflow tool), one subagent per prompt on a named model; the ids
+    #     still without a reply, split for several workflows:
+    python -m cosmos_search.vetting pending --prompts run/prompts --replies run/replies --chunks 9
+    #     then check every transcript: one Read and one Write, served by the named model throughout
+    python scripts/stage_a_audit.py --transcripts <session>/subagents --prompts run/prompts --replies run/replies \
+        --out run/audit.json --reviewer prereg/reviewers/<calibration batch>.json
+
+    # 3. Parse and commit (verdicts become immutable), archive them in the repo as a git commit, and push it.
+    #    With --audit, a packet without a counted review is committed as a failed verdict whatever its reply
+    #    file says, and commit.json records which model, effort and agent type made the verdicts.
     python -m cosmos_search.vetting commit --packets products.json --replies run/replies --vetter <label> \
-        --batch run/batch --archive prereg/verdicts/<batch name>
+        --batch run/batch --archive prereg/verdicts/<batch name> [--audit run/audit.json]
     git push        # reveal refuses until the archive commit is on origin
 
     # 4. Only now open the key and score
@@ -67,13 +76,60 @@ def cmd_api(args):
     print(f"replies in {out}")
 
 
+def cmd_pending(args):
+    ids = pending(args.prompts, args.replies)
+    n = max(1, min(args.chunks, len(ids)))
+    print(json.dumps([ids[i::n] for i in range(n)] if ids else []))
+
+
+def pending(prompts, replies):
+    """Packet ids with a prompt file and no reply file yet."""
+    done = {f.stem for f in Path(replies).glob("*.txt")}
+    return sorted(f.stem for f in Path(prompts).glob("*.md") if f.stem not in done)
+
+
+def audited(path, packet_ids):
+    """(reviewer fields for commit.json, {packet id: why its review does not count}) from a stage_a_audit.py
+    output. A batch with a mix of reviewers, or an audit of other packets, is refused."""
+    a = json.loads(Path(path).read_text())
+    r = a["reviewer"]
+    if not r.get("model"):
+        raise SystemExit(f"{path}: no review counted, nothing to commit")
+    if len(r.get("configurations_seen") or []) > 1:
+        raise SystemExit(f"{path}: reviews by more than one model, effort or agent type; re-run the minority and "
+                         "audit again")
+    known = set(a["counted_transcripts"]) | set(a["unclean"]) | set(a["no_transcript"])
+    if set(packet_ids) - known:
+        raise SystemExit(f"{path}: audit does not cover {len(set(packet_ids) - known)} of the packets")
+    why = {}
+    for pid in packet_ids:
+        if pid in a["counted_transcripts"]:
+            continue
+        entries = a["transcripts"].get(pid) or []
+        notes = sorted({p for e in entries for p in e["reviewer_problems"]}
+                       | ({"tool calls other than one Read and one Write"} if any(not e["clean"] for e in entries)
+                          else set()))
+        why[pid] = "no counted review: " + ("; ".join(notes) if notes else "no transcript")
+    fields = {k: r[k] for k in ("model", "effort", "agent_type", "launch", "harness")}
+    return {"reviewer": fields, "reviews_not_counted": len(why)}, why
+
+
 def cmd_commit(args):
+    packets = _packets(args.packets)
+    extra, uncounted = {}, {}
+    if args.audit:
+        extra, uncounted = audited(args.audit, [p["packet_id"] for p in packets])
     verdicts = []
-    for p in _packets(args.packets):
+    for p in packets:
         f = Path(args.replies) / f"{p['packet_id']}.txt"
-        verdicts.append(parse(f.read_text(), p, args.vetter) if f.exists() else failed(p["packet_id"], args.vetter, "no reply"))
-    extra = {"plan_sha256": _sha(args.plan)} if args.plan else None
-    rec = commit(verdicts, args.batch, archive=args.archive, allow_dirty=args.allow_dirty, extra=extra)
+        if p["packet_id"] in uncounted:
+            verdicts.append(failed(p["packet_id"], args.vetter, uncounted[p["packet_id"]]))
+        else:
+            verdicts.append(parse(f.read_text(), p, args.vetter) if f.exists()
+                            else failed(p["packet_id"], args.vetter, "no reply"))
+    if args.plan:
+        extra["plan_sha256"] = _sha(args.plan)
+    rec = commit(verdicts, args.batch, archive=args.archive, allow_dirty=args.allow_dirty, extra=extra or None)
     print(json.dumps(rec, indent=2))
 
 
@@ -97,10 +153,17 @@ def main(argv=None):
     s.add_argument("--model", required=True)
     s.add_argument("--max-tokens", type=int, default=4000)
     s.set_defaults(fn=cmd_api)
+    s = sub.add_parser("pending")
+    s.add_argument("--prompts", required=True)
+    s.add_argument("--replies", required=True)
+    s.add_argument("--chunks", type=int, default=9, help="number of lists to split the ids into")
+    s.set_defaults(fn=cmd_pending)
     s = sub.add_parser("commit")
     s.add_argument("--packets", required=True)
     s.add_argument("--replies", required=True)
     s.add_argument("--vetter", required=True)
+    s.add_argument("--audit", help="stage_a_audit.py output: only counted reviews are committed as verdicts, and "
+                                   "the reviewer goes into commit.json")
     s.add_argument("--batch", required=True)
     s.add_argument("--archive", help="directory in the repo to commit the verdicts to (push before revealing)")
     s.add_argument("--plan", help="sealed decoy plan; its sha256 goes into commit.json")
