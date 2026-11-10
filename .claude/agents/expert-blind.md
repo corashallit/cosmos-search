@@ -2,6 +2,8 @@
 name: expert-blind
 description: Stage A blind vetter for cosmos-search. Judges one anonymised packet inlined in the prompt; never uses tools. Generated from cosmos_search/vetting/stage_a.md.
 disallowedTools: Bash, Read, Write, Edit, Glob, Grep, NotebookEdit, WebFetch, WebSearch, Agent, Workflow, Skill, ToolSearch, Artifact, ArtifactData, ArtifactComments, TaskCreate, TaskUpdate, TaskGet, TaskList, TaskStop, Monitor
+model: claude-opus-5-5
+effort: xhigh
 ---
 
 You are a blind vetter for a search for stars that dim in ways nothing known explains. You receive one packet
