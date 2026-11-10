@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software or the lists and write-ups it produces, please cite it as below."
+type: software
+title: "cosmos-search: a search of Gaia DR4 epoch photometry for slow fades and long dimming episodes"
+abstract: >-
+  Code and written results of a search of Gaia DR4 epoch photometry for stars that fade or brighten over
+  years and for dimming episodes of weeks to years that neither the instrument nor known astrophysics
+  explains, with secondary searches for short dips and for non-Keplerian astrometry. Thresholds are set
+  from the release's own stars, recall is measured with injected signals, and candidates go through
+  automated checks against independent surveys and a blind review with a measured false-positive rate.
+authors:
+  - given-names: Cora
+    family-names: Shallit
+repository-code: "https://github.com/corashallit/cosmos-search"
+license: BSD-3-Clause
+version: 0.0.1
+keywords:
+  - Gaia DR4
+  - epoch photometry
+  - time-domain astronomy
+  - variable stars
+  - anomaly detection
+  - technosignatures

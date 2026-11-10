@@ -117,6 +117,13 @@ def iter_epoch_csv(source, chunk_rows=2000):
     source is a path or bytes. Yields light-curve tables of up to chunk_rows sources each, streaming, so
     memory stays bounded: the largest bulk files (Galactic bulge) are 2.2 GB compressed.
     """
+    for sid, cols in iter_epoch_csv_columns(source, chunk_rows):
+        yield _to_long(sid, cols)
+
+
+def iter_epoch_csv_columns(source, chunk_rows=2000):
+    """The same file as (source_id per transit, {DR3 column: values per transit}) for up to chunk_rows sources at
+    a time, before the mapping to the light-curve schema (`gaia.dr4_fake` rewrites these as DR4-shaped rows)."""
     if isinstance(source, (bytes, bytearray)):
         raw = bytes(source)
         if raw[:2] == b"\x1f\x8b":
@@ -136,16 +143,20 @@ def iter_epoch_csv(source, chunk_rows=2000):
             rows = list(itertools.islice(reader, chunk_rows))
             if not rows:
                 return
-            yield _rows_to_table(rows, idx)
+            yield _rows_to_columns(rows, idx)
 
 
-def _rows_to_table(rows, idx):
+def _rows_to_columns(rows, idx):
     source_id = np.array([int(r[idx["source_id"]]) for r in rows], dtype=np.int64)
     n = np.array([int(r[idx["n_transits"]]) for r in rows], dtype=np.int64)
     cols = {name: _parse_arrays([r[idx[name]] for r in rows], dtype, n) for name, dtype in _NUMERIC.items()}
     for name in _BOOL:
         cols[name] = _parse_bools([r[idx[name]] for r in rows], n)
-    return _to_long(np.repeat(source_id, n), cols)
+    return np.repeat(source_id, n), cols
+
+
+def _rows_to_table(rows, idx):
+    return _to_long(*_rows_to_columns(rows, idx))
 
 
 def _parse_arrays(cells, dtype, n):

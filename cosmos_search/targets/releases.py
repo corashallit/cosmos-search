@@ -191,7 +191,7 @@ def fetch_star_rows(tap, ids, release, columns, chunk=50_000, workers=4):
                 d = tap.query(q, uploads={"ids": Table({"source_id": part})}, cache=False).to_pandas()
                 d.columns = [c.lower() for c in d.columns]
                 return names, d
-            except Exception:  # noqa: BLE001 (one retry, then the lookup fails loudly)
+            except Exception:
                 if attempt:
                     raise
 
