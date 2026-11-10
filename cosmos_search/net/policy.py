@@ -56,6 +56,13 @@ POLICIES = {
     "irsa.ipac.caltech.edu": HostPolicy(max_concurrent=4, timeout=120.0),
     # HATS catalogues are static Parquet.
     "data.lsdb.io": HostPolicy(max_concurrent=8),
+    # SkyMapper and NOIRLab Data Lab TAP document no limit; a star is two short synchronous queries.
+    "api.skymapper.nci.org.au": HostPolicy(max_concurrent=2, timeout=120.0),
+    "datalab.noirlab.edu": HostPolicy(max_concurrent=2, timeout=180.0),
+    # ATLAS forced photometry throttles per account with 429 and Retry-After, which the client waits out.
+    "fallingstar-data.com": HostPolicy(max_concurrent=2, min_interval=1.0, timeout=120.0),
+    # ASAS-SN Sky Patrol: the lookup host and its block servers are one small service, so they share a limiter.
+    "ifa.hawaii.edu": HostPolicy(max_concurrent=2, min_interval=0.25, shared=True, timeout=180.0),
 }
 
 DEFAULT = HostPolicy()

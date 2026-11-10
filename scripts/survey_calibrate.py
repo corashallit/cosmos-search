@@ -12,8 +12,8 @@ did not flag as variable, with RUWE < 1.4, and whose G scatter over DR3 (sqrt(n_
 the median of their half-magnitude. Gaia calls them quiet over 2014-2017; a few percent will still vary, which is
 why every summary below uses medians and percentiles.
 
-`fetch` reads each survey for each star (a table needs source_id, ra, dec and, where known, pmra, pmdec,
-ref_epoch) into <out>/<survey>.parquet, a few stars at once; rerunning skips stars already read. `tess` does the
+`fetch` reads each survey for each star (a Parquet or CSV table with source_id, ra, dec and, where known, pmra,
+pmdec, ref_epoch) into <out>/<survey>.parquet, a few stars at once; rerunning skips stars already read. `tess` does the
 same for `surveys.tess_activity`.
 
 `floors`: the scatter of 180-day bin means on the constant stars beyond their quoted errors, per survey: the
@@ -81,6 +81,12 @@ def sample(a):
     print(f"{len(out)} stars -> {a.out}")
 
 
+def read_stars(path):
+    """A star table from Parquet or CSV (the lists under configs/surveys/ are CSV)."""
+    path = Path(path)
+    return pd.read_csv(path) if path.suffix == ".csv" else pd.read_parquet(path)
+
+
 def _fetch_one(survey, star):
     if not surveys.covers(survey, star["dec"]):
         return surveys.empty(), "outside"
@@ -95,7 +101,7 @@ def _fetch_one(survey, star):
 
 
 def fetch(a):
-    stars = pd.read_parquet(a.stars)
+    stars = read_stars(a.stars)
     if a.max_g is not None:
         stars = stars[stars["phot_g_mean_mag"] < a.max_g]
     if a.min_g is not None:
@@ -131,7 +137,7 @@ def fetch(a):
 def tess(a):
     from cosmos_search.surveys import tess_activity
 
-    stars = pd.read_parquet(a.stars)
+    stars = read_stars(a.stars)
     if a.max_g is not None:
         stars = stars[stars["phot_g_mean_mag"] < a.max_g]
     if a.limit:
@@ -198,7 +204,7 @@ def _bins_by_star(lc, floors):
 
 
 def floors(a):
-    stars = pd.read_parquet(a.stars)[["source_id", "phot_g_mean_mag"]]
+    stars = read_stars(a.stars)[["source_id", "phot_g_mean_mag"]]
     lc = load(a.lc)
     zero = {s: 0.0 for s in pd.unique(lc["survey"])}
     b = _bins_by_star(lc, zero).merge(stars, on="source_id")
@@ -215,22 +221,35 @@ def floors(a):
     Path(a.out).write_text(json.dumps(res, indent=1))
 
 
+def _floors_arg(a):
+    """The season floors to use: `slow.independent.SEASON_FLOOR`, with those of a --floors file (the output of
+    `floors`, or a plain {survey: value}) in place of its entries."""
+    out = dict(ind.SEASON_FLOOR)
+    if getattr(a, "floors", None):
+        for s, v in json.loads(Path(a.floors).read_text()).items():
+            v = v["all"]["floor"] if isinstance(v, dict) else v
+            if v is not None and np.isfinite(v):
+                out[s] = float(v)
+    return out
+
+
 def _fake_change(slope, span=DR4_SPAN):
     return {"kind": "trend", "t_first": span[0], "t_last": span[1], "slope": slope, "d_bp": np.nan, "e_bp": np.nan,
             "d_rp": np.nan, "e_rp": np.nan}
 
 
 def null(a):
-    stars = pd.read_parquet(a.stars)[["source_id", "phot_g_mean_mag"]]
+    stars = read_stars(a.stars)[["source_id", "phot_g_mean_mag"]]
     lc = load(a.lc)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     change = _fake_change(a.slope)
+    fl = _floors_arg(a)
     rows = []
     for sid, d in lc.groupby("source_id"):
         for label, dd in (("null", d), ("injected", d.assign(
                 flux=d["flux"] * (1 + a.slope * (d["t"] - DR4_SPAN[0]) / 365.25)))):
-            same, aft = ind.same_years(dd, change), ind.after(dd, change)
+            same, aft = ind.same_years(dd, change, floors=fl), ind.after(dd, change, floors=fl)
             for s in (k for k in same if k != "all"):
                 rows.append({"source_id": sid, "survey": s, "case": label, "which": "same", **same[s]})
             for s in (k for k in aft if k != "all"):
@@ -262,12 +281,13 @@ def null(a):
 
 
 def known(a):
-    stars = pd.read_parquet(a.stars)
+    stars = read_stars(a.stars)
     lc = load(a.lc)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     tess_rows = pd.read_parquet(a.tess).set_index("source_id") if a.tess else None
     rows = []
+    fl = _floors_arg(a)
     by_star = dict(tuple(lc.groupby("source_id")))
     for s in stars.to_dict("records"):
         d = by_star.get(s["source_id"])
@@ -276,7 +296,7 @@ def known(a):
         change = ind.gaia_change(s)
         row = {"source_id": s["source_id"], "g": s["phot_g_mean_mag"], "kind": change["kind"],
                "total_change": ind.total_change(change), "slope": s.get("slope"), "class": s.get("dpac_class"),
-               **ind.columns(ind.same_years(d, change), ind.after(d, change))}
+               **ind.columns(ind.same_years(d, change, floors=fl), ind.after(d, change, floors=fl))}
         if tess_rows is not None and s["source_id"] in tess_rows.index:
             t = tess_rows.loc[s["source_id"]]
             row.update(tess_amp=t.get("tess_amp"), tess_sectors=t.get("tess_sectors"),
@@ -336,12 +356,14 @@ def main(argv=None):
     p.add_argument("--lc", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--slope", type=float, default=-0.02, help="made-up Gaia trend, fraction per year")
+    p.add_argument("--floors", help="season floors to use in place of the module's (output of `floors`)")
     p.set_defaults(fn=null)
     p = sub.add_parser("known")
     p.add_argument("--stars", required=True)
     p.add_argument("--lc", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--tess")
+    p.add_argument("--floors", help="season floors to use in place of the module's (output of `floors`)")
     p.set_defaults(fn=known)
     a = ap.parse_args(argv)
     a.fn(a)
