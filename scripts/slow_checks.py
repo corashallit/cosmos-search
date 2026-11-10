@@ -29,8 +29,9 @@ from cosmos_search.gaia.archive import tap
 from cosmos_search.net.tap import Tap
 from cosmos_search.slow import checks
 
-GAIA_COLS = ("source_id, ra, dec, pmra, pmdec, parallax, parallax_error, ref_epoch, phot_g_mean_mag, bp_rp, ruwe, "
-             "ipd_frac_multi_peak, phot_bp_rp_excess_factor")
+GAIA_COLS = ("ra", "dec", "pmra", "pmdec", "parallax", "parallax_error", "ref_epoch", "phot_g_mean_mag", "bp_rp", "ruwe",
+             "ipd_frac_multi_peak", "phot_bp_rp_excess_factor", "best_class_name", "best_class_score")
+RELEASE_OF = {"gaiadr3": "dr3", "gaiadr4": "dr4"}
 
 
 def candidates(fading, n, max_g=None):
@@ -39,18 +40,11 @@ def candidates(fading, n, max_g=None):
 
 
 def gaia_rows(ids, schema):
-    """gaia_source columns and DPAC's best variability class for the given source ids."""
-    t = tap()
-    g, c = [], []
-    for i in range(0, len(ids), 200):
-        chunk = ",".join(str(int(x)) for x in ids[i:i + 200])
-        g.append(t.query(f"SELECT {GAIA_COLS} FROM {schema}.gaia_source WHERE source_id IN ({chunk})",
-                         sync=True).to_pandas())
-        c.append(t.query(f"SELECT source_id, best_class_name, best_class_score FROM {schema}.vari_classifier_result "
-                         f"WHERE source_id IN ({chunk})", sync=True).to_pandas())
-    for d in g + c:
-        d.columns = [x.lower() for x in d.columns]
-    return pd.concat(g, ignore_index=True).merge(pd.concat(c, ignore_index=True), on="source_id", how="left")
+    """Astrometry, mean photometry and DPAC's best variability class for the given source ids, under DR3's column
+    names whatever the release calls them and whichever tables hold them (targets/releases.py)."""
+    from cosmos_search.targets import releases
+
+    return releases.fetch_star_rows(tap(), ids, RELEASE_OF.get(schema, schema), GAIA_COLS)
 
 
 def at_2019(r):
@@ -167,7 +161,8 @@ def main(argv=None):
         cand = candidates(fading, pool, a.max_g)
         cand = cand.drop(columns=["phot_g_mean_mag", "bp_rp"], errors="ignore").merge(
             gaia_rows(cand["source_id"].to_numpy(), a.schema), on="source_id", how="left")
-        keep = cand[~cand["best_class_name"].isin(a.skip_class)]
+        skip = {c.upper() for c in a.skip_class}  # DR4's class names may differ in case from DR3's
+        keep = cand[~cand["best_class_name"].astype(str).str.upper().isin(skip)]
         if len(keep) >= a.n or len(cand) < pool:
             cand = keep.sort_values("strength", ascending=False).head(a.n)
             break
