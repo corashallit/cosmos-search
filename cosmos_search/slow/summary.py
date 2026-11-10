@@ -335,7 +335,9 @@ def corrected_epochs(lc, table=None, cells=None):
     own = drift.star_cells(stars.reset_index().rename(columns={"g_mag": "phot_g_mean_mag"}))
     if cells is not None:
         given = cells.reindex(own.index)
-        own = own.where(given["gbin"].isna().to_numpy()[:, None], given).astype(np.int8)
+        has = given["gbin"].notna().to_numpy()
+        for c in ("gbin", "cbin"):
+            own[c] = np.where(has, given[c].to_numpy(), own[c].to_numpy()).astype(np.int8)
     stars[["gbin", "cbin"]] = own.to_numpy()
     order = np.lexsort((ep["t"].to_numpy(), ep["band"].to_numpy(), ep["source_id"].to_numpy()))
     if not np.all(order[1:] > order[:-1]):
@@ -525,7 +527,9 @@ def apply_reference(summ, ref, g_mag=None):
     out = summ.copy()
     med, err, cnt, lev = lookup(ref, out["source_id"].to_numpy(), out["g_mag"].to_numpy() if g_mag is None else g_mag)
     raw = out["slope_z_raw"].to_numpy(float) if "slope_z_raw" in out else out["slope_z"].to_numpy(float)
-    slope, slope_err = out["slope"].to_numpy(float), out["slope_err"].to_numpy(float)
+    slope = out["slope"].to_numpy(float)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        slope_err = out["slope_err"].to_numpy(float) if "slope_err" in out else np.abs(slope / raw)
     with np.errstate(invalid="ignore", divide="ignore"):
         z = (slope - med) / np.sqrt(slope_err ** 2 + err ** 2)
     out["slope_ref"], out["slope_ref_err"], out["n_ref"], out["ref_level"] = med, err, cnt, lev
