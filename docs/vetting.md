@@ -80,6 +80,14 @@ The fallback is the subagent `.claude/agents/expert-blind.md`, which deny-lists 
 documentation does not define a zero-tool agent, so that list is a best effort to be checked once per session. Both
 use the same text (`vetting/stage_a.md`; a test keeps them in sync).
 
+*What has run since 2026-10-21.* The project has no API key by decision, and inlining a packet would put it
+through the launching thread's context. So every batch from the confirmatory one on has used a third route: one
+general-purpose subagent per packet, told to make one Read of its prompt file (the same text, then the packet) and
+one Write of its reply, with every transcript audited afterwards (`scripts/stage_a_audit.py`). Such a subagent has
+tools, so the audit is what shows it used none but those two. From 2026-11-10 the launch is a workflow script
+(`scripts/stage_a_reviews.js`) that names the model and the reasoning effort, and the audit also checks that the
+named model served every turn of every review (§15).
+
 **Why stateless agents change the decoy design.** For people, decoys must be mixed in at a hidden rate, because a
 person who knows they are in a calibration session behaves differently. A Stage A agent sees one packet, keeps no
 memory between packets and is never told which run it is in. Its behaviour on a packet depends only on that packet.
