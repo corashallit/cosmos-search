@@ -11,7 +11,12 @@ predictions for the field's stars, so one star's change does not move them.
 
 Kept detections: Source Extractor flags below 4 (bits 1 and 2 mark neighbours and deblending; 4 and above are
 saturation, truncation or failed apertures), no flagged pixels (`nimaflags` = 0: bad, saturated or cross-talk),
-and a PSF magnitude with an error below MAX_ERR.
+a PSF magnitude with an error below MAX_ERR, and not on an image of type "bad".
+
+One group per filter and image type (fs Shallow Survey, ms Main Survey, 3ps the transient survey's fields). With
+one group per filter, constant stars of G 17 to 18.5 read as fading (median k / error +0.5): the short early
+exposures catch a faint star only when noise lifts it, so its early level is too high. Per image type that bias
+is gone (+0.1) for a trend error about a fifth larger.
 """
 
 import numpy as np
@@ -25,6 +30,7 @@ MATCH_ARCSEC = 1.5      # SkyMapper's seeing is ~2.5-3"; a Gaia position (at Sky
 SEARCH_ARCSEC = 5.0
 MAX_ERR = 0.1           # mag
 BANDS = {f: f"sm_{f}" for f in "uvgriz"}
+BAD_IMAGE = "bad"       # dr4.images.image_type of images the survey itself set aside
 
 _tap = None
 
@@ -62,19 +68,22 @@ def pick_object(objects, source_id, ra, dec):
 
 
 def clean(rows, source_id):
-    """Kept detections (module notes) as a COLUMNS table; one group per filter."""
+    """Kept detections (module notes) as a COLUMNS table; one group per filter and image type."""
     if not len(rows):
         return empty()
+    kind = rows["image_type"].astype(str).str.strip()
     ok = ((rows["flags"].to_numpy() < 4) & (rows["nimaflags"].to_numpy() == 0)
           & np.isfinite(rows["mag_psf"].to_numpy(float)) & (rows["e_mag_psf"].to_numpy(float) < MAX_ERR)
-          & (rows["e_mag_psf"].to_numpy(float) > 0) & rows["filter"].astype(str).isin(list(BANDS)).to_numpy())
-    r = rows[ok]
+          & (rows["e_mag_psf"].to_numpy(float) > 0) & rows["filter"].astype(str).isin(list(BANDS)).to_numpy()
+          & (kind != BAD_IMAGE).to_numpy())
+    r, kind = rows[ok], kind[ok]
     if not len(r):
         return empty()
     band = r["filter"].astype(str).map(BANDS).to_numpy()
     mag, magerr = r["mag_psf"].to_numpy(float), r["e_mag_psf"].to_numpy(float)
     flux, err = mag_to_flux(mag, magerr)
-    return table(source_id, "skymapper", band, band, r["date"].to_numpy(float) + MJD_TO_BTJD, flux, err, mag)
+    return table(source_id, "skymapper", band, band + "_" + kind.to_numpy(), r["date"].to_numpy(float) + MJD_TO_BTJD,
+                 flux, err, mag)
 
 
 def fetch(source_id, ra, dec, cache=True):

@@ -20,9 +20,15 @@ The calls are those of the `skypatrol` client, written out here so that they go 
 
 Epoch columns: asas_sn_id, jd, flux (mJy), flux_err, mag, mag_err, limit, fwhm, image_id, camera, quality.
 Fluxes are measured at the catalogue position on every image, detected or not, so a fading star keeps its epochs;
-this reader uses flux, never mag. Kept epochs: quality "G" (good image). Cameras ba to bh observed in V, the rest
-in g (`skypatrol`'s own table); each camera is its own group, since their zero points differ by up to a few
-percent and a camera change in 2017-2018 would otherwise read as a step.
+this reader uses flux, never mag. Kept epochs: quality "G" (good image) from a camera in `skypatrol`'s V list (ba
+to bh) or g list (bA to bH, bi to bt, cB). Each camera is its own group, since their zero points differ by up to
+a few percent and a camera change in 2017-2018 would otherwise read as a step.
+
+Be gentle with this host. On 2026-11-10 two empty connections to the port a second apart (the first version of
+`reachable`) were followed within two minutes by the whole hawaii.edu network dropping the machine's address,
+while the service stayed up for everyone else: most likely a border filter reading the probes as a port scan.
+`reachable` is now one ordinary request, the host's policy retries a failed call twice at most, and nothing
+here should ever open a connection without sending a request.
 
 ASAS-SN's pixels are 8 arcsec and its point-spread function about 16 arcsec, so neighbours matter more here than
 anywhere else: `slow.independent` divides the expected change by 1 + (neighbours' flux inside that beam over the
@@ -31,12 +37,13 @@ star's).
 
 import base64
 import io
-import socket
 
 import numpy as np
 import pandas as pd
+import requests
 
 from cosmos_search.net import ResponseCache, check_blind, get_client
+from cosmos_search.net.client import USER_AGENT
 
 from . import Unreachable, empty, table
 
@@ -46,7 +53,10 @@ CATALOG = "master_list"
 COLS = ["asas_sn_id", "ra_deg", "dec_deg", "catalog_sources"]
 SEARCH_ARCSEC = 8.0     # one ASAS-SN pixel
 MATCH_ARCSEC = 3.0      # catalogue positions are Gaia's or better than an arcsec; Gaia's is propagated to ~2019
+# `skypatrol`'s own lists; it drops epochs from a camera in neither, and so does `clean`.
 V_CAMERAS = frozenset({"ba", "bb", "bc", "bd", "be", "bf", "bg", "bh"})
+G_CAMERAS = frozenset({"bA", "bB", "bC", "bD", "bE", "bF", "bG", "bH", "bi", "bj", "bk", "bl", "bm", "bn", "bo", "bp",
+                       "bq", "br", "bs", "bt", "cB"})
 PROBE_SECONDS = 8.0
 
 _reachable = {}
@@ -57,16 +67,28 @@ def base_url(host=HOST, port=PORT):
 
 
 def reachable(host=HOST, port=PORT, timeout=PROBE_SECONDS):
-    """Whether a TCP connection to the service opens, tried once per process and host."""
+    """Whether the service answers from this machine, tried once per process and host: one GET of
+    /get_current_message, the call the `skypatrol` client itself opens with, sent once and never retried. It is
+    an ordinary request on purpose (module notes: an empty connection can look like a port scan)."""
     check_blind()
     key = (host, port)
     if key not in _reachable:
         try:
-            with socket.create_connection((host, port), timeout=timeout):
-                _reachable[key] = True
-        except OSError:
+            resp = requests.get(f"{base_url(host, port)}/get_current_message", timeout=timeout,
+                                headers={"User-Agent": USER_AGENT})
+            _reachable[key] = resp.status_code == 200
+        except requests.exceptions.RequestException:
             _reachable[key] = False
     return _reachable[key]
+
+
+def check_reachable(host=HOST, port=PORT):
+    """Raise `Unreachable` when the service's port cannot be opened from this machine."""
+    if not reachable(host, port):
+        raise Unreachable(
+            f"ASAS-SN Sky Patrol answers only on {host}:{port} (plain http), and this machine cannot open that "
+            "port. Cloud containers reach ports 80 and 443 only; run this from a machine with ordinary network "
+            "access (kore).")
 
 
 def cone(ra, dec, radius_arcsec=SEARCH_ARCSEC):
@@ -94,11 +116,7 @@ def request(ra, dec, client=None, host=HOST, port=PORT):
     """(index of targets in the cone, epochs of all of them) as DataFrames; the epochs are empty when the cone
     holds no catalogued target."""
     client = client or get_client()
-    if not reachable(host, port):
-        raise Unreachable(
-            f"ASAS-SN Sky Patrol answers only on {host}:{port} (plain http), and this machine cannot open that "
-            "port. Cloud containers reach ports 80 and 443 only; run this from a machine with ordinary network "
-            "access (kore).")
+    check_reachable(host, port)
     radius, ra_s, dec_s = cone(ra, dec)
     api = base_url(host, port)
     resp = client.post(f"{api}/lookup_cone/radius{radius}_ra{ra_s}_dec{dec_s}",
@@ -125,6 +143,9 @@ def clean(rows, source_id):
     if not len(rows):
         return empty()
     r = rows[rows["quality"].astype(str) == "G"] if "quality" in rows else rows
+    r = r[r["camera"].astype(str).isin(V_CAMERAS | G_CAMERAS)]
+    if not len(r):
+        return empty()
     cam = r["camera"].astype(str)
     band = np.where(cam.isin(V_CAMERAS), "asassn_V", "asassn_g")
     mag = pd.to_numeric(r["mag"], errors="coerce").to_numpy(float) if "mag" in r else None

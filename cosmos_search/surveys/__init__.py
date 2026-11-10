@@ -119,6 +119,25 @@ def reader(survey):
     raise ValueError(f"unknown survey {survey!r}; one of {ALL}")
 
 
+def usable(names=ALL, **options):
+    """(the surveys of `names` that this machine can read now, {survey: why not}). ASAS-SN needs its port and
+    ATLAS a token; each is tried once here so that a run reports a missing survey once and not once per star.
+    options: {survey: {keyword: value}} for that survey's check (a test server's address)."""
+    ok, why = [], {}
+    for s in names:
+        try:
+            if s == "asassn":
+                from . import asassn
+                asassn.check_reachable(**options.get(s, {}))
+            elif s == "atlas":
+                from . import atlas
+                atlas.check_token(**options.get(s, {}))
+            ok.append(s)
+        except (MissingCredential, Unreachable) as e:
+            why[s] = str(e)
+    return ok, why
+
+
 def fetch(survey, source_id, ra, dec, **options):
     return reader(survey)(source_id, ra, dec, **options)
 

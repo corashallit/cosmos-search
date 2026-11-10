@@ -67,6 +67,11 @@ def _check(resp, what):
     resp.raise_for_status()
 
 
+def check_token(client=None, base_url=BASE_URL):
+    """Raise `MissingCredential` unless ATLAS accepts this session's token (one GET of the account's task list)."""
+    _check((client or get_client()).get(f"{base_url}/queue/", headers=headers()), "token check")
+
+
 def request(ra, dec, mjd_min=MJD_MIN, mjd_max=None, use_reduced=True, client=None, base_url=BASE_URL,
             poll=POLL_SECONDS, timeout=TIMEOUT_SECONDS, sleep=time.sleep):
     """Run one forced-photometry job and return the result text."""

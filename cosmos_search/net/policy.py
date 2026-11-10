@@ -62,7 +62,9 @@ POLICIES = {
     # ATLAS forced photometry throttles per account with 429 and Retry-After, which the client waits out.
     "fallingstar-data.com": HostPolicy(max_concurrent=2, min_interval=1.0, timeout=120.0),
     # ASAS-SN Sky Patrol: the lookup host and its block servers are one small service, so they share a limiter.
-    "ifa.hawaii.edu": HostPolicy(max_concurrent=2, min_interval=0.25, shared=True, timeout=180.0),
+    # Few retries, far apart: the university's border filter has dropped a client address before (asassn.py).
+    "ifa.hawaii.edu": HostPolicy(max_concurrent=2, min_interval=0.5, shared=True, timeout=180.0, max_retries=2,
+                                 backoff_base=20.0, breaker_threshold=2, breaker_cooldown=1800.0),
 }
 
 DEFAULT = HostPolicy()

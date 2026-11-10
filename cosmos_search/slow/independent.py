@@ -43,6 +43,7 @@ import pandas as pd
 from scipy import stats
 
 from cosmos_search.inject.lightcurve import BAND_WAVELENGTH_UM
+from cosmos_search.surveys import FWHM_ARCSEC
 
 VISIT_GAP_DAYS = 0.5
 BIN_DAYS = 180.0
@@ -52,6 +53,7 @@ K_SIGMA = 3.0
 HALF = 0.5
 CLIP_SIGMA = 5.0
 BAND_FACTOR_RANGE = (0.25, 4.0)
+NEIGHBOUR_ARCSEC = 32.0    # twice the widest beam read here (ASAS-SN's 16 arcsec)
 BP_UM, RP_UM, G_UM = BAND_WAVELENGTH_UM["BP"], BAND_WAVELENGTH_UM["RP"], BAND_WAVELENGTH_UM["G"]
 
 # Scatter of 180-day bin means on constant stars beyond their quoted errors, as a fraction of the flux
@@ -63,9 +65,9 @@ PROVISIONAL = ("asassn", "atlas")
 
 def band_factor(band, d_bp=np.nan, e_bp=np.nan, d_rp=np.nan, e_rp=np.nan):
     """The change expected in `band` over the change in G, from the BP and RP changes (module notes). 1 when BP
-    and RP are missing or agree within twice their combined error."""
-    lam = BAND_WAVELENGTH_UM[band]
-    if not (np.isfinite(d_bp) and np.isfinite(d_rp) and np.isfinite(e_bp) and np.isfinite(e_rp)):
+    and RP are missing or agree within twice their combined error, and for a band with no listed wavelength."""
+    lam = BAND_WAVELENGTH_UM.get(band)
+    if lam is None or not (np.isfinite(d_bp) and np.isfinite(d_rp) and np.isfinite(e_bp) and np.isfinite(e_rp)):
         return 1.0
     if abs(d_bp - d_rp) <= 2 * np.hypot(e_bp, e_rp):
         return 1.0
@@ -83,6 +85,21 @@ def dilution(sep_arcsec, dmag, fwhm_arcsec):
     ok = np.isfinite(sep) & np.isfinite(dmag)
     sigma = fwhm_arcsec / 2.3548
     return float(np.sum(10 ** (-0.4 * dmag[ok]) * np.exp(-sep[ok] ** 2 / (4 * sigma ** 2))))
+
+
+def neighbours_adql(ra, dec, schema="gaiadr3", radius_arcsec=NEIGHBOUR_ARCSEC):
+    """Gaia sources within radius_arcsec of (ra, dec), the star itself among them."""
+    return (f"SELECT source_id, ra, dec, phot_g_mean_mag FROM {schema}.gaia_source WHERE 1 = CONTAINS("
+            f"POINT('ICRS', ra, dec), CIRCLE('ICRS', {float(ra):.7f}, {float(dec):.7f}, {radius_arcsec / 3600:.7f}))")
+
+
+def dilutions(neighbours, source_id, ra, dec, g_mag, names):
+    """{survey: c} for the named surveys from a `neighbours_adql` table (`dilution` with each survey's FWHM)."""
+    nb = neighbours[neighbours["source_id"].to_numpy() != int(source_id)]
+    nb = nb[np.isfinite(nb["phot_g_mean_mag"].to_numpy(float))]
+    sep = 3600 * np.hypot((nb["ra"].to_numpy(float) - ra) * np.cos(np.radians(dec)), nb["dec"].to_numpy(float) - dec)
+    dmag = nb["phot_g_mean_mag"].to_numpy(float) - float(g_mag)
+    return {s: dilution(sep, dmag, FWHM_ARCSEC[s]) for s in names}
 
 
 def visits(lc, gap=VISIT_GAP_DAYS):
