@@ -171,6 +171,32 @@ def test_review_launch_script_names_no_model():
     assert "agentType: 'general-purpose', model, effort" in js and "claude-" not in js
 
 
+def test_audit_can_record_a_batch_reviewed_before_the_check(batch):
+    transcript(batch / "t" / "a.jsonl", A, batch, workflow=False, forwarded=True)
+    transcript(batch / "t" / "b.jsonl", B, batch, workflow=False)
+    transcript(batch / "t" / "c.jsonl", C, batch, workflow=False)
+    rec = batch / "reviewers" / "old.json"
+    s = run(batch, "--allow-thread-messages", "--record", str(rec))
+    assert s["clean"] == 3 and json.loads(rec.read_text())["thread_messages_in_context"] == 1
+    assert run(batch, "--reviewer", str(rec))["wrong_reviewer"] == [A]            # a new batch is held to the rule
+
+
+def test_agent_files_and_launch_name_the_adopted_reviewer():
+    """The model and effort in .claude/agents/ are those of the calibration batch whose reviewer is adopted, and
+    that batch's record was made from its transcripts."""
+    from cosmos_search.vetting import reviewer
+
+    rec = reviewer.record()
+    assert rec["batch"] == reviewer.ADOPTED and rec["model"] and rec["effort"] and rec["packets"] > 0
+    for path in reviewer.AGENT_FILES:
+        fm = reviewer.frontmatter(path)
+        assert (fm["model"], fm["effort"]) == (rec["model"], rec["effort"]), path.name
+    args = reviewer.launch_args("/tmp/x", [A, B])
+    assert (args["model"], args["effort"], args["ids"]) == (rec["model"], rec["effort"], [A, B])
+    for name in ("verdicts.jsonl", "commit.json"):                                  # the batch it names is archived
+        assert (ROOT / "prereg" / "verdicts" / reviewer.ADOPTED / name).exists()
+
+
 # --- two reviewers on the same packets ---------------------------------------------------------------------------
 
 slow_cal = _load("slow_cal")

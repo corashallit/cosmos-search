@@ -22,6 +22,7 @@ and false-shortlist rate have to be measured again.
 Prompt files without a counted review are listed for a re-run. --record writes the batch's reviewer record (the
 configuration every counted review shares), which later audits take with --reviewer. Transcript directories are
 searched recursively, so the `subagents` directory of a session covers Agent-tool launches and workflow runs.
+Batches reviewed before this check existed can be recorded with --allow-thread-messages.
 """
 
 import argparse
@@ -96,7 +97,7 @@ def config(rec):
     return None
 
 
-def reviewer_problems(rec, expected=None):
+def reviewer_problems(rec, expected=None, allow_thread_messages=False):
     """Why this transcript's review does not count as the expected reviewer's ([] when it does)."""
     out = []
     if not rec["served"]:
@@ -109,7 +110,7 @@ def reviewer_problems(rec, expected=None):
         out.append(f"more than one effort level: {', '.join(rec['effort'])}")
     if rec["api_errors"]:
         out.append(f"{rec['api_errors']} API-error turn(s)")
-    if rec["forwarded_messages"]:
+    if rec["forwarded_messages"] and not allow_thread_messages:
         out.append("a message from the launching thread was copied into the reviewer's context")
     for key, got in (("model", rec["served"]), ("effort", rec["effort"]), ("agent_type", rec["agent_type"])):
         want = (expected or {}).get(key)
@@ -118,7 +119,7 @@ def reviewer_problems(rec, expected=None):
     return out
 
 
-def audit(transcripts, prompts, replies, expected=None):
+def audit(transcripts, prompts, replies, expected=None, allow_thread_messages=False):
     """{packet id: [one entry per transcript]}. An entry is `clean` when the tool calls are the one Read and the one
     Write, and `counted` when it is also the expected reviewer (reviewer_problems is empty)."""
     prompts, replies = Path(prompts).resolve(), Path(replies).resolve()
@@ -133,7 +134,7 @@ def audit(transcripts, prompts, replies, expected=None):
         work = [(n, i) for n, i in tools if n not in HANDBACK]
         clean = (len(work) == 2 and work[0][0] == "Read" and work[0][1].get("file_path") == str(prompts / f"{pid}.md")
                  and work[1][0] == "Write" and work[1][1].get("file_path") == str(replies / f"{pid}.txt"))
-        problems = reviewer_problems(rec, expected)
+        problems = reviewer_problems(rec, expected, allow_thread_messages)
         out.setdefault(pid, []).append({"transcript": str(t), "clean": bool(clean), "calls": [n for n, _ in tools],
                                         "reviewer": rec, "reviewer_problems": problems,
                                         "counted": bool(clean and not problems)})
@@ -178,6 +179,7 @@ def summarise(res, ids, expected=None):
             "harness": dict(Counter(v for r in recs for v in r["harness"])),
             "first_review": min((r["start"] for r in recs if r["start"]), default=None),
             "last_review": max((r["end"] for r in recs if r["end"]), default=None),
+            "thread_messages_in_context": sum(1 for r in recs if r["forwarded_messages"]),
             "tokens_per_review_median": tokens[len(tokens) // 2] if tokens else None,
             "output_tokens_total": sum(r["output_tokens"] for r in recs),
         },
@@ -192,6 +194,7 @@ def record(summary, batch):
     r = summary["reviewer"]
     return {"batch": batch, "model": r["model"], "effort": r["effort"], "agent_type": r["agent_type"],
             "launch": r["launch"], "harness": r["harness"], "packets": summary["packets"],
+            "thread_messages_in_context": r["thread_messages_in_context"],
             "first_review": r["first_review"], "last_review": r["last_review"]}
 
 
@@ -219,9 +222,12 @@ def main(argv=None):
     ap.add_argument("--reviewer", help="reviewer record of a calibration batch (prereg/reviewers/<batch>.json)")
     ap.add_argument("--record", help="write this batch's reviewer record here (needs every packet counted)")
     ap.add_argument("--batch", help="batch name for --record")
+    ap.add_argument("--allow-thread-messages", action="store_true",
+                    help="count reviews that had messages from the launching thread in their context (to record a "
+                         "batch reviewed before 2026-11-10; the record says how many)")
     a = ap.parse_args(argv)
     expected = load_expected(a)
-    res = audit(a.transcripts, a.prompts, a.replies, expected)
+    res = audit(a.transcripts, a.prompts, a.replies, expected, a.allow_thread_messages)
     ids = sorted(p.stem for p in Path(a.prompts).glob("*.md"))
     summary = summarise(res, ids, expected)
     Path(a.out).write_text(json.dumps({**summary, "transcripts": res}, indent=1))

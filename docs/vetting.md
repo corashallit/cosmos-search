@@ -729,6 +729,35 @@ recall by flavour, including the temperature and G-only fakes; the paired tables
 Brier score and AUC; how often the top class agrees; named objects; the repeat's flips and S scatter; failed
 reviews, re-runs and tokens per review.
 
+### Amendment (2026-11-10 23:15 UTC, after 116 reviews and before the key is opened)
+
+At 23:05 UTC Cora moved the project's threads back to `claude-opus-5-5` to save tokens. Told that the rest of
+this run would cost about 10 million more output tokens on `claude-fable-5-2` (it writes about 25 thousand per
+review at this effort, 2.4 times what the 2026-10-30 reviewer wrote), she chose at 23:08 UTC to stop it and to
+name `claude-opus-5-5` for reviews. The nine workflows were stopped at once. No reply has been read and the key
+is unopened. What changes:
+
+- **Sample.** 116 of the 432 files have a counted review, and 14 of the 87 repeats (all 14 among the 116); 18
+  reviews were in flight and are lost. The workflows took the ids in alphabetical order, so the 116 are the
+  first ids of that order, less the ones in flight (sha256 of the id list
+  `d0880959a4bc19a7c672ff20007e3c76f67c3139b8df05ec2e17d79069b1ecc3`). Ids are random labels, so this is a
+  random subset as far as the files' content goes, but it is not stratified, and how many of R1's fakes and of
+  each class it holds is not known until the key is opened (expected: about 13 fakes of R1's 50 and 86 natural
+  and chance-pass stars of the 322).
+- **Criteria.** R1 and R2 were sized for 50 and 322. On a quarter of that they are reported with their bounds
+  and not applied as pass or fail. The paired comparison with the 2026-10-30 verdicts is made as written, on the
+  files both reviewed; at this size it can show only a gross difference.
+- **Outcome.** The rule under "What each outcome leads to" is replaced by Cora's choice: release-day reviews
+  use the reviewer of §14, `claude-opus-5-5` at effort `xhigh` (`prereg/reviewers/slow-cal-1.json`, read from
+  that batch's transcripts; 18 of its 432 reviews had thread messages in their context, which the record says).
+  `slow-cal-3` is not run. `claude-fable-5-2` stays unmeasured beyond what the 116 show.
+- **Archives.** As planned, with the reviewed files only: `prereg/verdicts/slow-cal-2` (116 verdicts) and
+  `slow-cal-2-repeat` (14), pushed before `slow_cal.py score` opens the key.
+- **Later.** The other 316 files can be reviewed at any time (`vetting pending` lists them; the replies and
+  transcripts so far are in `/mnt/project-files/slow-cal-2/`). Their verdicts would be archived as a batch of
+  their own before being scored, and since this batch's result will be known by then, the two together are a
+  measurement with one look taken part way.
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run

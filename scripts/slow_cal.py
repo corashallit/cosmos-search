@@ -852,7 +852,10 @@ def cmd_compare(a):
     new, old = pd.read_csv(d / "verdicts_table.csv"), pd.read_csv(Path(a.against) / "verdicts_table.csv")
     strata = pd.read_csv(d / "strata.csv", index_col=0)
     without = Path(a.without).read_text().split() if a.without else ()
+    if a.partial:        # the new reviewer saw only some of the packets: pair those, say how many
+        old = old[old["packet_id"].isin(set(new["packet_id"]))]
     out = compare(old, new, strata, without)
+    out["packets_compared"] = int(len(new))
     if a.repeat:
         out["repeat"] = repeat_scatter(new, pd.read_csv(Path(a.repeat) / "verdicts_table.csv"), other=old)
     (d / "compare.json").write_text(json.dumps(out, indent=1, default=_json))
@@ -914,6 +917,7 @@ def main(argv=None):
     s.add_argument("--against", required=True, help="scored batch of the old reviewer, same packets")
     s.add_argument("--repeat", help="scored batch of the new reviewer's second pass over some of the packets")
     s.add_argument("--without", help="file of packet ids to leave out of a sensitivity copy of the paired figures")
+    s.add_argument("--partial", action="store_true", help="the new reviewer saw only some of the old one's packets")
     s.set_defaults(fn=cmd_compare)
     a = ap.parse_args(argv)
     a.fn(a)
