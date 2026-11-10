@@ -48,6 +48,7 @@ precede the verdicts in each PR's history. Batch 1's rule was set in the pilots 
 | 5 | v4, in `docs/dayone.md` | `verdicts/dayone-batch5` cf60d94 | v4 not adopted |
 | confirm-main, confirm-hidden | v5: d167af0 (PR #53) | `verdicts/confirm-main` e3ea437, `verdicts/confirm-hidden` 7d23f83, pushed 2026-10-22 ~03:07 UTC | v5 adopted (`docs/dayone.md`, "Confirmatory result") |
 | slow-cal-1 | `docs/vetting.md` §14: 9b88faf (PR #77) | `verdicts/slow-cal-1` 83b887f | recall passes, false shortlist fails (§14, "Result") |
+| slow-cal-2, slow-cal-2-repeat | `docs/vetting.md` §15: f505da4, amended 0ec1481 before the reveal (PR #85) | `verdicts/slow-cal-2` dc92bef (116 of 432 files), `verdicts/slow-cal-2-repeat` e3a9fcb (14) | stopped part way; criteria reported, not applied; reviewer stays that of slow-cal-1 (§15, "Result") |
 
 
 ## Which reviewer made the verdicts (from 2026-11-10)

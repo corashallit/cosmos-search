@@ -758,6 +758,79 @@ is unopened. What changes:
   their own before being scored, and since this batch's result will be known by then, the two together are a
   measurement with one look taken part way.
 
+### Result (2026-11-10, on 116 of the 432 files)
+
+The key was opened after both archives were on origin: `prereg/verdicts/slow-cal-2` (116 verdicts, commit
+dc92bef) and `prereg/verdicts/slow-cal-2-repeat` (14, commit e3a9fcb). All 130 counted reviews were served by
+`claude-fable-5-2` at effort `xhigh` on every turn, made one Read and one Write, had no thread message in their
+context, and gave a reply that parses; nothing was re-run.
+
+The 116 files hold 6 of R1's 50 fakes, 95 of the 322 natural and chance-pass stars (82 and 13), and 5 each of the
+temperature, G-only and weak grey fakes. A random quarter would hold about 13 of R1's fakes; the labels at the
+front of the alphabet happen to hold few (over all 432 labels, the alphabetical rank of R1's fakes against the
+rest gives Mann-Whitney p = 0.21, so label and content are unrelated, as they should be).
+
+| On the same 116 files | `claude-fable-5-2`, 2026-11-10 | `claude-opus-5-5`, 2026-10-30 |
+|---|---|---|
+| R1's fakes shortlisted | 6/6 (one-sided lower bound 61%) | 6/6 |
+| Natural and chance-pass stars shortlisted | 9/95 (9.5%; one-sided upper bound 15.9%) | 10/95 (10.5%; 17.2%) |
+| The same, weighted to the frame's mix of flagged stars | 4.5% (0.7-9.0%, bootstrap) | 4.6% (0.7-9.2%) |
+| Weak grey fakes (S/N < 20) shortlisted | 3/5 | 3/5 |
+| Temperature fakes shortlisted | 3/5 | 4/5 |
+| G-only fakes shortlisted | 0/5 | 2/5 |
+| Brier score; AUC of S, R1's fakes against natural stars | 0.052; 1.00 | 0.049; 0.995 |
+
+As the amendment says, R1 and R2 are reported here and not applied.
+
+*File by file.* The two reviewers made the same shortlist decision on 106 of the 116 files. Of the 95 natural
+and chance-pass stars, 6 were shortlisted by both, 4 by the 2026-10-30 reviewer alone, 3 by the new one alone and
+82 by neither (exact McNemar: two-sided p = 1.0, "the new one shortlists more" p = 0.77). The difference in
+false-shortlist rate is −1.1 percentage points (95% interval −6.5 to +4.4). All seven stars on which they differ
+have S between 0.26 and 0.43 from both, within 0.09 of the 0.35 line. Without the 7 files whose 2026-10-30
+review had thread messages in its context: 8/89 against 8/89, 5 shared. Over the 95 stars S averages 0.185
+against 0.176 (Wilcoxon p = 0.23), moves by 0.046 on average between the two, and has rank correlation 0.88;
+the top class is the same for 82. Over all 116 files: mean absolute change 0.052, rank correlation 0.90, same
+top class for 92. Neither named an object from its data, and neither had a failed review.
+
+*The same model twice.* On the 14 files it reviewed twice (11 natural, 1 chance pass, 2 fakes), the new model
+made the same shortlist decision every time (3 shortlisted, 11 not). S moved by 0.046 on average between its two
+reviews (standard deviation of the difference 0.058, so about 0.04 per review), and the top class was the same
+for 9. On those 14 files the two models differ by 0.050 on average and in one decision. So on a single file the
+two models' S differs by about as much as two reviews by one model do. Fourteen files give that only roughly.
+
+*G-only fakes are the one visible difference.* The new model gave all five "calibration offset" as the top class
+and shortlisted none (S 0.14-0.30). The 2026-10-30 reviewer called three of the five unexplained and shortlisted
+two (S 0.46 and 0.60, against 0.30 and 0.16 from the new model), as it did over the full set (13 of 25, §14).
+Five files do not establish a difference (one-sided exact p = 0.25), but this is the weakness §14 recorded, and
+the new model reads a change seen in G alone as instrumental. Since 2026-10-30 an automated check compares G's
+change with BP's and RP's before any review (`band_verdict`, docs/arms/slow-changes.md, "G against BP and RP"),
+so on release day less rests on the reviewer's reading of such stars than it did.
+
+*What the sample does and does not show.* On natural stars, a gap of more than about 5 percentage points in
+false-shortlist rate between the two models would have shown, and none did. On recall there are six fakes: the
+new model's recall of strong anomalous fades is unlikely to be below 61%, and nothing finer can be said.
+
+*Cost.* On the same 116 files the new model wrote 24.6 thousand output tokens per review on average (median
+20.9) against 10.8 (median 10.1): 2.3 times by the mean, 2.1 by the median. (The amendment's "2.4 times" set a
+mean against a median.) Total tokens per review with cached input are the same for both, about 200 thousand. A
+review took a median of 225 s against 110 s. The counted reviews used 2.85 million output tokens (116) and 0.36
+million (14 repeats); the 18 reviews in flight at the stop left no usage record.
+
+*Reviewer for release day.* `claude-opus-5-5` at effort `xhigh`, as Cora chose (`vetting/reviewer.py`:
+`ADOPTED = "slow-cal-1"`). The 116 files give no reason against it: on natural stars and strong fakes the two
+models agree to within one model's own repeat scatter, and the new one writes about twice the output per review.
+The figures to quote for the review stay §14's (recall 88%, false shortlist 5.0% at the flagged mix).
+
+*Not measured.* The reviewer as launched from today on (workflow script, harness 2.1.322, no thread messages) is
+the 2026-10-30 model and effort on a different launch path (then: Agent tool, harness 2.1.312, thread messages
+in 18 of 432 reviews). The test launches showed the system text differs by a privacy note and a note that the
+final text returns to a script. Whether that moves verdicts has not been tested. The test would be the same 116
+files on the named model as launched today, compared with its own 2026-10-30 verdicts against the repeat scatter
+above (about 1.3 million output tokens). It was not run, to save tokens.
+
+Data: `/mnt/project-files/slow-cal-2/` (`README.md` there; replies, transcripts, audits, `verdicts_table.csv` of
+both batches, `compare.json`).
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -827,3 +900,11 @@ is unopened. What changes:
   11.0% against 10%: fail), colour and NEOWISE errors hold (96%, 92%). Weighted to the mix of flagged stars the
   false shortlist is 5.0% (2.8-7.5%). On DR4 the review comes after automated cuts. The review reads 12 of 25
   G-only changes as unexplained; no test compares G's change with BP's and RP's.
+- 2026-11-10. Which model reviews (§15). Nothing named the reviewing model; every calibration ran on
+  `claude-opus-5-5`, by its transcripts. The agents' files and launches now name model and effort from
+  `prereg/reviewers/slow-cal-1.json`, launches go through `scripts/stage_a_reviews.js` (no thread messages reach
+  the reviewer), and the audit refuses a review served by anything else. A re-review of §14's files on
+  `claude-fable-5-2` was stopped at 116 of 432 to save tokens (Cora's choice): 6/6 strong fakes from both models,
+  natural and chance-pass stars shortlisted 9/95 against 10/95, same decision on 106 files, S differing by about
+  one model's own repeat scatter, 2.3 times the output tokens. The new model shortlisted 0 of 5 G-only fakes
+  where the old one shortlisted 2. Release-day reviews stay on `claude-opus-5-5` at `xhigh`.
