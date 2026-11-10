@@ -89,7 +89,7 @@ def keep_mask(stats, thr, thr_p, fraction=KEEP_FRACTION):
 
 
 def score_all(lc, table, thr, thr_p, cells=None, period_search=True, period_g_max=PERIOD_G_MAX, random_share=0.0,
-              fraction=KEEP_FRACTION, keep_fraction=LC_FRACTION, keep_g_max=LC_G_MAX):
+              fraction=KEEP_FRACTION, keep_fraction=LC_FRACTION, keep_g_max=LC_G_MAX, marks=True, own=True):
     """Every star of a light-curve table (epoch.SCHEMA, whole stars, ideally one compact patch of sky).
 
     Returns (summ, stats, keep):
@@ -102,8 +102,11 @@ def score_all(lc, table, thr, thr_p, cells=None, period_search=True, period_g_ma
       and a random share (`summary.random_share`). With them the archive-style summary of the uncorrected G
       epochs (n_g, uwv_g, abbe_g, slow_z) and the two bounds;
     - keep: source_ids whose light curves are worth keeping: stars brighter than keep_g_max within keep_fraction
-      of a threshold on the fading side, and the random share."""
-    ep, stars = per_star.corrected_epochs(lc, table, cells)
+      of a threshold on the fading side, and the random share.
+
+    marks, own: as `drift.normalise` (marks=False reads DR3 as DR4's bulk files arrive, without rejection
+    marks)."""
+    ep, stars = per_star.corrected_epochs(lc, table, cells, marks, own)
     summ = per_star.star_summary(lc, epochs=(ep, stars))
     if not len(summ):
         return summ.assign(slope_z_local=np.nan, full=False), pd.DataFrame(), np.array([], np.int64)

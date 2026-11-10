@@ -323,13 +323,14 @@ def magnitudes(med_flux):
     return pd.DataFrame({"g_mag": mag[0], "bp_rp": mag[1] - mag[2]}, index=med_flux.index)
 
 
-def corrected_epochs(lc, table=None, cells=None):
+def corrected_epochs(lc, table=None, cells=None, marks=True, own=True):
     """Good epochs of a light-curve table with `frac_corr` (drift-corrected with `table`; uncorrected without one),
     ordered by star, band and time, and one row per star with g_mag, bp_rp, gbin and cbin.
 
     cells: G and colour bins from a catalogue (`drift.star_cells`), used for the stars it has; the rest, and every
-    star when it is None, are placed by the magnitudes of their own median fluxes."""
-    ep = drift.normalise(lc, with_median=True)
+    star when it is None, are placed by the magnitudes of their own median fluxes. marks, own: as
+    `drift.normalise` (marks=False reads DR3 without its rejection marks, as DR4's bulk files arrive)."""
+    ep = drift.normalise(lc, with_median=True, marks=marks, own=own)
     med = ep.groupby(["source_id", "band"], sort=True)["med_flux"].first().unstack("band")
     stars = magnitudes(med)
     own = drift.star_cells(stars.reset_index().rename(columns={"g_mag": "phot_g_mean_mag"}))
@@ -346,12 +347,12 @@ def corrected_epochs(lc, table=None, cells=None):
     return ep.assign(frac_corr=ep["frac"].to_numpy() - d), stars
 
 
-def star_summary(lc, table=None, cells=None, epochs=None):
+def star_summary(lc, table=None, cells=None, epochs=None, marks=True, own=True):
     """One row per star of a light-curve table (epoch.SCHEMA) with any good epoch: COLUMNS (module docstring).
 
     table: the rule's drift table. Stars with fewer than detect.MIN_VISITS G visits keep their counts and
     magnitudes and have no statistics. epochs: `corrected_epochs`' output for `lc`, when the caller needs it too."""
-    ep, stars = corrected_epochs(lc, table, cells) if epochs is None else epochs
+    ep, stars = corrected_epochs(lc, table, cells, marks, own) if epochs is None else epochs
     if not len(ep):
         return pd.DataFrame(columns=list(COLUMNS))
     sid = ep["source_id"].to_numpy()
@@ -450,7 +451,10 @@ def from_store(t):
 
 def random_share(source_id, share):
     """A repeatable pseudo-random `share` of stars, by a hash of source_id."""
-    return _hash(source_id) < np.uint64(min(max(share, 0.0), 1.0) * (2.0 ** 64 - 1))
+    h = _hash(source_id)
+    if share >= 1:
+        return np.ones(h.shape, bool)
+    return h < np.uint64(int(max(share, 0.0) * 2.0 ** 64))
 
 
 # -- trends against neighbours of similar brightness -------------------------------------------------------------

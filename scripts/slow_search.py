@@ -247,9 +247,12 @@ def pass_one(item, a):
         if a["rule"]:
             sm, st, keep = search.score_all(lc, table, thr, thr_p, cells=cells, period_search=not a["no_period"],
                                             period_g_max=a["period_g_max"], random_share=a["random_share"],
-                                            keep_fraction=a["keep_fraction"], keep_g_max=a["keep_g_max"])
+                                            keep_fraction=a["keep_fraction"], keep_g_max=a["keep_g_max"],
+                                            marks=not a["no_marks"], own=not a["no_own_test"])
         else:
-            sm, st, keep = summary.star_summary(lc, cells=cells).assign(full=False), pd.DataFrame(), np.array([], np.int64)
+            sm = summary.star_summary(lc, cells=cells, marks=not a["no_marks"],
+                                      own=not a["no_own_test"]).assign(full=False)
+            st, keep = pd.DataFrame(), np.array([], np.int64)
         if len(sm):
             n_stars += len(sm)
             scored = np.isfinite(sm["sigma_visit"].to_numpy())
@@ -383,8 +386,8 @@ def _files(directory):
     return [str(q) for q in sorted(Path(directory).glob("*.parquet")) if pq.read_metadata(q).num_rows]
 
 
-FLAG_COLUMNS = ["id", "gbin", "flagged", "early", "rising", "rising_rep", "shared_fade", "shared_rise",
-                "fade_set_aside", "rise_set_aside", "by", "fade_kind", "strength", "rise_strength"]
+FLAG_COLUMNS = ["id", "gbin", "phot_g_mean_mag", "flagged", "early", "rising", "rising_rep", "shared_fade",
+                "shared_rise", "fade_set_aside", "rise_set_aside", "by", "fade_kind", "strength", "rise_strength"]
 FLAGS_MIN = 0.8        # flags.parquet keeps stars at this strength or more, either way
 Z_EDGES = np.linspace(-12, 12, 961)  # histogram of trend significance per G bin, for its median over the run
 
@@ -505,57 +508,72 @@ def flag(a):
 
 # -- cuts -------------------------------------------------------------------------------------------------------
 
-def cuts_cmd(a):
-    """Automated cuts before anyone reads the lists, added to them as columns:
+CUT_COLUMNS = ("astrometric_params_solved", *search.MOTION_COLUMNS, "phot_g_mean_mag", "bp_rp", "phot_bp_n_obs",
+               "phot_rp_n_obs", "phot_bp_n_blended_transits", "phot_rp_n_blended_transits", "best_class_name")
 
-    - `still`: parallax and proper motion consistent with zero (`search.motion`), for every star above strength 1
-      either way: quasars, galaxies and stars in other galaxies, read as a list of their own;
-    - `band_verdict` on the fading list (`checks.band_check`): whether G's change agrees with BP's and RP's, with
-      each star's BP/RP blended-transit fraction (`blend`) from the same gaia_source rows.
 
-    cuts_summary.json gives the fading and rising counts above each strength without the still stars, and the
-    fading counts by band verdict."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    from astropy.table import Table
-
+def star_rows(a, ids):
+    """Catalogue rows (CUT_COLUMNS, DR3's names) of the listed stars: from the archive (`releases.fetch_star_rows`,
+    which knows each release's tables), or from --gaia, a Parquet file of rows fetched before."""
+    if a.gaia:
+        g = pd.read_parquet(a.gaia)
+        g = g[g["source_id"].isin(ids)].drop_duplicates("source_id").reset_index(drop=True)
+        for c in CUT_COLUMNS:
+            if c not in g:
+                g[c] = None if c == "best_class_name" else np.nan
+        return g
     from cosmos_search.gaia.archive import tap
+    from cosmos_search.targets import releases
+
+    return releases.fetch_star_rows(tap(), ids, a.release, CUT_COLUMNS, chunk=a.chunk, workers=a.workers)
+
+
+def cuts_cmd(a):
+    """Automated cuts before anyone reads the lists, added to them as columns, for every star above strength 1
+    either way (the run's one catalogue query):
+
+    - `still`: parallax and proper motion consistent with zero (`search.motion`): quasars, galaxies and stars in
+      other galaxies, read as a list of their own;
+    - `kind`: the kind of star from parallax, absolute magnitude and colour (`kinds.star_kind`), and `vari_class`,
+      the release's variability class where it has one;
+    - `q_kind`, `n_fade_kind`, `n_rise_kind`, `read_order` (`kinds.rank`): each fade against the brightenings of
+      the same kind of star, and the order to read the list in: ordinary dwarfs first, stars without a
+      variability class before those with one, then q_kind, then brightest first. The fading list is written in
+      that order;
+    - `band_verdict` on the fading list (`checks.band_check`): whether G's change agrees with BP's and RP's, with
+      each star's BP/RP blended-transit fraction (`blend`).
+
+    cuts_summary.json gives, per kind of star, the fading and brightening counts above each strength, and the
+    counts without the still stars and by band verdict."""
     from cosmos_search.slow import checks
-    from cosmos_search.vetting.stage0 import BLEND_COLS
 
     run = Path(a.run)
-    flags = pd.read_parquet(run / "flags.parquet", columns=["id", "gbin", "strength", "rise_strength"])
-    ids = flags.loc[(flags["strength"] > 1) | (flags["rise_strength"] > 1), "id"].to_numpy()
-    cols = ", ".join(f"g.{c}" for c in ("source_id", "astrometric_params_solved") + search.MOTION_COLUMNS + BLEND_COLS)
-    t, t0 = tap(), time.time()
-
-    def fetch(chunk):
-        q = (f"SELECT {cols} FROM TAP_UPLOAD.ids AS u JOIN {a.schema}.gaia_source AS g "
-             f"ON g.source_id = u.source_id")
-        for attempt in (0, 1):
-            try:
-                d = t.query(q, uploads={"ids": Table({"source_id": chunk})}).to_pandas()
-                d.columns = [c.lower() for c in d.columns]
-                return d
-            except Exception:  # noqa: BLE001 (one retry, then the step fails loudly)
-                if attempt:
-                    raise
-
-    chunks = [ids[i:i + a.chunk] for i in range(0, len(ids), a.chunk)]
-    with ThreadPoolExecutor(a.workers) as ex:
-        g = pd.concat(list(ex.map(fetch, chunks)), ignore_index=True)
+    flags = pd.read_parquet(run / "flags.parquet")
+    listed = flags[(flags["strength"] > 1) | (flags["rise_strength"] > 1)].reset_index(drop=True)
+    t0 = time.time()
+    g = star_rows(a, listed["id"].to_numpy()).set_index("source_id").reindex(listed["id"].to_numpy())
+    found = int(g["parallax"].notna().sum() + (g["phot_g_mean_mag"].notna() & g["parallax"].isna()).sum())
+    if "phot_g_mean_mag" in listed:  # the light curve's own magnitude where the catalogue has none
+        g["phot_g_mean_mag"] = g["phot_g_mean_mag"].fillna(pd.Series(listed["phot_g_mean_mag"].to_numpy(), index=g.index))
     with np.errstate(invalid="ignore", divide="ignore"):
-        blend = np.fmax(g["phot_bp_n_blended_transits"] / g["phot_bp_n_obs"],
-                        g["phot_rp_n_blended_transits"] / g["phot_rp_n_obs"])
-    m = pd.concat([g[["source_id"]], search.motion(g)], axis=1).rename(columns={"source_id": "id"})
-    m["blend"] = blend.to_numpy(float)
+        blend = np.fmax(g["phot_bp_n_blended_transits"].to_numpy(float) / g["phot_bp_n_obs"].to_numpy(float),
+                        g["phot_rp_n_blended_transits"].to_numpy(float) / g["phot_rp_n_obs"].to_numpy(float))
+    m = search.motion(g).reset_index(drop=True)
+    m.insert(0, "id", listed["id"].to_numpy())
+    m["blend"] = blend
+    m["kind"] = kinds.star_kind(g, m["still"].to_numpy()).to_numpy()
+    cls = g["best_class_name"].to_numpy()
+    m["vari_class"] = [x if isinstance(x, str) and x.strip() else None for x in cls]
+    stars = listed[["id", "strength", "rise_strength"]].assign(kind=m["kind"].to_numpy(),
+                                                              phot_g_mean_mag=g["phot_g_mean_mag"].to_numpy())
+    m = pd.concat([m, kinds.rank(stars, classified=m["vari_class"].notna().to_numpy())], axis=1)
     m.to_parquet(run / "cuts.parquet", index=False)
-    print(f"{len(g)} of {len(ids)} stars' gaia_source rows in {time.time() - t0:.0f} s ({len(chunks)} queries); "
-          f"still {int(m['still'].sum())}", flush=True)
-    summ = {"still": int(m["still"].sum()), "looked_up": int(len(ids)), "found": int(len(g))}
+    print(f"{found} of {len(listed)} stars' catalogue rows in {time.time() - t0:.0f} s; still {int(m['still'].sum())}",
+          flush=True)
+    summ = {"still": int(m["still"].sum()), "looked_up": int(len(listed)), "found": found}
+    added = [c for c in m.columns if c != "id"] + ["band_z", "band_verdict"]
     for name in ("fading", "early", "rising"):
-        d = pd.read_parquet(run / f"{name}.parquet").drop(
-            columns=["chi2_motion", "still", "blend", "band_z", "band_verdict"], errors="ignore")
+        d = pd.read_parquet(run / f"{name}.parquet").drop(columns=added, errors="ignore")
         d = d.merge(m, on="id", how="left")
         d["still"] = d["still"].fillna(False).astype(bool)
         if name == "fading" and "strength_by" in d:
@@ -564,7 +582,13 @@ def cuts_cmd(a):
             summ["fading_band_verdicts_moving"] = {
                 grp: x["band_verdict"].value_counts().to_dict()
                 for grp, x in moving.groupby(np.where(moving["gbin"] <= 7, "G<19", "G>=19"))}
+            summ["fading_by_kind"] = {k: {"listed": int(len(x)), "without_class": int(x["vari_class"].isna().sum()),
+                                          "q_kind_below_0.5": int((x["q_kind"] < 0.5).sum())}
+                                      for k, x in d.groupby("kind")}
+        if name != "rising":
+            d = d.sort_values("read_order")
         d.to_parquet(run / f"{name}.parquet", index=False)
+    summ["above_strength_by_kind"] = kinds.counts(stars)
     summ["above_strength_moving"] = search.tail_moving(flags, m.loc[m["still"], "id"])
     (run / "cuts_summary.json").write_text(json.dumps(summ, indent=1))
     print(json.dumps(summ, indent=1))
@@ -632,6 +656,10 @@ def main(argv=None):
                    help="random share of fainter stars whose summary rows are stored (those near a threshold "
                         "always are)")
     c.add_argument("--no-period", action="store_true")
+    c.add_argument("--no-marks", action="store_true",
+                   help="ignore DR3's rejected-epoch marks, to read DR3 as DR4's bulk files arrive (without marks)")
+    c.add_argument("--no-own-test", action="store_true",
+                   help="skip our own bad-epoch test (drift.own_good); only to measure what it does")
     c.set_defaults(func=pass_cmd)
     f = sub.add_parser("flag", help="trends against neighbours, shared-date test, lists and summary over a run")
     f.add_argument("--run", required=True, help="a pass's output (or its --durable directory)")
@@ -641,9 +669,11 @@ def main(argv=None):
     f.add_argument("--out")
     f.add_argument("--chunk-level", type=int, default=3, help="HEALPix level of the sky regions flagged one at a time")
     f.set_defaults(func=flag)
-    m = sub.add_parser("cuts", help="still stars (no measurable motion) and G against BP and RP, on the lists")
+    m = sub.add_parser("cuts", help="still stars, kind of star and reading order, G against BP and RP, on the lists")
     m.add_argument("--run", required=True, help="the flag step's output directory")
-    m.add_argument("--schema", default="gaiadr4")
+    m.add_argument("--release", default="dr4", choices=("dr3", "dr4"), help="whose tables the catalogue query uses")
+    m.add_argument("--gaia", help="Parquet of catalogue rows fetched before (source_id and CUT_COLUMNS), instead "
+                                  "of the archive")
     m.add_argument("--chunk", type=int, default=50_000, help="source_ids per uploaded query")
     m.add_argument("--workers", type=int, default=4)
     m.set_defaults(func=cuts_cmd)

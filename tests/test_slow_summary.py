@@ -277,3 +277,128 @@ def test_rank_measures_fades_against_the_same_kind_of_stars_brightening():
     assert r2["read_order"].iloc[0] > r2["read_order"].iloc[3:n].max()   # classified: after its kind's others
     c = kinds.counts(stars)
     assert c["FGK dwarf"]["5.0"]["fading"] == 3 and c["FGK dwarf"]["5.0"]["rising"] == 0
+
+
+def test_own_test_drops_spikes_and_high_errors_and_keeps_a_deep_dip_whole():
+    rng = np.random.default_rng(12)
+    t = np.sort(rng.uniform(0.0, 1000.0, 60))
+    flux = 1e4 * (1 + rng.normal(0, 0.002, 60))
+    err = np.full(60, 20.0)
+    flux[10] *= 1.08                      # one epoch 8% bright between ordinary neighbours
+    flux[30:33] *= 0.85                   # a 15% dimming over three epochs
+    flux[45] *= 0.90                      # one epoch 10% faint
+    err[50] = 70.0                        # one epoch with 3.5 times the median error
+    sid, band = np.ones(60, np.int64), np.zeros(60, np.int64)
+    keep = drift.own_good(sid, band, t, flux, err)
+    assert np.flatnonzero(~keep).tolist() == [10, 45, 50]
+    flux[0] *= 1.10                       # a spike at the first epoch is judged against the next two
+    assert not drift.own_good(sid, band, t, flux, err)[0]
+    # normalise: DR3's marks and our own test are separate switches
+    df = pd.DataFrame({"source_id": 1, "band": "G", "t": t, "flux": flux, "err": err, "flags": 0, "transit_id": 0,
+                       "fov": 1, "ccd_row": 1, "n_obs": 9})
+    df.loc[20, "flags"] = epoch.FLAG_VARI_REJECT
+    lc = pa.Table.from_pandas(df, schema=epoch.SCHEMA, preserve_index=False)
+    n = {(m, o): len(drift.normalise(lc, marks=m, own=o)) for m in (True, False) for o in (True, False)}
+    assert n == {(True, True): 55, (True, False): 59, (False, True): 56, (False, False): 60}
+    s = summary.star_summary(lc, marks=False)
+    assert s["n_g"].iloc[0] == 56 and s["s_fade"].iloc[0] > 6          # the dip is still there, and found
+
+
+def test_fallback_predictions_order_and_archive_query():
+    from cosmos_search.slow import fallback
+    from cosmos_search.targets import releases
+
+    watch = pd.DataFrame({"source_id": [11, 12], "phot_g_mean_mag": [12.0, 9.0], "slope": [-0.02, -0.05],
+                          "slope_z": [-6.0, -10.0], "t_first": [-100.0, -100.0], "t_last": [900.0, 900.0],
+                          "fade_kind": ["fade", "drop"]})
+    p = fallback.predict(watch)
+    years = (fallback.DR4_END_BTJD - 900.0) / 365.25
+    assert p["pred_change_since_dr3"].tolist() == pytest.approx([-0.02 * years, -0.05 * years])
+    assert p["pred_slope_z"].iloc[0] == pytest.approx(-6.0 * (1968.5 / 1000.0) ** 1.5)
+    assert "2.0% a year" in p["prediction"].iloc[0] and "not recovered" in p["prediction"].iloc[1]
+    out = fallback.outcome([-0.02, -0.02, -0.02, -0.02, np.nan], [-0.015, -0.004, -0.001, 0.01, -0.02],
+                           [0.001, 0.001, 0.001, 0.001, 0.001])
+    assert out.tolist() == ["continued", "slowed", "stopped", "reversed", ""]
+    known = pd.DataFrame({"source_id": [12, 20, None], "name": ["a", "b", "c"]})
+    abbe = pd.DataFrame({"source_id": [30, 31, 11], "phot_g_mean_mag": 14.0, "phot_g_abbe_value": [0.5, 0.2, 0.1],
+                         "abbe_max": 0.6})
+    lst = fallback.ordered(watch, known, abbe)
+    assert lst["source_id"].tolist() == [12, 11, 20, 31, 30]            # brightest watch star first, no repeats
+    assert lst["list"].tolist() == ["watch", "watch", "known", "abbe", "abbe"] and lst["order"].tolist() == [0, 1, 2, 3, 4]
+    sample = pd.DataFrame({"source_id": np.arange(400), "phot_g_mean_mag": np.r_[np.full(200, 12.5), np.full(200, 15.5)],
+                           "bp_rp": 1.0,
+                           "phot_g_abbe_value": np.r_[np.linspace(0, 1, 200), np.linspace(0.5, 1, 200)]})
+    cuts = fallback.abbe_cuts(sample, 0.1)
+    assert cuts["abbe_max"].tolist() == pytest.approx([0.1, 0.55], abs=0.01)
+    q = fallback.abbe_adql(cuts, source_id_range=(100, 200))
+    assert "phot_g_abbe_value < 0.1" in q and "source_id BETWEEN 100 AND 200" in q and q.count("OR") == 1
+    have = releases.draft_columns()["all_source_photometry"]
+    for c in fallback.ABBE_COLUMNS.split(", ") + ["random_index_as"]:
+        assert c in have, c
+
+
+def _script(name):
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parents[1] / "scripts" / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod            # so that worker processes can find the script's functions
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_pass_flag_and_cuts_end_to_end(tmp_path):
+    import json
+
+    import pyarrow.parquet as pq
+
+    ss = _script("slow_search")
+    rng = np.random.default_rng(13)
+    flux = 10 ** ((25.6874 - 14.2) / 2.5)
+    lcdir = tmp_path / "lc"
+    lcdir.mkdir()
+    planted = {}
+    for k in range(2):
+        shapes_ = ("noise",) * 120 + ("fade", "dip", "rise", "short")
+        sid0 = 1 + k * 1000
+        pq.write_table(lightcurves(rng, shapes_, flux=flux, sid0=sid0), lcdir / f"part{k}.parquet")
+        planted.update({sid0 + 120: "fade", sid0 + 121: "dip", sid0 + 122: "rise"})
+    run = tmp_path / "run"
+    assert ss.main(["pass", "--out", str(run), "--lightcurves", str(lcdir), "--rule", str(rule_v3.RULE_DIR),
+                    "--workers", "1"]) == 0
+    done = [json.loads(p.read_text()) for p in sorted((run / "done").glob("*.json"))]
+    assert [d["stars"] for d in done] == [124, 124] and all(d["with_scores"] == 123 for d in done)
+    summ = pd.read_parquet(run / "summary" / "part0.parquet")
+    assert len(summ) == 124 and summ["ref"].all() and 0 < summ["full"].sum() < 60
+    kept = pq.read_table(run / "lightcurves" / "part0.parquet")
+    assert {121, 122} <= set(np.asarray(kept["source_id"]).tolist()) and 123 not in set(np.asarray(kept["source_id"]).tolist())
+    assert ss.main(["pass", "--out", str(run), "--lightcurves", str(lcdir), "--rule", str(rule_v3.RULE_DIR),
+                    "--workers", "1"]) == 0                              # a second run has nothing left to do
+    lists = tmp_path / "lists"
+    assert ss.main(["flag", "--run", str(run), "--out", str(lists)]) == 0
+    fading, rising = pd.read_parquet(lists / "fading.parquet"), pd.read_parquet(lists / "rising.parquet")
+    fades = {i for i, s_ in planted.items() if s_ in ("fade", "dip")}
+    assert fades <= set(fading["id"]) and len(fading) <= len(fades) + 2
+    assert {i for i, s_ in planted.items() if s_ == "rise"} <= set(rising["id"])
+    s = json.loads((lists / "summary.json").read_text())
+    assert s["stars"] == 248 and s["by_magnitude"]["G<19"]["scored"] == 246
+    assert abs(s["trend_offset_by_G"]["14-15"]["median_trend_z_against_neighbours"]) < 0.05
+    # the cuts step from a file of catalogue rows: kinds and reading order
+    ids = pd.read_parquet(lists / "flags.parquet")["id"].to_numpy()
+    gaia = pd.DataFrame({"source_id": ids, "parallax": 5.0, "parallax_error": 0.02, "pmra": 10.0, "pmra_error": 0.02,
+                         "pmdec": -5.0, "pmdec_error": 0.02, "pmra_pmdec_corr": 0.0, "parallax_pmra_corr": 0.0,
+                         "parallax_pmdec_corr": 0.0, "phot_g_mean_mag": 14.2, "bp_rp": 0.9,
+                         "phot_bp_n_obs": 40, "phot_rp_n_obs": 40, "phot_bp_n_blended_transits": 0,
+                         "phot_rp_n_blended_transits": 0, "best_class_name": None})
+    gaia.loc[gaia["source_id"] == 121, "best_class_name"] = "RS"
+    gaia.to_parquet(tmp_path / "gaia.parquet", index=False)
+    assert ss.main(["cuts", "--run", str(lists), "--gaia", str(tmp_path / "gaia.parquet")]) == 0
+    fading = pd.read_parquet(lists / "fading.parquet")
+    assert (fading["kind"] == "FGK dwarf").all() and not fading["still"].any()
+    assert fading["read_order"].is_monotonic_increasing and fading["id"].iloc[-1] == 121    # classified: read last
+    assert {"q_kind", "n_fade_kind", "n_rise_kind", "band_verdict", "vari_class"} <= set(fading.columns)
+    c = json.loads((lists / "cuts_summary.json").read_text())
+    assert c["fading_by_kind"]["FGK dwarf"]["listed"] == len(fading)
+    assert c["above_strength_by_kind"]["FGK dwarf"]["1.0"]["fading"] >= len(fades)
