@@ -279,6 +279,7 @@ def test_asassn_closed_port_is_unreachable_not_an_empty_light_curve(tmp_path):
         asassn.fetch(5, 10.5, -5.25, client=make_client(tmp_path), cache=False, host="127.0.0.1", port=port)
     ok, why = surveys.usable(["asassn", "noirlab"], asassn={"host": "127.0.0.1", "port": port})
     assert ok == ["noirlab"] and "asassn" in why
+    assert "asassn" not in surveys.DEFAULT and "asassn" in surveys.ALL     # read only when asked for by name
 
 
 # ---- TESS activity ---------------------------------------------------------------------------------------------
@@ -307,17 +308,41 @@ def _tglc_file(t, aper, psf, sector=5, bad=()):
     return buf.getvalue()
 
 
+def _two_orbits(step=1 / 48):
+    t = np.arange(0, 27.0, step)
+    return t[(t < 13.0) | (t > 14.5)]
+
+
+def test_flatten_removes_each_orbits_drift_and_its_first_day():
+    rng = np.random.default_rng(12)
+    t = _two_orbits()
+    star = 1 + 0.01 * np.sin(2 * np.pi * t / 3.0)
+    second = t > 14
+    drift = np.where(second, 0.05 * (t - 14.5) / 12.5, -0.04 * t / 13)            # a different line in each orbit
+    ramp = 0.2 * np.exp(-t / 0.2) + 0.2 * np.exp(-np.clip(t - 14.5, 0, None) / 0.2) * second   # orbit starts
+    flux = 800 * (star + drift + ramp + rng.normal(0, 0.001, len(t)))
+    raw = tess_activity.variability(t, flux)
+    tf, ff = tess_activity.flatten(t, flux)
+    flat = tess_activity.variability(tf, ff)
+    assert raw["amp"] > 0.04
+    assert flat["amp"] == pytest.approx(2 * 0.01 * np.sin(np.radians(81)), rel=0.1)
+    assert flat["period"] == pytest.approx(3.0, rel=0.05)
+    assert tf.min() >= 1.0 and not ((tf > 13) & (tf < 15.5)).any()                # first day of each orbit gone
+    assert len(tess_activity.flatten(t[:30], flux[:30])[0]) == 0                  # too short to fit
+
+
 def test_sector_row_takes_the_smaller_of_the_two_fluxes():
     rng = np.random.default_rng(2)
-    t = np.arange(0, 26.0, 1 / 48)
+    t = _two_orbits()
     star = 1 + 0.01 * np.sin(2 * np.pi * t / 5.0)
-    aper = 500 * (star + 0.03 * (t / 26) + rng.normal(0, 0.001, len(t)))        # a scattered-light ramp
+    aper = 500 * (star + 0.02 * np.sin(2 * np.pi * t / 1.7) + rng.normal(0, 0.001, len(t)))   # pointing jitter
     psf = 400 * (star + rng.normal(0, 0.001, len(t)))
-    psf[10] = 1e6                                                               # a flagged cadence
-    row = tess_activity.sector_row(42, _tglc_file(t, aper, psf, bad=[10]))
+    psf[100] = 1e6                                                              # a flagged cadence
+    row = tess_activity.sector_row(42, _tglc_file(t, aper, psf, bad=[100]))
     assert row["sector"] == 5 and row["tmag"] == 12.5 and row["source_id"] == 42
     assert row["amp"] == row["amp_psf"] < row["amp_aper"]
     assert row["amp"] == pytest.approx(2 * 0.01 * np.sin(np.radians(81)), rel=0.1)
+    assert row["period"] == pytest.approx(5.0, rel=0.05)
 
 
 def test_spread_and_summarise():
@@ -359,13 +384,13 @@ def test_bins_never_cross_an_edge_and_carry_the_floor():
     rng = np.random.default_rng(3)
     v = ind.visits(epochs(rng, nightly(), 1.0))
     b = ind.bins(v, edges=[600.0, 1000.0], floors=FLOORS)
-    assert not ((b["t"] > 420) & (b["t"] < 600) & (b["n"] > 45)).any()
-    for e in (600.0, 1000.0):
-        lo, hi = v["t"].to_numpy()[:, None] < e, None
-        t_bin = ind.bins(v, edges=[e], floors=FLOORS)
-        assert len(t_bin) == len(ind.bins(v[v["t"] < e], edges=[e], floors=FLOORS)) + \
-            len(ind.bins(v[v["t"] >= e], edges=[e], floors=FLOORS))
-        del lo, hi
+    assert b["n"].sum() == len(v) and b["n"].max() <= 45               # 180 days of 4-day visits at most
+    for e in (600.0, 1000.0, 777.0):
+        # A bin holding visits from both sides of the edge would make the whole give fewer bins than its halves.
+        whole = ind.bins(v, edges=[e], floors=FLOORS)
+        halves = [ind.bins(v[v["t"] < e], edges=[e], floors=FLOORS), ind.bins(v[v["t"] >= e], edges=[e], floors=FLOORS)]
+        assert len(whole) == len(halves[0]) + len(halves[1])
+        assert np.allclose(np.sort(whole["t"]), np.sort(pd.concat(halves)["t"]))
     assert (b["err"] >= FLOORS["skymapper"]).all() and b["err"].max() < 0.006
 
 
@@ -448,6 +473,9 @@ def test_after_gaia_an_episode_still_under_way_stays_faint_or_recovers():
     back = np.where((t >= 1200) & (t <= 1830), 1 - change["depth"], 1.0)
     r = ind.after(epochs(rng, t, back, survey="ztf", band="ztf_r"), change, floors=FLOORS)
     assert r["all"]["verdict"] == "recovered" and r["all"]["recovered"] == pytest.approx(1.0, abs=0.2)
+    deeper = np.where(t >= 1200, 1 - change["depth"], 1.0) - np.where(t > 1830, 0.1, 0.0)
+    r = ind.after(epochs(rng, t, deeper, survey="ztf", band="ztf_r"), change, floors=FLOORS)
+    assert r["all"]["verdict"] == "fainter" and r["all"]["recovered"] == pytest.approx(-0.1 / 0.08, abs=0.3)
     assert ind.after(epochs(rng, t, faint), EPISODE, floors=FLOORS)["all"]["verdict"] == "no_data"   # it had ended
 
 
@@ -468,6 +496,11 @@ def test_gaia_change_reads_a_fading_list_row():
 def test_activity_ratio_and_flat_columns():
     assert ind.activity(TREND, 0.05) == pytest.approx(0.03 * 1800 / 365.25 / 0.05)
     assert np.isnan(ind.activity(TREND, 0.0)) and np.isnan(ind.activity(TREND, None))
+    # A star TESS finds quiet: the floor stands in for its amplitude, so the ratio is a lower limit.
+    floor = tess_activity.quiet_floor(12.0)
+    assert floor < tess_activity.quiet_floor(14.0) < tess_activity.quiet_floor(15.5) == tess_activity.quiet_floor(np.nan)
+    assert ind.activity(TREND, 0.002, floor) == pytest.approx(0.03 * 1800 / 365.25 / floor)
+    assert ind.activity(TREND, 0.05, floor) == ind.activity(TREND, 0.05)
     rng = np.random.default_rng(11)
     t = np.arange(-100.0, 3700.0, 4.0)
     lc = epochs(rng, t, 1 + TREND["slope"] * (t - TREND["t_first"]) / 365.25)

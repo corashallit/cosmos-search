@@ -2,7 +2,7 @@
 
     python scripts/slow_checks.py --fading R/fading.parquet --out R/checks [--n 100] [--schema gaiadr4] [--max-g 17]
         [--skip-class ECL] [--skip-still] [--skip-band] [--workers 6] [--lightcurves R/lightcurves]
-        [--surveys ztf,skymapper,noirlab,atlas,asassn | none] [--no-tess]
+        [--surveys ztf,atlas,skymapper,noirlab[,asassn] | none] [--no-tess]
 
 --fading is the list `scripts/slow_search.py flag` writes (ordered by strength). For each of the first --n stars
 (optionally only those brighter than --max-g): gaia_source astrometry and quality columns and DPAC's variability
@@ -16,14 +16,15 @@ the next star goes on. Stars are checked
 another would take over a day.
 
 Other surveys (--surveys, on by default; docs/arms/slow-changes.md "Other surveys"): each star is read from every
-listed survey that this machine can reach (`cosmos_search.surveys`; ASAS-SN needs port 9006 and ATLAS a token, and
-a survey that cannot be read is named once at the start and left out), and compared with Gaia's change
-(`slow.independent`): `same_k`, `same_k_err` and `same_years` say whether the surveys saw Gaia's change over Gaia's
-own dates (1 the same change, 0 none; seen, not_seen, opposite, undecided, no_data), `after` and its columns what
-they saw since Gaia's last visit, each also per survey (`<survey>_k`, ...), with `<survey>_dilution` the share
-of neighbours' light in that survey's beam. For stars brighter than TESS_MAX_G, `tess_amp` is the variability
-within a month from TESS (`surveys.tess_activity`) and `activity_ratio` Gaia's change as a multiple of it. Writes
-surveys.parquet (all epochs read) and tess.parquet (one row per star and sector).
+listed survey that this machine can reach (`cosmos_search.surveys`; ATLAS needs a token and ASAS-SN, which is read
+only when named, port 9006; a survey that cannot be read is named once at the start and left out), and compared
+with Gaia's change (`slow.independent`): `same_k`, `same_k_err` and `same_years` say whether the surveys saw
+Gaia's change over Gaia's own dates (1 the same change, 0 none; seen, not_seen, opposite, undecided, no_data),
+`after` and its columns what they saw since Gaia's last visit, each also per survey (`<survey>_k`, ...), with
+`<survey>_dilution` the share of neighbours' light in that survey's beam. For stars brighter than TESS_MAX_G,
+`tess_amp` is the variability within a month from TESS (`surveys.tess_activity`), `tess_quiet` whether that is no
+more than constant stars show, and `activity_ratio` Gaia's change as a multiple of it (a lower limit for a quiet
+star). Writes surveys.parquet (all epochs read) and tess.parquet (one row per star and sector).
 """
 
 import argparse
@@ -44,6 +45,9 @@ from cosmos_search.slow import independent as ind
 from cosmos_search.surveys import tess_activity
 
 TESS_MAX_G = 16.0      # TGLC has no light curve for stars fainter than about Tmag 16
+MIRROR_TAP = "https://gaia.aip.de/tap"
+_esa_failed = False
+_mirror = None
 
 GAIA_COLS = ("source_id, ra, dec, pmra, pmdec, parallax, parallax_error, ref_epoch, phot_g_mean_mag, bp_rp, ruwe, "
              "ipd_frac_multi_peak, phot_bp_rp_excess_factor")
@@ -54,18 +58,39 @@ def candidates(fading, n, max_g=None):
     return f.sort_values("strength", ascending=False).head(n).rename(columns={"id": "source_id"})
 
 
+def gaia_query(adql):
+    """A synchronous Gaia archive query as a DataFrame with lower-case columns: ESA's archive, logged in, and the
+    AIP mirror when ESA fails. Under load ESA rejects synchronous queries with 503 after a minute of retries (seen
+    2026-11-10, logged in), so once it has failed the mirror is asked first for the rest of the run."""
+    global _esa_failed, _mirror
+    order = ("mirror", "esa") if _esa_failed else ("esa", "mirror")
+    last = None
+    for which in order:
+        try:
+            if which == "esa":
+                d = tap().query(adql, sync=True).to_pandas()
+            else:
+                if _mirror is None:
+                    _mirror = Tap(MIRROR_TAP, job_slots=2)
+                d = _mirror.query(adql, sync=True).to_pandas()
+            d.columns = [x.lower() for x in d.columns]
+            return d
+        except Exception as e:  # noqa: BLE001 (either service may be down or lack the table; try the other)
+            last = e
+            if which == "esa" and not _esa_failed:
+                _esa_failed = True
+                print(f"ESA Gaia archive failed ({e!r:.100}); asking {MIRROR_TAP} first from here on", flush=True)
+    raise last
+
+
 def gaia_rows(ids, schema):
     """gaia_source columns and DPAC's best variability class for the given source ids."""
-    t = tap()
     g, c = [], []
     for i in range(0, len(ids), 200):
         chunk = ",".join(str(int(x)) for x in ids[i:i + 200])
-        g.append(t.query(f"SELECT {GAIA_COLS} FROM {schema}.gaia_source WHERE source_id IN ({chunk})",
-                         sync=True).to_pandas())
-        c.append(t.query(f"SELECT source_id, best_class_name, best_class_score FROM {schema}.vari_classifier_result "
-                         f"WHERE source_id IN ({chunk})", sync=True).to_pandas())
-    for d in g + c:
-        d.columns = [x.lower() for x in d.columns]
+        g.append(gaia_query(f"SELECT {GAIA_COLS} FROM {schema}.gaia_source WHERE source_id IN ({chunk})"))
+        c.append(gaia_query(f"SELECT source_id, best_class_name, best_class_score FROM "
+                            f"{schema}.vari_classifier_result WHERE source_id IN ({chunk})"))
     return pd.concat(g, ignore_index=True).merge(pd.concat(c, ignore_index=True), on="source_id", how="left")
 
 
@@ -112,8 +137,7 @@ def other_surveys(r, z, names, schema, with_tess):
     c = {}
     if len(lc):
         try:
-            nb = tap().query(ind.neighbours_adql(r.ra, r.dec, schema), sync=True).to_pandas()
-            nb.columns = [x.lower() for x in nb.columns]
+            nb = gaia_query(ind.neighbours_adql(r.ra, r.dec, schema))
             c = ind.dilutions(nb, r.source_id, r.ra, r.dec, r.phot_g_mean_mag, pd.unique(lc["survey"]))
         except Exception as e:  # noqa: BLE001 (without neighbours the comparison runs undiluted, and says so)
             err += f"neighbours: {e!r:.120}; "
@@ -124,7 +148,10 @@ def other_surveys(r, z, names, schema, with_tess):
         try:
             summary, sectors = tess_activity.activity(r.source_id, r.ra, r.dec)
             row.update(summary)
-            row["activity_ratio"] = ind.activity(change, summary.get("tess_amp"))
+            if summary.get("tess_sectors"):
+                floor = tess_activity.quiet_floor(r.phot_g_mean_mag)
+                row["tess_quiet"] = bool(summary["tess_amp"] <= floor)
+                row["activity_ratio"] = ind.activity(change, summary["tess_amp"], floor)
         except Exception as e:  # noqa: BLE001
             err += f"TESS: {e!r:.120}; "
     return row, lc, sectors, err
@@ -209,8 +236,9 @@ def main(argv=None):
     ap.add_argument("--workers", type=int, default=6, help="stars checked at once (IRSA and ZTF fetches)")
     ap.add_argument("--lightcurves", help="the run's kept light curves (`slow_search.py score` R/lightcurves): adds "
                                           "the eclipsing-binary check on G and ZTF")
-    ap.add_argument("--surveys", default=",".join(surveys.ALL),
-                    help="other surveys to compare Gaia's change with, comma-separated, or none")
+    ap.add_argument("--surveys", default=",".join(surveys.DEFAULT),
+                    help="other surveys to compare Gaia's change with, comma-separated, or none; asassn is read "
+                         "only when named here")
     ap.add_argument("--no-tess", action="store_true", help="leave out the TESS variability of bright stars")
     a = ap.parse_args(argv)
     out = Path(a.out)

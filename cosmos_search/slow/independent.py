@@ -9,10 +9,12 @@ nothing with Gaia's instrument or calibration. Three questions, each a number wi
   neighbour that only Gaia's narrow window separates.
 - `after`: the trend after Gaia's last visit, as a fraction of Gaia's flux per year and as a multiple of Gaia's
   trend (1 went on at the same rate, 0 stopped, negative turned around); for an episode still under way at
-  Gaia's last visit, how much of the depth has been recovered since.
+  Gaia's last visit, how much of the depth has been recovered since (negative: fainter still).
 - `activity`: the star's change over Gaia's dates as a multiple of its variability within a month in TESS
   (`surveys.tess_activity`). Starspots that rotate into view and a spot cycle are the same spots, so a star whose
-  rotational modulation is 5% can fade 5% by activity alone, and one that is flat to 0.3% cannot.
+  rotational modulation is 5% can fade 5% by activity alone, and one that is flat to 0.3% cannot. TESS's own
+  systematics set what "flat" can mean (`tess_activity.quiet_floor`: 1.6% at G < 13, 2.9% to G 14.5, 9.5%
+  fainter), so for a quiet star the ratio is a lower limit.
 
 What Gaia's change predicts for another band. The change's colour is known from BP and RP: taking the fractional
 change as linear in 1/wavelength between BP (0.51 um) and RP (0.78 um) covers a grey screen (flat), interstellar-like
@@ -295,9 +297,10 @@ def after(lc, change, c=None, floors=SEASON_FLOOR):
     verdict on the ratio read as a k: "seen" here means the fade went on, so the names are "went_on", "stopped"
     (rules out half of Gaia's rate), "reversed" and "undecided".
     For an episode still under way at Gaia's last visit: `recovered`, the level after t_last minus the level
-    inside the faint window as a fraction of the depth (0 still as faint, 1 back to normal), with its error,
-    from groups that have bins on both sides; verdict "still_faint" (recovered + K_SIGMA errors < HALF),
-    "recovered" (recovered - K_SIGMA errors > HALF) or "undecided".
+    inside the faint window as a fraction of the depth (0 still as faint, 1 back to normal, negative fainter
+    still), with its error, from groups that have bins on both sides; verdict "fainter" (recovered + K_SIGMA
+    errors < 0: it went on fading), "still_faint" (recovered + K_SIGMA errors < HALF), "recovered" (recovered -
+    K_SIGMA errors > HALF) or "undecided".
     Returns {survey: {...}} plus "all"."""
     names = {"seen": "went_on", "not_seen": "stopped", "opposite": "reversed"}
     if change["kind"] not in ("trend", "episode") or not len(lc):
@@ -346,6 +349,8 @@ def after(lc, change, c=None, floors=SEASON_FLOOR):
 def _recovery(k, e, k_sigma=K_SIGMA, half=HALF):
     if not (np.isfinite(k) and np.isfinite(e) and e > 0):
         return "no_data"
+    if k + k_sigma * e < 0:
+        return "fainter"
     if k + k_sigma * e < half:
         return "still_faint"
     if k - k_sigma * e > half:
@@ -362,13 +367,17 @@ def total_change(change):
     return np.nan
 
 
-def activity(change, tess_amp):
+def activity(change, tess_amp, floor=0.0):
     """Gaia's total change over the star's variability within a month in TESS (`surveys.tess_activity`: the 5th to
-    95th percentile range, noise removed). NaN when either is missing or the TESS range is not above its noise."""
+    95th percentile range, noise removed). floor: what constant stars of this brightness show
+    (`tess_activity.quiet_floor`); an amplitude under it is replaced by it, so for a star TESS finds quiet the
+    ratio is a lower limit. NaN when Gaia's change or the TESS amplitude is missing, or both amplitude and floor
+    are zero."""
     total = total_change(change)
-    if not (np.isfinite(total) and tess_amp is not None and np.isfinite(tess_amp) and tess_amp > 0):
+    if not (np.isfinite(total) and tess_amp is not None and np.isfinite(tess_amp)):
         return np.nan
-    return float(total / tess_amp)
+    amp = max(float(tess_amp), float(floor))
+    return float(total / amp) if amp > 0 else np.nan
 
 
 def columns(same, aft, prefix=""):

@@ -49,6 +49,8 @@ FWHM_ARCSEC = {"ztf": 2.0, "asassn": 16.0, "atlas": 5.0, "skymapper": 2.9, "noir
 DEC_RANGE = {"ztf": (-30.0, 90.0), "asassn": (-90.0, 90.0), "atlas": (-90.0, 90.0), "skymapper": (-90.0, 16.0),
              "noirlab": (-90.0, 90.0)}
 ALL = ("ztf", "asassn", "atlas", "skymapper", "noirlab")
+# Read unless asked otherwise. ASAS-SN is left out until its reader has run against the live service (asassn.py).
+DEFAULT = ("ztf", "atlas", "skymapper", "noirlab")
 
 
 class MissingCredential(RuntimeError):
@@ -119,7 +121,7 @@ def reader(survey):
     raise ValueError(f"unknown survey {survey!r}; one of {ALL}")
 
 
-def usable(names=ALL, **options):
+def usable(names=DEFAULT, **options):
     """(the surveys of `names` that this machine can read now, {survey: why not}). ASAS-SN needs its port and
     ATLAS a token; each is tried once here so that a run reports a missing survey once and not once per star.
     options: {survey: {keyword: value}} for that survey's check (a test server's address)."""
@@ -142,7 +144,7 @@ def fetch(survey, source_id, ra, dec, **options):
     return reader(survey)(source_id, ra, dec, **options)
 
 
-def fetch_all(star, surveys=ALL, log=None, **options):
+def fetch_all(star, surveys=DEFAULT, log=None, **options):
     """Every listed survey for one star. star: a mapping or row with source_id, ra, dec and, where known, pmra,
     pmdec and ref_epoch. A survey that does not cover the star's declination is skipped; one that fails is
     reported in the returned errors and the rest go on. Returns (table, {survey: error text}).

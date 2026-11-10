@@ -40,6 +40,7 @@ import pandas as pd
 
 from cosmos_search import surveys
 from cosmos_search.slow import independent as ind
+from cosmos_search.surveys import tess_activity
 
 G_RANGES = ((11.0, 13.0), (13.0, 15.0), (15.0, 17.0), (17.0, 18.5))
 DR4_SPAN = (-136.06, 1868.5)     # BTJD, DR4's first and last epoch
@@ -135,8 +136,6 @@ def fetch(a):
 
 
 def tess(a):
-    from cosmos_search.surveys import tess_activity
-
     stars = read_stars(a.stars)
     if a.max_g is not None:
         stars = stars[stars["phot_g_mean_mag"] < a.max_g]
@@ -176,6 +175,8 @@ def season_floor(b):
     """f such that (bin - its group's median) / sqrt(err^2 + f^2) has unit robust scatter, over bins of groups
     with at least 3 bins. The group median is itself noisy, which shrinks the residuals by sqrt(1 - 1/n) on
     average; that factor is put back."""
+    if not len(b):
+        return np.nan, 0
     key = b[["source_id", "survey", "band", "group"]].astype(str).agg("|".join, axis=1)
     n = key.map(key.value_counts())
     med = b.groupby(key)["flux"].transform("median")
@@ -299,8 +300,10 @@ def known(a):
                **ind.columns(ind.same_years(d, change, floors=fl), ind.after(d, change, floors=fl))}
         if tess_rows is not None and s["source_id"] in tess_rows.index:
             t = tess_rows.loc[s["source_id"]]
+            floor = tess_activity.quiet_floor(s["phot_g_mean_mag"])
             row.update(tess_amp=t.get("tess_amp"), tess_sectors=t.get("tess_sectors"),
-                       activity_ratio=ind.activity(change, t.get("tess_amp")))
+                       tess_quiet=bool(t.get("tess_amp") <= floor) if pd.notna(t.get("tess_amp")) else None,
+                       activity_ratio=ind.activity(change, t.get("tess_amp"), floor))
         rows.append(row)
     r = pd.DataFrame(rows)
     r.to_parquet(out / "known.parquet", index=False)
