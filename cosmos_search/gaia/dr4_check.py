@@ -1,12 +1,12 @@
-"""First-hour checks of DR4's epoch photometry: is it out, is a file what the reader expects, does it agree with DR3.
+"""First-hour checks of DR4's epoch photometry: is a file what the reader expects, does DR4 agree with DR3.
 
-    python -m cosmos_search.gaia.dr4_check status                       # which routes answer (exit 3: none yet)
     python -m cosmos_search.gaia.dr4_check file PATH_OR_URL [--json F]  # one bulk file, before the whole-sky pass
     python -m cosmos_search.gaia.dr4_check compare --dr4 LC --dr3 LC    # the same stars in both releases
 
-Each check returns a dict with `problems` (stop and fix before the whole-sky pass) and `notes` (expected to differ
-from the draft data model somewhere; read them, carry on). They assume nothing beyond what the reader needs, so
-they also say plainly when a file is not in the layout the reader was written for.
+(Which routes answer at all is `gaia.dr4_routes`.) Each check returns a dict with `problems` (stop and fix before
+the whole-sky pass) and `notes` (expected to differ from the draft data model somewhere; read them, carry on).
+They assume nothing beyond what the reader needs, so they also say plainly when a file is not in the layout the
+reader was written for.
 
 `file`: the Parquet schema against the reader's columns and the draft data model; whether each star's rows are
 contiguous (if not, the reader sorts the file in memory); observation times against DR4's span in the archive's
@@ -186,43 +186,6 @@ def file_report(path, sample_rows=3_000_000):
     return rep
 
 
-def status(prefix=dr4_bulk.PREFIX, star=None, tap=True):
-    """Which routes to DR4's epoch photometry answer now: bulk files on the CDN, the archive's TAP schema, and
-    DataLink (tried for `star`, a source id). `released` is true as soon as one does."""
-    from cosmos_search.targets import releases
-
-    out = {"released": False}
-    try:
-        out["files"] = dr4_bulk.summary(prefix)
-        out["released"] |= bool(out["files"]["top_level"])
-    except Exception as exc:  # noqa: BLE001 (each route is reported, none stops the others)
-        out["files"] = {"error": repr(exc)[:300]}
-    if tap:
-        try:
-            from . import archive
-
-            schema = releases.tables("dr4")["schema"]
-            handle = archive.tap()
-            rows = handle.query(f"SELECT table_name FROM tap_schema.tables WHERE schema_name = '{schema}'",
-                                sync=True, cache=False)
-            out["tap"] = {"schema": schema, "tables": len(rows)}
-            if len(rows):
-                out["released"] = True
-                out["tap"]["missing"] = releases.check_release("dr4", handle)
-        except Exception as exc:  # noqa: BLE001
-            out["tap"] = {"error": repr(exc)[:300]}
-    if star is not None:
-        try:
-            from . import dr4_datalink
-
-            lc = dr4_datalink.fetch([int(star)])
-            out["datalink"] = {"star": int(star), "lightcurve_rows": lc.num_rows}
-            out["released"] |= lc.num_rows > 0
-        except Exception as exc:  # noqa: BLE001
-            out["datalink"] = {"star": int(star), "error": repr(exc)[:300]}
-    return out
-
-
 def compare_releases(dr4_lc, dr3_lc, id_map=None, time_tolerance=0.02):
     """DR4 against DR3 light curves (both epoch.SCHEMA, pyarrow or pandas) of the same stars.
 
@@ -316,10 +279,6 @@ def _read_lightcurves(path):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m cosmos_search.gaia.dr4_check", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("status", help="which routes to DR4's epoch photometry answer")
-    s.add_argument("--prefix", default=dr4_bulk.PREFIX)
-    s.add_argument("--star", type=int, help="source id to ask DataLink for")
-    s.add_argument("--no-tap", action="store_true")
     f = sub.add_parser("file", help="check one bulk file (a local path, or a key or URL on the CDN)")
     f.add_argument("path")
     f.add_argument("--rows", type=int, default=3_000_000)
@@ -327,14 +286,11 @@ def main(argv=None):
     c.add_argument("--dr4", required=True, help="light-curve Parquet file or directory (epoch.SCHEMA)")
     c.add_argument("--dr3", required=True)
     c.add_argument("--id-map", help="Parquet with source_id (DR4) and dr3_source_id, from dr3_neighbourhood")
-    for p in (s, f, c):
+    for p in (f, c):
         p.add_argument("--json", help="also write the result to this file")
     a = ap.parse_args(argv)
 
-    if a.cmd == "status":
-        rep = status(a.prefix, a.star, not a.no_tap)
-        code = 0 if rep["released"] else 3
-    elif a.cmd == "file":
+    if a.cmd == "file":
         if Path(a.path).exists():
             rep = file_report(a.path, a.rows)
         else:

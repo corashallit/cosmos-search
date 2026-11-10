@@ -1,4 +1,4 @@
-"""First-hour checks on fake DR4 files: a file's layout, DR4 against DR3 for the same stars, and which routes answer."""
+"""First-hour checks on fake DR4 files: a file's layout, and DR4 against DR3 for the same stars."""
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -80,11 +80,9 @@ def test_compare_releases(tmp_path):
     assert dr4_check.compare_releases(moved, dr3, id_map)["problems"] == []
 
 
-def test_status_reports_each_route(served, tmp_path):  # noqa: F811
-    _, dr3, _, _ = served
-    star = int(dr3["source_id"].iloc[0])
-    rep = dr4_check.status(star=star, tap=False)
-    assert rep["released"] and rep["files"]["epoch_photometry_files"] == 3
-    assert rep["datalink"]["lightcurve_rows"] > 0
-    nothing = dr4_check.status(prefix="Gaia/gdr5/", tap=False)
-    assert not nothing["released"] and nothing["files"]["epoch_photometry_files"] == 0
+def test_routes_see_the_stand_in_files(served):  # noqa: F811
+    from cosmos_search.gaia import dr4_routes
+
+    cdn = dr4_routes.check_cdn()
+    assert cdn["epoch_photometry_files"] == 3 and cdn["with_md5"] == 3
+    assert dr4_routes.check_cdn("Gaia/gdr5/")["top_level"] == []
