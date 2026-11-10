@@ -176,11 +176,14 @@ def _phot_flags(table):
     return np.array([_flag_cell(v) for v in cells]).reshape(len(table), 12) & 0xFFFF
 
 
-def epoch_photometry_to_lc(table, vari_rejected=None):
+def epoch_photometry_to_lc(table, vari_rejected=None, max_rows=1 << 18):
     """DR4 epoch_photometry rows (pyarrow or astropy Table or pandas frame, one per transit) -> light-curve table
     (epoch.SCHEMA), sorted by source, band and time.
 
     vari_rejected: optional dict {(transit_id, band): True} from vari_epoch_flags.
+
+    A pyarrow table longer than `max_rows` whose stars are in source_id order is converted a slice of whole stars
+    at a time (the same result; the working memory of the conversion is about 0.7 kB per transit row otherwise).
     """
     names = resolve(_names(table))
     missing = [c for c in REQUIRED if c not in names]
@@ -189,6 +192,22 @@ def epoch_photometry_to_lc(table, vari_rejected=None):
                        "(update gaia.dr4.COLUMNS or ALIASES)")
     if _is_list(table, names["g_flux"]):
         table = explode(table)
+    if isinstance(table, pa.Table) and table.num_rows > max_rows:
+        sid = _col(table, names["source_id"], np.int64)
+        starts = np.flatnonzero(np.r_[True, sid[1:] != sid[:-1]])
+        if np.all(np.diff(sid[starts]) > 0):
+            cuts = [0]
+            while cuts[-1] < len(sid):
+                k = np.searchsorted(starts, cuts[-1] + max_rows, side="right") - 1
+                nxt = starts[k] if starts[k] > cuts[-1] else (starts[k + 1] if k + 1 < len(starts) else len(sid))
+                cuts.append(int(nxt) if cuts[-1] + max_rows < len(sid) else len(sid))
+            del sid
+            return pa.concat_tables([_to_lc(table.slice(a, b - a), names, vari_rejected)
+                                     for a, b in zip(cuts, cuts[1:])])
+    return _to_lc(table, names, vari_rejected)
+
+
+def _to_lc(table, names, vari_rejected):
     sid = _col(table, names["source_id"], np.int64)
     tid = _col(table, names["transit_id"], np.int64)
     _, fov, row, _ = decode_transit_id(tid)

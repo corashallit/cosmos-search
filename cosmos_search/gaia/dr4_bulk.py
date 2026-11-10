@@ -30,6 +30,7 @@ import argparse
 import hashlib
 import json
 import re
+import resource
 import shutil
 import sys
 import time
@@ -188,7 +189,7 @@ def _n_stars(sid):
     return int(1 + np.count_nonzero(sid[1:] != sid[:-1])) if len(sid) else 0
 
 
-def iter_rows(path, select=None, random_share=0.0, keep_all=False, stars=30_000, batch_rows=1 << 19):
+def iter_rows(path, select=None, random_share=0.0, keep_all=False, stars=30_000, batch_rows=1 << 18):
     """Transit rows of the kept stars of one bulk file, as pyarrow Tables of about `stars` whole stars each, in file
     order. A star is never split between tables.
 
@@ -202,6 +203,8 @@ def iter_rows(path, select=None, random_share=0.0, keep_all=False, stars=30_000,
 
     def kept(batch):
         m = keep_mask(batch.column(sid_col), select, random_share, keep_all)
+        if m.all():
+            return pa.Table.from_batches([batch])
         return pa.Table.from_batches([batch]).filter(pa.array(m)) if m.any() else None
 
     if nested or stars_contiguous(path, sid_col):
@@ -244,7 +247,7 @@ def iter_rows(path, select=None, random_share=0.0, keep_all=False, stars=30_000,
         yield rows.slice(int(edges[a]), int(edges[b] - edges[a]))
 
 
-def iter_lightcurves(path, select=None, random_share=0.0, keep_all=False, stars=30_000, batch_rows=1 << 19):
+def iter_lightcurves(path, select=None, random_share=0.0, keep_all=False, stars=30_000, batch_rows=1 << 18):
     """Light curves (epoch.SCHEMA, transit_id kept) of the kept stars of one bulk file, about `stars` whole stars
     at a time. Each table is sorted by source_id, band and time; tables follow the file's order, so each covers one
     compact patch of sky when the file is ordered by position. See `iter_rows` for memory."""
@@ -377,7 +380,9 @@ def process_file(info, out, select_path=None, random_share=0.0, keep_all=False, 
             n_stars, n_rows = work(path)
     rec = {"name": info["name"], "key": info.get("key"), "bytes": info.get("size"), "md5": info.get("md5"),
            "transits_kept": transits[0], "stars_kept": n_stars, "rows": n_rows, "download_s": round(t_dl, 1),
-           "process_s": round(time.time() - t0 - t_dl, 1), "seconds": round(time.time() - t0, 1)}
+           "process_s": round(time.time() - t0 - t_dl, 1), "seconds": round(time.time() - t0, 1),
+           # The worker's largest memory so far (Linux reports kB), for choosing --workers on a new machine.
+           "worker_peak_rss_gb": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6, 2)}
     if durable:
         dr3_pass._publish({"lightcurves": dest}, Path(durable), info["name"], rec)
     else:
