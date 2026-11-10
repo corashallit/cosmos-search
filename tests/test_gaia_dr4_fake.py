@@ -3,6 +3,7 @@ bulk reader in bounded memory, and the DR4 DataLink reader."""
 
 import gzip
 import io
+import json
 import threading
 import zipfile
 
@@ -212,3 +213,64 @@ def test_datalink_pull_resumes(served, tmp_path):
     assert srv.RequestHandlerClass.counts["datalink"] == calls  # nothing pulled twice
     got = pa.concat_tables([pq.read_table(p) for p in sorted((out / "lightcurves").glob("*.parquet"))]).to_pandas()
     same(dr3, got)
+
+
+def test_build_resumes_where_it_stopped(tmp_path):
+    d = dr3_files(tmp_path)
+    whole, part = tmp_path / "whole", tmp_path / "part"
+    assert dr4_fake.main(["build", "--out", str(whole), "--dr3", str(d), "--workers", "1", "--row-group", "37"]) == 0
+    first = sorted(d.glob("*.csv.gz"))[0]
+    dr4_fake._build_one(str(first), str(part), ORDER, "keep", 37)       # the build stopped after one DR3 file
+    args = ["build", "--out", str(part), "--dr3", str(d), "--workers", "1", "--row-group", "37", "--resume"]
+    assert dr4_fake.main(args) == 0
+    assert same(read_all(whole), read_all(part))
+    assert not (part / "_parts").exists() and not (part / "_parts_done").exists()
+    a, b = (json.loads((r / "build.json").read_text()) for r in (whole, part))
+    assert a["transits"] == b["transits"] and a["files"] == b["files"] == 3
+    # stopped while the files were being put in place: one is there already, its parts gone
+    again = tmp_path / "again"
+    for p in sorted(d.glob("*.csv.gz")):
+        dr4_fake._build_one(str(p), str(again), ORDER, "keep", 37)
+    only = next(x for x in sorted((again / "_parts").iterdir()) if len(list(x.glob("*.parquet"))) == 1)
+    dest = again / dr4_fake.key_of(int(only.name), ORDER)
+    dest.parent.mkdir(parents=True)
+    next(only.glob("*.parquet")).replace(dest)
+    assert dr4_fake.main(["build", "--out", str(again), "--dr3", str(d), "--workers", "1", "--resume"]) == 0
+    assert same(read_all(whole), read_all(again))
+
+
+def test_practice_compares_a_part_of_the_sky_at_a_time(tmp_path):
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "dr4_practice", Path(__file__).resolve().parents[1] / "scripts" / "dr4_practice.py")
+    practice = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(practice)
+    root, _ = build(tmp_path)
+    lcs = []
+    for k, p in enumerate(sorted(root.glob(f"{dr4_fake.PRODUCT}/**/*.parquet"))):
+        lc = pa.concat_tables(list(dr4_bulk.iter_lightcurves(p, keep_all=True)))
+        pq.write_table(lc, tmp_path / f"lc{k}.parquet")
+        lcs.append(tmp_path / f"lc{k}.parquet")
+    digests = [practice.digest_lightcurves(p) for p in lcs]
+    # a second copy of the stars far away on the sky (another level-1 pixel), split over the files differently
+    far = [d.assign(source_id=d["source_id"] + (5 << practice.PART_SHIFT)) for d in digests]
+
+    def index(frames, name):
+        out = []
+        for k, d in enumerate(frames):
+            path = tmp_path / f"{name}{k}.parquet"
+            d.to_parquet(path, index=False)
+            out.append((str(path), int(d["source_id"].min()), int(d["source_id"].max()), len(d)))
+        return out
+
+    everything = practice._merge(digests + far)
+    a = index(digests + far, "a")
+    b = index([practice._merge(digests[:2] + far[2:]), practice._merge(digests[2:] + far[:2])], "b")
+    whole = practice.compare(everything, everything)
+    assert whole["equal"] and practice.compare_by_part(a, b) == whole
+    changed = [d.copy() for d in far]
+    changed[0].loc[changed[0].index[0], "n"] += 1
+    bad = practice.compare_by_part(a, index(digests + changed, "c"))
+    assert not bad["equal"] and bad["n_differs"] == 1 and bad["star_bands"] == whole["star_bands"]
