@@ -5,11 +5,13 @@ import threading
 
 from cosmos_search.net import Tap, get_client
 
-TAP_URL = "https://gea.esac.esa.int/tap-server/tap"
-LOGIN_URL = "https://gea.esac.esa.int/tap-server/login"
-DATALINK_URL = "https://gea.esac.esa.int/data-server/data"
-CDN_URL = "https://cdn.gea.esac.esa.int"
-CDN_LIST_URL = "https://gaia.eu-1.cdn77-storage.com"
+# Each endpoint can be replaced through the environment, which is how a practice run points the release-day code
+# at the local stand-in for ESA's servers (`gaia.dr4_fake serve` prints the lines to export).
+TAP_URL = os.environ.get("COSMOS_GAIA_TAP_URL", "https://gea.esac.esa.int/tap-server/tap")
+LOGIN_URL = os.environ.get("COSMOS_GAIA_LOGIN_URL", "https://gea.esac.esa.int/tap-server/login")
+DATALINK_URL = os.environ.get("COSMOS_GAIA_DATALINK_URL", "https://gea.esac.esa.int/data-server/data")
+CDN_URL = os.environ.get("COSMOS_GAIA_CDN_URL", "https://cdn.gea.esac.esa.int")
+CDN_LIST_URL = os.environ.get("COSMOS_GAIA_CDN_LIST_URL", "https://gaia.eu-1.cdn77-storage.com")
 
 # The archive runs at most 5 jobs per user (2026-10-14 release); keep one free for interactive use.
 JOB_SLOTS = 4

@@ -17,14 +17,28 @@ Flag mapping into `flags` (bits 1, 2, 4 keep their DR3 meaning; the rest are DR4
 | 128 | attitude problem | transit_proc_flags bit 15 |
 
 Bit 4 (DR3's "noisy across CCDs") has no direct DR4 equivalent; the per-CCD table measures it instead
-(`ccd_consistency`). Column names may change by release; `COLUMNS` is the one place to fix them.
+(`ccd_consistency`). Bit 1 is never set from epoch_photometry alone: the draft model has no variability-rejection
+column (DR3's `variability_flag_*_reject`), so the 2-5% of epochs DPAC's variability processing rejected in DR3
+arrive unmarked unless `vari_epoch_flags` (a separate DataLink product) is joined.
+
+Column names may change by release. `COLUMNS` and `ALIASES` are the one place to fix them: `resolve` matches names
+without regard to case and accepts DR3's spellings (`g_transit_time`, `g_transit_flux`, ...). Fluxes are float32
+in the draft model and are widened here. A table with one row per source and array-valued transit columns (DR3's
+layout, and how AIP served DR3) is unpacked by `explode`.
 """
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 
-from .epoch import (BANDS, FLAG_PHOT_REJECT, FLAG_VARI_REJECT, SCHEMA, decode_transit_id,
-                    gaia_time_to_btjd)
+from .epoch import (
+    BANDS,
+    FLAG_PHOT_REJECT,
+    FLAG_VARI_REJECT,
+    SCHEMA,
+    decode_transit_id,
+    gaia_time_to_btjd,
+)
 
 FLAG_SATURATION = 8
 FLAG_SATELLITE_EVENT = 16
@@ -39,6 +53,16 @@ COLUMNS = {
 }
 _PHOT_INDEX = {"SM": 0, "AF": slice(1, 10), "BP": 10, "RP": 11}
 
+# Other spellings a release (or a mirror) may use for a column, tried in order after the name itself.
+ALIASES = {
+    "g_obs_time": ("g_transit_time",), "g_flux": ("g_transit_flux",), "g_flux_error": ("g_transit_flux_error",),
+    "g_n_obs": ("g_transit_n_obs",),
+}
+# What epoch_photometry_to_lc reads; only REQUIRED must be present.
+READ_COLUMNS = ("source_id", "transit_id", "g_n_obs", "transit_proc_flags", "phot_ccd_proc_flags",
+                *(c for cols in COLUMNS.values() for c in cols))
+REQUIRED = ("source_id", "transit_id", *COLUMNS["G"])
+
 CCD_SCHEMA = pa.schema([
     ("source_id", pa.int64()), ("transit_id", pa.int64()), ("ccd", pa.int8()), ("t", pa.float64()),
     ("flux", pa.float64()), ("err", pa.float64()),
@@ -46,26 +70,71 @@ CCD_SCHEMA = pa.schema([
 
 
 def _names(table):
-    """Column names of an astropy Table or a pyarrow Table (bulk Parquet files are read as the latter)."""
-    return table.colnames if hasattr(table, "colnames") else table.column_names
+    """Column names of an astropy Table, a pyarrow Table (bulk Parquet files) or a pandas frame (DataLink csv)."""
+    if hasattr(table, "colnames"):
+        return table.colnames
+    return table.column_names if hasattr(table, "column_names") else list(table.columns)
+
+
+def resolve(names):
+    """{name in READ_COLUMNS: the table's own spelling of it}, for the columns the table has."""
+    lower = {str(n).lower(): n for n in names}
+    out = {}
+    for c in READ_COLUMNS:
+        for cand in (c, *ALIASES.get(c, ())):
+            if cand in lower:
+                out[c] = lower[cand]
+                break
+    return out
+
+
+def missing_required(names):
+    return [c for c in REQUIRED if c not in resolve(names)]
 
 
 def _col(table, name, dtype=np.float64):
+    fill = np.nan if np.dtype(dtype).kind == "f" else 0
     col = table[name]
-    if isinstance(col, pa.ChunkedArray):
-        fill = np.nan if np.dtype(dtype).kind == "f" else 0
+    if isinstance(col, (pa.ChunkedArray, pa.Array)):
         return np.asarray(col.fill_null(fill) if col.null_count else col, dtype=dtype)
     if hasattr(col, "filled"):  # astropy masked column
-        return np.asarray(col.filled(np.nan if np.dtype(dtype).kind == "f" else 0), dtype=dtype)
+        return np.asarray(col.filled(fill), dtype=dtype)
+    if hasattr(col, "to_numpy") and hasattr(col, "isna"):  # pandas
+        return col.to_numpy(dtype=np.float64, na_value=np.nan).astype(dtype) if np.dtype(dtype).kind == "f" \
+            else col.fillna(0).to_numpy(dtype=dtype)
     return np.asarray(col, dtype=dtype)
+
+
+def _is_list(table, name):
+    if isinstance(table, pa.Table):
+        t = table.schema.field(name).type
+        return pa.types.is_list(t) or pa.types.is_large_list(t) or pa.types.is_fixed_size_list(t)
+    return False
+
+
+def explode(table):
+    """One row per transit from a pyarrow table with one row per source and array-valued transit columns: every
+    list column as long as transit_id's is unpacked, the others are repeated."""
+    tid = resolve(table.column_names)["transit_id"]
+    ref = pc.list_value_length(table[tid]).fill_null(0)
+    parent = pc.list_parent_indices(table[tid].combine_chunks())
+    cols = {}
+    for name in table.column_names:
+        col = table[name]
+        if _is_list(table, name) and pc.list_value_length(col).fill_null(0).equals(ref):
+            cols[name] = pc.list_flatten(col.combine_chunks())
+        else:
+            cols[name] = col.take(parent)
+    return pa.table(cols)
 
 
 def transit_flags(table):
     """Per-transit flag bits (before band-specific ones) from DR4 transit_proc_flags and phot flags."""
     n = len(table)
     flags = np.zeros(n, np.int32)
-    if "transit_proc_flags" in _names(table):
-        proc = _col(table, "transit_proc_flags", np.int64) & 0xFFFF
+    names = resolve(_names(table))
+    if "transit_proc_flags" in names:
+        proc = _col(table, names["transit_proc_flags"], np.int64) & 0xFFFF
         ipd = proc & 0xF
         flags |= np.where((ipd >= 1) & (ipd <= 3), FLAG_MULTI_SOURCE, 0)
         flags |= np.where(proc & 0x3800, FLAG_COSMETIC, 0)
@@ -77,33 +146,63 @@ def transit_flags(table):
     return flags
 
 
+def _flag_cell(v):
+    """One row's phot_ccd_proc_flags as 12 ints: an array, a list, or text such as "[0, 8192, ...]" (csv)."""
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return np.zeros(12, np.int64)
+    if isinstance(v, (str, bytes)):
+        text = v.decode() if isinstance(v, bytes) else v
+        parts = text.strip().strip("[](){}").replace(",", " ").split()
+        v = [int(float(x)) if x.lower() not in ("null", "nan", "") else 0 for x in parts]
+    out = np.zeros(12, np.int64)
+    arr = np.asarray(v, dtype=np.int64).ravel()[:12]
+    out[:len(arr)] = arr
+    return out
+
+
 def _phot_flags(table):
-    if "phot_ccd_proc_flags" not in _names(table):
+    name = resolve(_names(table)).get("phot_ccd_proc_flags")
+    if name is None:
         return None
-    raw = table["phot_ccd_proc_flags"]
-    if isinstance(raw, pa.ChunkedArray) and not raw.null_count:
-        flat = pa.chunked_array([c.flatten() for c in raw.chunks], raw.type.value_type) if raw.num_chunks else None
-        if flat is not None and len(flat) == 12 * len(raw):  # vectorised path for Parquet list columns
-            return np.asarray(flat, dtype=np.int64).reshape(len(raw), 12) & 0xFFFF
-    arr = np.array([np.asarray(v, dtype=np.int64) if v is not None else np.zeros(12, np.int64) for v in raw])
-    return arr.reshape(len(table), 12) & 0xFFFF
+    raw = table[name]
+    if isinstance(raw, pa.ChunkedArray) and not raw.null_count and _is_list(table, name):
+        if raw.num_chunks:
+            flat = np.concatenate([np.asarray(c.flatten(), dtype=np.int64) for c in raw.chunks])
+            if len(flat) == 12 * len(raw):  # vectorised path for Parquet list columns
+                return flat.reshape(len(raw), 12) & 0xFFFF
+    cells = raw.to_pylist() if isinstance(raw, (pa.ChunkedArray, pa.Array)) else raw
+    if not len(table):
+        return np.zeros((0, 12), np.int64)
+    return np.array([_flag_cell(v) for v in cells]).reshape(len(table), 12) & 0xFFFF
 
 
 def epoch_photometry_to_lc(table, vari_rejected=None):
-    """DR4 epoch_photometry rows (astropy or pyarrow Table, one per transit) -> light-curve table (epoch.SCHEMA).
+    """DR4 epoch_photometry rows (pyarrow or astropy Table or pandas frame, one per transit) -> light-curve table
+    (epoch.SCHEMA), sorted by source, band and time.
 
     vari_rejected: optional dict {(transit_id, band): True} from vari_epoch_flags.
     """
-    sid = _col(table, "source_id", np.int64)
-    tid = _col(table, "transit_id", np.int64)
+    names = resolve(_names(table))
+    missing = [c for c in REQUIRED if c not in names]
+    if missing:
+        raise KeyError(f"no column(s) {missing}; columns are {sorted(map(str, _names(table)))} "
+                       "(update gaia.dr4.COLUMNS or ALIASES)")
+    if _is_list(table, names["g_flux"]):
+        table = explode(table)
+    sid = _col(table, names["source_id"], np.int64)
+    tid = _col(table, names["transit_id"], np.int64)
     _, fov, row, _ = decode_transit_id(tid)
     base = transit_flags(table)
     phot = _phot_flags(table)
-    n_obs = _col(table, "g_n_obs", np.int64).astype(np.int8) if "g_n_obs" in _names(table) else np.zeros(len(table), np.int8)
+    n_obs = np.clip(_col(table, names["g_n_obs"], np.int64), 0, 127).astype(np.int8) if "g_n_obs" in names \
+        else np.zeros(len(table), np.int8)
     parts = []
     for code, band in enumerate(BANDS):
         tcol, fcol, ecol = COLUMNS[band]
-        t, f, e = _col(table, tcol), _col(table, fcol), _col(table, ecol)
+        if not all(c in names for c in (tcol, fcol)):
+            continue
+        t, f = _col(table, names[tcol]), _col(table, names[fcol])
+        e = _col(table, names[ecol]) if ecol in names else np.full(len(t), np.nan)
         keep = np.isfinite(t) & np.isfinite(f)
         flags = base.copy()
         if band != "G" and phot is not None:
