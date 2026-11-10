@@ -33,6 +33,24 @@ BAND_WAVELENGTH_UM = {
     "V": 0.55,
     "W1": 3.4,
     "W2": 4.6,
+    # Other surveys read by cosmos_search.surveys.
+    "asassn_V": 0.55,
+    "asassn_g": 0.48,
+    "atlas_c": 0.53,
+    "atlas_o": 0.68,
+    "sm_u": 0.35,
+    "sm_v": 0.39,
+    "sm_g": 0.50,
+    "sm_r": 0.61,
+    "sm_i": 0.78,
+    "sm_z": 0.91,
+    "decam_u": 0.38,
+    "decam_g": 0.48,
+    "decam_r": 0.64,
+    "decam_i": 0.78,
+    "decam_z": 0.92,
+    "decam_Y": 0.99,
+    "decam_VR": 0.63,
 }
 REF_UM = BAND_WAVELENGTH_UM["G"]
 DAYS_PER_YEAR = 365.25
