@@ -61,8 +61,8 @@ By route, fastest first (`routes.json` says which exist):
    [arms/slow-changes.md](arms/slow-changes.md), "Release day, end to end".
 2. **A mirror's table, no bulk files.** Whole-sky selection on ESA's `all_source_photometry`, light curves of the
    selected stars from the mirror by source_id range.
-3. **DataLink only.** The watch-list, the known answers and the top of the selection, at 0.1 to 1.9 light curves
-   a second (2,849 DR3 watch-list stars took 26 min on 2026-11-10); check the other routes daily.
+3. **DataLink only.** The watch-list, the known answers and the top of the selection, at 0.1 to 2.0 light curves
+   a second (2,849 DR3 watch-list stars took 24 min on 2026-11-10, no failed call); check the other routes daily.
 
 Then lists, automated cuts, the checks per candidate and figures, as in "Release day, end to end".
 

@@ -13,7 +13,7 @@ is in [../release-day.md](../release-day.md).
 |---|---|---|---|
 | ESA bulk files on the CDN (`dr4_bulk pull`) | 32 MB/s per stream, 122 MB/s with 8 streams from one cloud container; kore pulled DR3's 73 GB at 45 MB/s (2026-10-21) | Planned: ESA's approved note puts transit-level epoch photometry on the CDN as Parquet (below); nothing under `Gaia/gdr4/` yet | Any selection size: all 7.2 TB stream past in ~17 h per container at 122 MB/s, and only kept stars are written |
 | AIP's database table (`epoch.mirror_epoch_photometry`) | ~1,500 light curves/s, ~3,000/s with 4 queries (by source_id range) | AIP served DR2's and DR3's light curves as a table; no DR4 announcement | A selection of millions: 2.5 × 10⁷ in 2-5 h |
-| ESA DataLink (`gaia.dr4_datalink`; DR3: `epoch.datalink_epoch_photometry`) | 0.1-1.9 light curves/s whatever the request shape (below) | The one route ESA's DR4 content page confirms; the only route to per-CCD G | ≤ ~10⁴ stars; per-CCD G for the top candidates |
+| ESA DataLink (`gaia.dr4_datalink`; DR3: `epoch.datalink_epoch_photometry`) | 0.1-2.0 light curves/s whatever the request shape (below) | The one route ESA's DR4 content page confirms; the only route to per-CCD G | ≤ ~10⁴ stars; per-CCD G for the top candidates |
 
 ## What ESA has said
 
