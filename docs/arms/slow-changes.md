@@ -738,7 +738,9 @@ fall to 0.17 or less and the bright ones do not move. `flag` writes the medians 
 What it changes, same field and settings as the tables in this section: thresholds at G < 19 are 5.35, 3.69 and
 6.74 (episode, trend, repeat; 5.42, 3.68, 6.77 before). Lists at G < 19: 4,059 fading and 3,637 brightening
 (3,960 and 3,707); above strength 5, 54 and 109 (54 and 106). Red stars at G 16-19: 363 fading against 380
-brightening. Injected steady fades listed, all hosts brighter than G 19: 82.0% at 1% a year and 95.1% at 3% a
+brightening. By kind of star above strength 1: M dwarfs 521 fading against 469 brightening (394 against 629),
+FGK dwarfs 1,730 against 1,610 (1,713 against 1,571); above strength 2 the kinds stand as before (M dwarfs 27
+against 65, FGK dwarfs 131 against 202). Injected steady fades listed, all hosts brighter than G 19: 82.0% at 1% a year and 95.1% at 3% a
 year (81.8% and 95.0%); untouched hosts 1.1% as before. By host colour at 1% a year: red hosts (BP−RP above
 2.2, 189 of them) 32% listed against 24% before, and their 1% a year brightenings 37% on the rising list
 against 42%; blue hosts (below 0.5, 105) 50% of 0.5% a year fades against 42%; hosts between 0.5 and 1.8 86%
