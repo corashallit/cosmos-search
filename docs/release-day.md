@@ -109,7 +109,9 @@ are pushed. `D/fakes.json` then says how many the reviewer shortlisted. At least
 consistent with the calibration. With fewer, no star is set aside on that batch's verdicts: the list is read in
 the checks' order with the verdict as a column ([vetting.md](vetting.md) §16). The review files hold nothing
 from the other surveys the checks read, where a fake's host would be seen unchanged, and the eclipsing-binary
-check stays beside each verdict in the table.
+check stays beside each verdict in the table. A trial on DR3 (2026-11-11, one field) had 24 of 30 shortlisted.
+Plan a batch at 15 thousand output tokens per review file, planted fades included: the trial's 31 reviews used
+463 thousand and took 9 minutes, eight workflows at once.
 
 **Launching the reviews.** The launcher hands every reviewer, before its task, the last message Cora typed in
 the thread that launches them, when that thread's context holds one (found in the practice of 2026-11-10,
@@ -122,6 +124,11 @@ through the coordinator is not handed on. So on release day:
    `prompts/` and an empty `replies/` where it can reach them (D built under `/mnt/project-files/`, or those two
    copied there and the replies copied back). It also runs the audit, because the reviewers' transcripts are in
    the session that launched them, and hands back `audit.json` with the replies. It never needs the key.
+   An answer of Cora's on a decision card counts as a message she typed, so that thread puts no card and no
+   question to her until the last review has returned, and she writes nothing in it until then. The trial of
+   2026-11-11 ran this way: the building thread's own launch was stopped by the check of step 2 after a card
+   answer, and the separate thread's 31 reviews all counted. Its steps are in
+   `/mnt/project-files/planted-trial/README.md`, which can be reused for the day's batch.
 2. `scripts/stage_a_reviews.js` checks first: one small subagent reports whether anything precedes its task, and
    if something does the script stops with no review launched. Then launch from another thread, or from this
    one after its context has been summarized (in the practice, a launch after that was handed the task only).

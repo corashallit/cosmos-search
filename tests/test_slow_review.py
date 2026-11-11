@@ -322,6 +322,8 @@ def test_planted_fades_among_the_files_and_their_result(planted, capsys):
     assert res["planted"] == 4 and res["shortlisted"] == 3 and res["reviews_failed"] == 1
     assert res["consistent_with_calibration"] and res["upper_95_one_sided"] > 0.9
     assert sum(v["planted"] for v in res["by_flavour"].values()) == 4
+    assert sum(v["planted"] for v in res["by_flag"].values()) == 4          # by what flagged each fake
+    assert sum(v["shortlisted"] for v in res["by_flag"].values()) == 3
     ft = pd.read_csv(d / "fakes_reviewed.csv")
     assert set(ft["source_id"]) == hosts and int(ft["shortlisted"].sum()) == 3
     assert "Planted fades: 3 of 4 shortlisted" in out and "Consistent with the calibration" in out
