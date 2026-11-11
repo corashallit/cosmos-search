@@ -10,8 +10,16 @@ import pytest
 from astropy.table import Table
 
 from cosmos_search.net import (
-    USER_AGENT, BlindModeError, BudgetExhausted, Client, HostBlocked, HostPolicy, IntegrityError,
-    ResponseCache, Tap, s3_list,
+    USER_AGENT,
+    BlindModeError,
+    BudgetExhausted,
+    Client,
+    HostBlocked,
+    HostPolicy,
+    IntegrityError,
+    ResponseCache,
+    Tap,
+    s3_list,
 )
 from cosmos_search.net import policy as policy_mod
 

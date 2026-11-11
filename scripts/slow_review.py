@@ -24,6 +24,10 @@ gaia_source values (ESA TAP, by the release's own table names) and its AllWISE a
 cross-match of `cosmos_search.xmatch`); `--gaia FILE` and `--no-context` replace or skip them (a practice run
 without network). A star whose NEOWISE or ZTF fetch failed in the checks is left out and listed in
 D/left_out.csv, so that the checks are run again for it rather than the reviewer reading a file with a hole.
+So is a star without a kept light curve: the scoring pass keeps them for stars brighter than G 19 only
+(`search.LC_G_MAX`). Either check only those (`slow_checks.py --max-g 19`), or pull the listed stars through
+DataLink (`python -m cosmos_search.gaia.dr4_datalink --ids D/left_out.csv --out DL`) and run `files` again with
+`--lightcurves R/lightcurves DL/lightcurves --overwrite` before any review is launched.
 
 The files hold what the calibration's files held. The eclipsing-binary check of `slow_checks.py --lightcurves`
 (`eb_explained`, its period) stays out of them unless `--with-eclipse`: no calibration batch has measured the
@@ -98,12 +102,14 @@ def checked_stars(checks_dir, fading, n=None, keep_fetch_errors=False):
 
 
 def corrected_epochs(lightcurves, stars, table):
-    """Drift-corrected epochs of the given stars from a directory of light-curve files (epoch.SCHEMA, the run's
-    kept light curves), found by each file's source_id range. stars: source_id, phot_g_mean_mag, bp_rp."""
+    """Drift-corrected epochs of the given stars from one or more directories of light-curve files (epoch.SCHEMA:
+    the run's kept light curves, a DataLink pull), found by each file's source_id range; a star in two
+    directories is read from the first. stars: source_id, phot_g_mean_mag, bp_rp."""
     cells = drift.star_cells(stars)
     ids = np.sort(stars["source_id"].to_numpy(np.int64))
+    dirs = [lightcurves] if isinstance(lightcurves, (str, Path)) else list(lightcurves)
     out = []
-    for f in sorted(Path(lightcurves).glob("*.parquet")):
+    for f in [f for d in dirs for f in sorted(Path(d).glob("*.parquet"))]:
         md = pq.read_metadata(f)
         col = md.schema.to_arrow_schema().get_field_index("source_id")
         st = [md.row_group(i).column(col).statistics for i in range(md.num_row_groups)]
@@ -115,6 +121,7 @@ def corrected_epochs(lightcurves, stars, table):
             t = pq.read_table(f, filters=[("source_id", "in", [int(x) for x in mine])])
             if t.num_rows:
                 out.append(vet.corrected(t, cells, table))
+                ids = np.setdiff1d(ids, out[-1]["source_id"].unique())
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame(
         columns=["source_id", "band", "t", "frac", "err_frac", "fov", "transit_id", "frac_corr"])
 
@@ -267,7 +274,8 @@ def cmd_files(a):
     write(d, packets, keys)
     pd.DataFrame(left, columns=["source_id", "reason"]).to_csv(d / "left_out.csv", index=False)
     rec = {"files": len(packets), "left_out": len(left), "refused_by_the_leak_scan": refused,
-           "checks": str(a.checks), "fading": str(a.fading), "lightcurves": str(a.lightcurves), "rule": str(a.rule),
+           "checks": str(a.checks), "fading": str(a.fading), "lightcurves": [str(x) for x in a.lightcurves],
+           "rule": str(a.rule),
            "schema": a.schema, "infrared_context": not a.no_context, "with_eclipse": bool(a.with_eclipse),
            "reviewer": reviewer.ADOPTED,
            "tests_in_each_file": sorted(packets[0]["tests"]) if packets else []}
@@ -326,9 +334,9 @@ def cmd_table(a):
     df.to_csv(d / "reviewed.csv", index=False)
     listed = df["shortlisted"]
     n_failed, n_eb = int((~df["reviewed"]).sum()), int((listed & df["eb_explained"].eq(True)).sum())
-    print(f"{len(df)} stars reviewed: {int(listed.sum())} on the shortlist ({n_failed} of them because the review "
-          f"failed), {n_eb} of the shortlist explained by an eclipsing binary's period; table at "
-          f"{d / 'reviewed.csv'}")
+    print(f"{len(df)} stars, {len(df) - n_failed} with a review that counts: {int(listed.sum())} on the shortlist "
+          f"({n_failed} of them because the review failed or does not count), {n_eb} of the shortlist explained by "
+          f"an eclipsing binary's period; table at {d / 'reviewed.csv'}")
     return 0
 
 
@@ -338,7 +346,8 @@ def main(argv=None):
     s = sub.add_parser("files")
     s.add_argument("--checks", required=True, help="output directory of slow_checks.py")
     s.add_argument("--fading", required=True, help="the fading list of slow_search.py flag (after cuts)")
-    s.add_argument("--lightcurves", required=True, help="the run's kept light curves")
+    s.add_argument("--lightcurves", required=True, nargs="+",
+                   help="the run's kept light curves; more directories (a DataLink pull) for stars not kept")
     s.add_argument("--rule", default=str(rule_v3.RULE_DIR), help="rule directory (its drift table)")
     s.add_argument("--out", required=True)
     s.add_argument("--schema", default="gaiadr4")

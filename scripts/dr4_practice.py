@@ -227,7 +227,7 @@ def main(argv=None):
 
     # 4. compare with DR3 read directly: a digest file per input file, then one part of the sky at a time
     lc_files = sorted((out / "lightcurves").glob("*.parquet"))
-    log = lambda m: print(m, flush=True)  # noqa: E731
+    log = lambda m: print(m, flush=True)
     with ProcessPoolExecutor(a.workers) as pool:
         idx4 = digest_files(pool, "dr4", lc_files, out / "digest" / "dr4", log)
         if not a.no_compare:

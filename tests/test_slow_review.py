@@ -169,7 +169,7 @@ def test_reviewed_list_after_the_verdicts(run, capsys):
     assert bool(t.loc[DIP, "eb_explained"]) and t.loc[DIP, "eb_period"] == pytest.approx(31.7)
     # a failed review is not a pass: the star stays on the list to read
     assert not bool(t.loc[FADE, "reviewed"]) and bool(t.loc[FADE, "shortlisted"]) and "no reply" in t.loc[FADE, "review_error"]
-    assert "1 of them because the review failed" in capsys.readouterr().out
+    assert "2 stars, 1 with a review that counts: 2 on the shortlist (1 of them" in capsys.readouterr().out
 
 
 def test_drift_is_removed_as_the_scoring_does(run):
