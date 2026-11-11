@@ -2,7 +2,10 @@
 
 How the slow-change search (and the other Gaia searches) will get DR4 epoch photometry on and after 2026-12-02,
 measured on DR3 on 2026-10-23. Code: `gaia/dr4_routes.py` (release-day check), `gaia/dr4_bulk.py` (bulk files),
-`gaia/epoch.py` (DataLink; the AIP mirror reader `mirror_epoch_photometry`).
+`gaia/dr4_datalink.py` (DR4's DataLink), `gaia/dr4_check.py` (checks of a file and of DR4 against DR3),
+`gaia/dr4_fake.py` (fake DR4 files from DR3 and a local stand-in for ESA's servers, for practice),
+`gaia/epoch.py` (DR3's DataLink; the AIP mirror reader `mirror_epoch_photometry`). The order of work on the day
+is in [../release-day.md](../release-day.md).
 
 ## Routes, fastest first
 
@@ -10,7 +13,7 @@ measured on DR3 on 2026-10-23. Code: `gaia/dr4_routes.py` (release-day check), `
 |---|---|---|---|
 | ESA bulk files on the CDN (`dr4_bulk pull`) | 32 MB/s per stream, 122 MB/s with 8 streams from one cloud container; kore pulled DR3's 73 GB at 45 MB/s (2026-10-21) | Planned: ESA's approved note puts transit-level epoch photometry on the CDN as Parquet (below); nothing under `Gaia/gdr4/` yet | Any selection size: all 7.2 TB stream past in ~17 h per container at 122 MB/s, and only kept stars are written |
 | AIP's database table (`epoch.mirror_epoch_photometry`) | ~1,500 light curves/s, ~3,000/s with 4 queries (by source_id range) | AIP served DR2's and DR3's light curves as a table; no DR4 announcement | A selection of millions: 2.5 × 10⁷ in 2-5 h |
-| ESA DataLink (`epoch.datalink_epoch_photometry`) | 0.1-1.5 light curves/s whatever the request shape (below) | DataLink only for per-CCD G | ≤ ~10⁴ stars; per-CCD G for the top candidates |
+| ESA DataLink (`gaia.dr4_datalink`; DR3: `epoch.datalink_epoch_photometry`) | 0.1-2.0 light curves/s whatever the request shape (below) | The one route ESA's DR4 content page confirms; the only route to per-CCD G | ≤ ~10⁴ stars; per-CCD G for the top candidates |
 
 ## What ESA has said
 
@@ -92,27 +95,17 @@ Whether every star should be screened as the files pass (the detector run per fi
 selected light curves kept) is a choice for the slow-change search; the API's `keep_all` exists for that hook and has
 no command-line flag, so a pull cannot write the whole release by accident.
 
-Processing a DR4-shaped Parquet file (built from a DR3 bulk file: 286,289 transits, 21.8 MB): converting every
-transit to `epoch.SCHEMA` runs at ~15 MB/s per core; keeping a 1% share runs at ~70 MB/s per core (mostly reading).
-So a 4-core container keeping a selection is limited by its network (~120 MB/s), and one converting everything by CPU
-(~60 MB/s) plus whatever the detector costs.
+Reading DR4-shaped Parquet files (practice run of 2026-11-10: 233 files built from DR3, 4.18 GB, 43 million
+transits, [../release-day.md](../release-day.md)): converting every transit to `epoch.SCHEMA` runs at 520,000
+transits a second per core (~50 MB/s of file per core), a piece of about 30,000 whole stars at a time
+(`dr4_bulk.iter_lightcurves`), with 1.2 to 1.5 GB of memory per worker. So a 4-core container converting
+everything is limited by its network (~120 MB/s) and by whatever the detector costs. A file whose stars are not
+contiguous is sorted in memory (1.4 GB for a 270 MB file).
 
 ## Release-day steps
 
-1. `python -m cosmos_search.gaia.dr4_routes --out routes.json` once the archive reopens: lists DR4 Parquet under
-   `Gaia/gdr4/` on the CDN, `epoch_photometry` tables at ESA, AIP and ARI, and times one DataLink call; prints which
-   route to use.
-2. Bulk files up: `python -m cosmos_search.gaia.dr4_bulk list`, read one file and check its columns against
-   `gaia.dr4.COLUMNS`, then `dr4_bulk pull --out WORK --durable DEST --select selection.parquet --random-share 0.001
-   --shard i/n` on kore and on several cloud containers. Resumes from done-markers; raw files are deleted as read.
-3. No bulk files, AIP table up: whole-sky selection on ESA TAP (`slow/select.py`), light curves from AIP by
-   source_id range.
-4. Neither: DataLink for the top of the selection, and re-check the CDN and AIP daily.
-5. Per-CCD G (DataLink only, not on the CDN): top ~10⁴ candidates through DataLink. For many more, the Gaia
-   Helpdesk can grant bulk access on request.
-
-The slow-change search's own steps, from thresholds to checks, are in docs/arms/slow-changes.md ("Release day, end
-to end"), with timings from a trial on all of DR3 (2026-10-30).
-
-The dry run on DR3 (`--release "Gaia DR3" --schema gaiadr3 --cdn-prefix Gaia/gdr3/Photometry/`) finds AIP's table,
-no Parquet on the CDN (DR3's files are csv.gz) and DataLink at 0.66 light curves/s.
+In [../release-day.md](../release-day.md): the route check (`gaia.dr4_routes`, exit code 3 while nothing answers),
+the check of one bulk file and of DR4 against DR3 (`gaia.dr4_check`), and the run by route. In short: bulk files if
+they exist (every star scored as the files pass, split by `--shard i/n` over cloud containers and kore, raw files
+deleted as read); otherwise the whole-sky selection on ESA's TAP with light curves from a mirror's table; otherwise
+DataLink for the lists that matter most, and a daily re-check of the other two.

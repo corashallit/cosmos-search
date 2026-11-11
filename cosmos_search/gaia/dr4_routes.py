@@ -3,6 +3,10 @@
     python -m cosmos_search.gaia.dr4_routes [--out routes.json]
     python -m cosmos_search.gaia.dr4_routes --release "Gaia DR3" --schema gaiadr3 --cdn-prefix Gaia/gdr3/   # dry run
 
+Exit code 3 while no route answers (the release is not out), 0 once one does. When ESA's archive has the schema,
+`columns_missing` lists the tables and columns the release-day queries name that it lacks (`targets.releases`),
+and the timed DataLink response is read by `dr4_datalink.read_response`, so its layout is checked at once.
+
 Three routes, in the order to prefer them (measured on DR3, 2026-10-23):
 
 | Route | DR3 rate | What it suits |
@@ -54,6 +58,14 @@ def check_tables(schema="gaiadr4", client=None):
             out[name] = {"tables": sorted(_sync_first_column(url, adql, client))}
         except Exception as exc:  # report and go on; one service down must not hide the others
             out[name] = {"error": repr(exc)[:300]}
+    # The schema name is an assumption until release: list ESA's schemas that look like this release, so a
+    # different name (to put in targets.releases) is seen at once.
+    tag = schema.removeprefix("gaia")
+    try:
+        names = _sync_first_column(MIRRORS["esa"], "SELECT schema_name FROM tap_schema.schemas", client)
+        out["esa"]["schemas"] = sorted(n for n in names if tag in n.lower())
+    except Exception as exc:
+        out["esa"].setdefault("schemas_error", repr(exc)[:300])
     return out
 
 
@@ -80,9 +92,18 @@ def check_datalink(release="Gaia DR4", schema="gaiadr4", n=5, client=None):
             "RETRIEVAL_TYPE": "EPOCH_PHOTOMETRY", "ID": ",".join(ids), "RELEASE": release,
             "DATA_STRUCTURE": "DATAMODEL_GAIA", "FORMAT": "csv", "VALID_DATA": "false"}, timeout=600)
         dt = time.time() - t0
-        return {"release": release, "n": len(ids), "status": resp.status_code, "bytes": len(resp.content),
-                "content_type": resp.headers.get("content-type"), "seconds": round(dt, 1),
-                "per_second": round(len(ids) / dt, 2) if dt > 0 and resp.content else None}
+        out = {"release": release, "n": len(ids), "status": resp.status_code, "bytes": len(resp.content),
+               "content_type": resp.headers.get("content-type"), "seconds": round(dt, 1),
+               "per_second": round(len(ids) / dt, 2) if dt > 0 and resp.content else None}
+        if resp.status_code == 200 and resp.content:  # the first real DR4 response the DataLink reader sees
+            try:
+                from . import dr4_datalink
+
+                out["lightcurve_rows"] = dr4_datalink.read_response(resp.content).num_rows
+            except Exception as exc:
+                out["reader_error"] = repr(exc)[:300]
+                out["head"] = resp.content[:300].decode(errors="replace")
+        return out
     except Exception as exc:
         return {"release": release, "error": repr(exc)[:300]}
 
@@ -108,6 +129,16 @@ def check(release="Gaia DR4", schema="gaiadr4", cdn_prefix=dr4_bulk.PREFIX, data
     r = {"checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
          "cdn": check_cdn(cdn_prefix, client), "tables": check_tables(schema, client),
          "datalink": check_datalink(release, schema, datalink_n, client) if datalink_n else {}}
+    esa = r["tables"].get("esa", {})
+    r["released"] = bool(r["cdn"].get("top_level") or esa.get("tables") or esa.get("schemas")
+                         or r["datalink"].get("lightcurve_rows"))
+    if r["tables"].get("esa", {}).get("tables"):  # the archive has the schema: are the columns our queries name there?
+        try:
+            from cosmos_search.targets import releases
+
+            r["columns_missing"] = releases.check_release("dr4" if schema == "gaiadr4" else "dr3", archive.tap())
+        except Exception as exc:
+            r["columns_missing"] = {"error": repr(exc)[:300]}
     r["recommendation"] = recommend(r)
     return r
 
@@ -126,7 +157,7 @@ def main(argv=None):
     if a.out:
         with open(a.out, "w") as fh:
             fh.write(text + "\n")
-    return 0
+    return 0 if r["released"] else 3
 
 
 if __name__ == "__main__":

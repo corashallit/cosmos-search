@@ -1,0 +1,16 @@
+{
+ "batch": "slow-cal-1",
+ "model": "claude-opus-5-5",
+ "effort": "xhigh",
+ "agent_type": "general-purpose",
+ "launch": {
+  "agent tool": 432
+ },
+ "harness": {
+  "2.1.312": 432
+ },
+ "packets": 432,
+ "thread_messages_in_context": 18,
+ "first_review": "2026-10-30T03:24:28.933Z",
+ "last_review": "2026-10-30T04:44:45.069Z"
+}

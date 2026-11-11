@@ -1,0 +1,19 @@
+{
+  "code_commit": "0ec14811167d54e9e4fe2a5fa9015afa646685cd",
+  "committed_utc": "2026-11-10T23:11:37+00:00",
+  "n_verdicts": 116,
+  "plan_sha256": "5c6ffb62107a93792629ccec0cd815cc5a3994baaf4122d13213d09a2895a722",
+  "reviewer": {
+    "agent_type": "general-purpose",
+    "effort": "xhigh",
+    "harness": {
+      "2.1.322": 116
+    },
+    "launch": {
+      "workflow": 116
+    },
+    "model": "claude-fable-5-2"
+  },
+  "reviews_not_counted": 0,
+  "verdicts_sha256": "b6ffd1bc43882b12e9b7fff9e0c3037dfb4514c7e786bdd032a81034d6887b2e"
+}

@@ -49,8 +49,9 @@ MIRROR_TAP = "https://gaia.aip.de/tap"
 _esa_failed = False
 _mirror = None
 
-GAIA_COLS = ("source_id, ra, dec, pmra, pmdec, parallax, parallax_error, ref_epoch, phot_g_mean_mag, bp_rp, ruwe, "
-             "ipd_frac_multi_peak, phot_bp_rp_excess_factor")
+GAIA_COLS = ("ra", "dec", "pmra", "pmdec", "parallax", "parallax_error", "ref_epoch", "phot_g_mean_mag", "bp_rp", "ruwe",
+             "ipd_frac_multi_peak", "phot_bp_rp_excess_factor", "best_class_name", "best_class_score")
+RELEASE_OF = {"gaiadr3": "dr3", "gaiadr4": "dr4"}
 
 
 def candidates(fading, n, max_g=None):
@@ -84,14 +85,22 @@ def gaia_query(adql):
 
 
 def gaia_rows(ids, schema):
-    """gaia_source columns and DPAC's best variability class for the given source ids."""
-    g, c = [], []
-    for i in range(0, len(ids), 200):
-        chunk = ",".join(str(int(x)) for x in ids[i:i + 200])
-        g.append(gaia_query(f"SELECT {GAIA_COLS} FROM {schema}.gaia_source WHERE source_id IN ({chunk})"))
-        c.append(gaia_query(f"SELECT source_id, best_class_name, best_class_score FROM "
-                            f"{schema}.vari_classifier_result WHERE source_id IN ({chunk})"))
-    return pd.concat(g, ignore_index=True).merge(pd.concat(c, ignore_index=True), on="source_id", how="left")
+    """Astrometry, mean photometry and DPAC's best variability class for the given source ids, under DR3's column
+    names whatever the release calls them and whichever tables hold them (targets/releases.py). From ESA's
+    archive, or from the AIP mirror once ESA has failed (`gaia_query`)."""
+    global _esa_failed, _mirror
+    from cosmos_search.targets import releases
+
+    release = RELEASE_OF.get(schema, schema)
+    if not _esa_failed:
+        try:
+            return releases.fetch_star_rows(tap(), ids, release, GAIA_COLS)
+        except Exception as e:  # noqa: BLE001 (ESA down or overloaded; the mirror holds the same tables)
+            _esa_failed = True
+            print(f"ESA Gaia archive failed ({e!r:.100}); asking {MIRROR_TAP} first from here on", flush=True)
+    if _mirror is None:
+        _mirror = Tap(MIRROR_TAP, job_slots=2)
+    return releases.fetch_star_rows(_mirror, ids, release, GAIA_COLS)
 
 
 def at_2019(r):
@@ -257,7 +266,8 @@ def main(argv=None):
         cand = candidates(fading, pool, a.max_g)
         cand = cand.drop(columns=["phot_g_mean_mag", "bp_rp"], errors="ignore").merge(
             gaia_rows(cand["source_id"].to_numpy(), a.schema), on="source_id", how="left")
-        keep = cand[~cand["best_class_name"].isin(a.skip_class)]
+        skip = {c.upper() for c in a.skip_class}  # DR4's class names may differ in case from DR3's
+        keep = cand[~cand["best_class_name"].astype(str).str.upper().isin(skip)]
         if len(keep) >= a.n or len(cand) < pool:
             cand = keep.sort_values("strength", ascending=False).head(a.n)
             break
