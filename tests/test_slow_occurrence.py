@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -228,7 +229,7 @@ def lightcurves(n_stars, rng, sigma=0.001, n_epochs=60, span=3 * YEAR):
 
 
 def detector(lc):
-    """The detector on uncorrected fluxes, standing in for search.score."""
+    """The detector on uncorrected fluxes, standing in for the search's scoring of a light-curve table."""
     ep = drift.normalise(lc)
     return detect.star_features(ep.assign(frac_corr=ep["frac"]))
 
@@ -366,10 +367,19 @@ def test_plant_swaps_in_the_injected_scores_of_a_share_of_stars():
     assert oc.plant(stars, inj, 0.02, 0.0, np.random.default_rng(0))[1] == 0
 
 
-def test_script_inject_and_limit(tmp_path):
-    spec = importlib.util.spec_from_file_location("slow_occurrence", REPO / "scripts" / "slow_occurrence.py")
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
+def _script(name):
+    spec = importlib.util.spec_from_file_location(name, REPO / "scripts" / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod            # so that worker processes can find the script's functions
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_script_pass_inject_and_limit(tmp_path):
+    """The steps as they run on a release: the search's pass and flag steps give the per-star table and the
+    neighbour reference, the inject step scores faded copies of the FGK dwarfs with the pass's own function, and
+    the limit and planted steps read all three."""
+    script, search_script = _script("slow_occurrence"), _script("slow_search")
     rng = np.random.default_rng(13)
     n = 60
     lc = lightcurves(n, rng)
@@ -387,38 +397,97 @@ def test_script_inject_and_limit(tmp_path):
     pd.DataFrame({"band": pd.Series(dtype="int8"), "gbin": pd.Series(dtype="int8"), "cbin": pd.Series(dtype="int8"),
                   "tbin": pd.Series(dtype="int32"), "drift": pd.Series(dtype="float64"),
                   "n_stars": pd.Series(dtype="int64")}).to_parquet(rule / "drift_table.parquet", index=False)
-    out = tmp_path / "occ"
+    run, lists, out = tmp_path / "run", tmp_path / "lists", tmp_path / "occ"
+    assert search_script.main(["pass", "--out", str(run), "--lightcurves", str(tmp_path / "lc"), "--rule", str(rule),
+                               "--no-period", "--workers", "1"]) == 0
+    assert search_script.main(["flag", "--run", str(run), "--rule", str(rule), "--out", str(lists)]) == 0
+    stored = pd.read_parquet(run / "summary" / "a.parquet")
+    assert len(stored) == n and "slope_z" not in stored and "slope_ref" not in stored and stored["ref"].all()
     assert script.main(["inject", "--lightcurves", str(tmp_path / "lc"), "--aux", str(tmp_path / "aux.parquet"),
                         "--rule", str(rule), "--out", str(out), "--workers", "1"]) == 0
     inj = pd.read_parquet(out / "injections" / "a.parquet")
     assert inj["source_id"].nunique() == 50 and len(inj) == 50 * len(oc.Config().rates)
-    # The real stars' scores, as slow_search.py score writes them.
-    from cosmos_search.slow import search
-    stats = search.score(lc, drift.star_cells(aux), pd.read_parquet(rule / "drift_table.parquet"), period_search=False)
-    (tmp_path / "stats").mkdir()
-    stats.to_parquet(tmp_path / "stats" / "a.parquet", index=False)
-    assert script.main(["limit", "--stars", str(tmp_path / "stats"), "--aux", str(tmp_path / "aux.parquet"),
-                        "--injections", str(out / "injections"), "--out", str(out / "limit")]) == 0
+    # An injected star is scored by the pass's own function: without a fade it would have its host's row.
+    host = stored.set_index("source_id").loc[inj["source_id"]]
+    slow = inj["rate"].to_numpy() == 0.001
+    assert np.allclose(inj["slope"][slow], host["slope"][slow].to_numpy() - 0.001, atol=2e-5)
+    assert np.allclose(inj["g_mag"][slow], host["g_mag"][slow].to_numpy(), atol=0.01)
+    args = ["--stars", str(run / "summary"), "--reference", str(lists / "reference.parquet"),
+            "--aux", str(tmp_path / "aux.parquet"), "--injections", str(out / "injections")]
+    assert script.main(["limit", *args, "--out", str(out / "limit")]) == 0
     rec = json.loads((out / "limit" / "limit.json").read_text())
     assert rec["inputs"]["fgk_dwarfs_searched"] == 50 and rec["inputs"]["stars_scored"] == 60
+    assert rec["inputs"]["neighbour_reference"] and rec["inputs"]["injection_hosts"] == 50
     fast = [r for r in rec["curve"] if r["rate"] >= 0.01]
     assert all(r["recall"] > 0.9 and r["limit"] == pytest.approx(3.0 / (50 * r["recall"]), rel=0.02) for r in fast)
+    # Stars and injected stars are measured against the same reference table, each by its own magnitude.
+    reference = pd.read_parquet(lists / "reference.parquet")
+    stars, _, offset = script.read_stars(run / "summary", str(tmp_path / "aux.parquet"), oc.Config(), reference)
+    inj_ref = script.read_injections(out / "injections", reference, offset)
+    for d in (stars, inj_ref[np.isfinite(inj_ref["slope"])]):
+        assert np.allclose(d["slope_z"], (d["slope"] - d["slope_ref"]) / np.hypot(d["slope_err"], d["slope_ref_err"]))
+        assert np.allclose(d["slope_z_raw"], d["slope"] / d["slope_err"])
+    assert stars["slope_ref"].nunique() == 1 and stars["slope_ref_err"].iloc[0] > 0
+    assert not offset.any() and rec["population_offset"][0]["stars"] == 0     # 50 stars: too few for an own median
     # Planted fades in the same stars: one star in five given its own injected scores at 2% a year.
-    assert script.main(["planted", "--stars", str(tmp_path / "stats"), "--aux", str(tmp_path / "aux.parquet"),
-                        "--injections", str(out / "injections"), "--out", str(out / "planted"), "--rates", "0.02",
+    assert script.main(["planted", *args, "--out", str(out / "planted"), "--rates", "0.02",
                         "--shares", "0", "0.2", "--trials", "3"]) == 0
     check = pd.read_csv(out / "planted" / "planted.csv")
     assert check["trials"].tolist() == [3, 3] and check["excess_p_below_0.05"].tolist() == [0, 3]
     assert check["limit_below_planted"].tolist() == [0, 0]
+    # As on the whole sky: the catalogue in sky slices, and hosts only from the pass's random share of stars
+    # (its lightcurves/ directory also holds the stars near a threshold, which are not a fair sample).
+    (tmp_path / "sky").mkdir()
+    aux.to_parquet(tmp_path / "sky" / "aux_L4_0000000.parquet", index=False)
+    assert script.main(["inject", "--lightcurves", str(tmp_path / "lc"), "--aux", str(tmp_path / "sky"), "--rule",
+                        str(rule), "--out", str(tmp_path / "occ2"), "--workers", "1", "--random-share", "0.5"]) == 0
+    part = pd.read_parquet(tmp_path / "occ2" / "injections" / "a.parquet")
+    dwarfs = np.arange(11, n + 1)
+    assert set(part["source_id"]) == set(dwarfs[script.summary.random_share(dwarfs, 0.5)]) and 10 < part["source_id"].nunique() < 40
+    assert part.equals(inj[inj["source_id"].isin(part["source_id"])].reset_index(drop=True))
+
+
+def test_catalogue_in_sky_slices(tmp_path):
+    """The whole sky's catalogue rows come one HEALPix pixel per query and per file. A query the service refuses
+    is asked again in quarters, and a file of stars reads only the slices its source_ids fall in."""
+    script = _script("slow_occurrence")
+    cfg = oc.Config()
+    where = script.sky_where(cfg)
+    assert "phot_g_mean_mag < 19" in where and "parallax >= 5 * parallax_error" in where and "bp_rp < 1.8" in where
+    width = 2 ** 35 * 4 ** (12 - 2)                       # source_ids per level-2 pixel
+    rng = np.random.default_rng(51)
+    ids = np.sort(rng.choice(np.arange(3 * width, 5 * width, 2 ** 31), 3_000, replace=False))
+    cat = pd.DataFrame({"source_id": ids, "phot_g_mean_mag": rng.uniform(12, 19, len(ids)), "bp_rp": 0.9,
+                        "parallax": 2.0, "parallax_error": 0.1})
+    calls = []
+
+    def query(lo, hi):
+        calls.append((lo, hi))
+        d = cat[(cat["source_id"] >= lo) & (cat["source_id"] <= hi)]
+        if len(d) > 400:
+            raise RuntimeError("too many rows for one query")
+        return d.rename(columns=str.upper).sample(frac=1.0, random_state=0)     # any order, any case
+
+    for pix in (3, 4):
+        d = script.sky_rows(query, pix * width, (pix + 1) * width - 1)
+        want = cat[(cat["source_id"] // width) == pix].reset_index(drop=True)
+        assert d.equals(want) and d["source_id"].is_monotonic_increasing
+        d.to_parquet(tmp_path / f"aux_L2_{pix:07d}.parquet", index=False)
+    assert len(calls) == 10 and max(hi - lo for lo, hi in calls) == width - 1     # each pixel: refused, then 4 quarters
+    rows = script.aux_rows(tmp_path, ids[1_000], ids[2_000])            # spans both slices
+    assert rows.index.tolist() == ids[1_000:2_001].tolist() and list(rows.columns) == script.AUX_COLUMNS[1:]
+    assert script.aux_rows(tmp_path, ids[10], ids[20]).index.tolist() == ids[10:21].tolist()
+    assert not len(script.aux_rows(tmp_path, 7 * width, 8 * width - 1))
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(SystemExit):
+        script.aux_rows(tmp_path / "empty", 0, 1)
 
 
 def test_limit_counts_a_referenced_table_file_by_file(tmp_path):
     """A per-star table with its own neighbour reference, in two files: the limit step tallies them one at a
     time and gets what the in-memory route gets. Giants by parallax and rows marked as not a fair sample of
     their magnitude (`ref` false) are left out."""
-    spec = importlib.util.spec_from_file_location("slow_occurrence", REPO / "scripts" / "slow_occurrence.py")
-    script = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(script)
+    script = _script("slow_occurrence")
     cfg = oc.Config()
     stars = population(6_000, np.random.default_rng(31), faders=20, rate=0.02)
     err = oc.slope_error(stars)
@@ -450,6 +519,12 @@ def test_limit_counts_a_referenced_table_file_by_file(tmp_path):
     for col in ("limit", "mirror_limit", "fading", "brightening", "recall", "excess_p", "g_max", "z_min"):
         assert np.allclose(got[col], curve[col]), col
     assert pd.DataFrame(rec["symmetry"])["stars"].tolist() == sym["stars"].tolist()
+    # The same from a catalogue kept in sky slices.
+    (tmp_path / "sky").mkdir()
+    aux.to_parquet(tmp_path / "sky" / "aux_L4_0000000.parquet", index=False)
+    assert script.main(["limit", "--stars", str(tmp_path / "summary"), "--aux", str(tmp_path / "sky"),
+                        "--injections", str(tmp_path / "inj"), "--out", str(tmp_path / "limit_sky")]) == 0
+    assert json.loads((tmp_path / "limit_sky" / "limit.json").read_text())["curve"] == rec["curve"]
     past = pd.read_parquet(tmp_path / "limit" / "past_cut.parquet")
     assert (past["z"].abs() >= cfg.z_cuts[0]).all() and past["z"].is_monotonic_increasing
     assert len(past) == sym["fading"].sum() + sym["brightening"].sum()
@@ -460,6 +535,38 @@ def test_limit_counts_a_referenced_table_file_by_file(tmp_path):
     assert np.allclose(moved["slope_z"], (moved["slope"] - moved["slope_ref"])
                        / np.hypot(moved["slope_err"], moved["slope_ref_err"]))
     assert np.allclose(moved["slope_z_raw"], moved["slope"] / moved["slope_err"])
+
+
+def test_searched_stars_are_centred_on_their_own_median():
+    """Against a neighbour reference made from all stars, the searched stars can sit off zero (the leftover
+    instrument trend depends on colour). Their own median per G range is taken out, from histograms that add up
+    file by file, and injected stars get the same shift."""
+    rng = np.random.default_rng(41)
+    n = 40_000
+    g = rng.uniform(12.0, 19.0, n)
+    err = 3e-4 * 10 ** (0.2 * (g - 13))
+    shift = np.where(g >= 18, -0.3, np.where(g >= 17, -0.1, 0.0)) * err          # in trend, per year
+    stars = pd.DataFrame({"source_id": np.arange(n), "g_mag": g, "slope": rng.normal(0, err) + 2e-4 + shift,
+                          "slope_err": err, "slope_ref": 2e-4, "slope_ref_err": 0.1 * err})
+    stars["slope_z"] = (stars["slope"] - stars["slope_ref"]) / np.hypot(err, 0.1 * err)
+    whole = oc.offset_hist(stars)
+    assert np.array_equal(whole, oc.offset_hist(stars.iloc[:15_000]) + oc.offset_hist(stars.iloc[15_000:]))
+    assert whole.sum() == n
+    off = oc.offsets(whole)
+    out = oc.centre(stars, off)
+    for lo in np.arange(12.0, 19.0, 0.5):
+        k = (g >= lo) & (g < lo + 0.5)
+        assert off[oc.offset_range(lo + 0.1)] == pytest.approx(np.median((stars["slope"] - 2e-4)[k]), abs=3e-6)
+        assert abs(np.median(out["slope_z"][k])) < 0.01 < 0.05 + abs(np.median(stars["slope_z"][k]))
+    assert np.median(stars["slope_z"][g >= 18]) < -0.2
+    assert np.allclose(out["slope_z"], (out["slope"] - out["slope_ref"]) / np.hypot(err, 0.1 * err))
+    # Ranges with too few stars take their neighbours' median; a table with too few stars is left alone.
+    few = stars[(g < 12.2) | (g >= 13)]
+    assert oc.offsets(oc.offset_hist(few))[oc.offset_range(12.1)] == pytest.approx(0.0, abs=3e-5)
+    assert not oc.offsets(oc.offset_hist(stars.iloc[:300])).any()
+    # An injected star is moved by its own G range's offset, whatever its trend.
+    inj = stars.iloc[:5].assign(slope=-0.02)
+    assert np.allclose(oc.centre(inj, off)["slope_ref"], 2e-4 + off[oc.offset_range(inj["g_mag"])])
 
 
 def test_tallies_add_up():

@@ -4,7 +4,7 @@
 
 `lc` is a light-curve table (gaia.epoch.SCHEMA) holding whole stars, the hosts. Each host gets the fade in all
 three bands (grey), keeps its source_id and its own noise, gaps and variability, and is scored by `scorer`, the
-function the search itself runs on a light-curve table (today `search.score` with the rule's drift table). A
+function the search itself runs on a light-curve table (`summary.star_summary` with the rule's drift table). A
 steady fade is deterministic, so a host gives one draw per rate; the randomness of the recall is in which stars
 are hosts.
 

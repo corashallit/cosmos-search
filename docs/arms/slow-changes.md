@@ -836,8 +836,11 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
     goes into them only with `--with-eclipse`, because no calibration batch has measured the reviewer on files
     that carry it. A star whose NEOWISE or ZTF fetch failed in the checks is left out and listed, so that its
     checks are run again first.
-11. The limit on how common steady fades are among FGK dwarfs, find or no find: `slow_occurrence.py` on the
-    threshold sample of step 2 (docs/arms/occurrence.md, "On DR4").
+11. The limit on how common steady fades are among FGK dwarfs, find or no find (docs/arms/occurrence.md, "On
+    DR4"): on day one `slow_occurrence.py` on the light curves of step 2, with the pass and flag steps run on
+    that directory; then on every star, from `R/summary`, `L/reference.parquet`, the light curves the pass keeps
+    of its random share of stars, and the dwarfs' parallaxes fetched in sky slices (`slow_occurrence.py aux
+    --sky 4`).
 
 ### Trial on all of DR3 (2026-10-30)
 
@@ -1239,6 +1242,14 @@ or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet
 - **2026-11-11.** The known answers are in the DataLink fallback list (3,791 stars with the watch-list). ESA's
   archive refused the position queries, so `slow known` gained `--mirror aip`.
 
+- **2026-11-11.** The occurrence limit reads the pass's per-star table and the flag step's reference, and the
+  DR3 field was run again that way (docs/arms/occurrence.md): fewer than 1 in 101 FGK dwarfs fade at 0.2% a
+  year, 1 in 7,879 at 1%, 1 in 58,623 at 5%. Found on the way: the trend left after the drift correction depends
+  on colour. Stars redder than BP−RP 2 brighten by 0.06 to 0.22% a year and the bluest by about 0.1%, at every
+  magnitude, while stars between 0.5 and 1.8 sit within 0.04% of zero (table in docs/arms/occurrence.md, "The
+  leftover trend depends on colour"). The drift table has one colour range above BP−RP 1.3 and the neighbour
+  reference none, so neither removes it. At DR3's errors that is +0.3 to +0.5 errors for the reddest stars;
+  at DR4's it would be about +1. The occurrence limit takes the dwarfs' own median out. The lists do not yet.
 - **2026-11-10.** Upper limit on how common steady fades are among FGK dwarfs (docs/arms/occurrence.md), built
   and run on the 195,572 FGK dwarfs of DR3's Andromeda field: fewer than 1 in 110 fade at 0.2% a year, 1 in
   7,545 at 1%, 1 in 51,304 at 5% (95%). Recall comes from steady fades injected into every one of those stars.

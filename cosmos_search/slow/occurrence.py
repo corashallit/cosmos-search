@@ -24,9 +24,10 @@ Beside the limit, for each rate, what subtracting the chance fades would give (`
 own variability and the instrument sent its trend either way equally often, the brightening count m would
 estimate the chance fades among the n (statistics.md §2, mirror null): n Poisson with mean b + f x detectable, m
 Poisson with mean b, and `single_limit` gives the limit on f. It is stronger for slow fades, and it is only as
-good as that symmetry. On DR3 brightening stars outnumber fading ones 85 to 55 beyond 6 errors and 30 to 10
-beyond 8 (docs/arms/occurrence.md), and in simulated counts with chance fades at 0.6 of the chance brightenings
-this number fell below the true share in a fifth to all of the samples (2026-11-10). So it is reported as what
+good as that symmetry. On DR3 brightening stars outnumber fading ones 89 to 61 beyond 6 errors and 28 to 12
+beyond 8, and fading ones lead 1,664 to 1,477 between 3 and 5 (docs/arms/occurrence.md), and in simulated counts
+with chance fades at 0.6 of the chance brightenings this number fell below the true share in a fifth to all of
+the samples (2026-11-10). So it is reported as what
 symmetry would buy and is never the limit. With it:
 - its region is chosen on fading + brightening together (`choose_mirror_region`), never on which way the stars
   went, so with no real fades and perfect symmetry the split of the chosen region is a fair coin;
@@ -36,11 +37,16 @@ symmetry would buy and is never the limit. With it:
 - `sky_dispersion`: whether the stars past the cut go the same way in the same patch of sky more often than
   independent stars would. The subtraction and the excess test take stars as independent.
 
-Trend significance is each star's G trend over its error, measured against stars of similar brightness
-(`brightness_reference`: the running median trend of the stars nearest in G). On DR3 the drift correction leaves
-+0.08% a year at G 12-13 (big-picture review, 2026-11-10), which would move every star there towards
-brightening and hide fades. A per-star table that already carries a neighbour reference (`slope_ref`, from
-`slow.summary`) is used as it is, and each injected star is then measured against its host's reference.
+Trend significance is each star's G trend over its error, measured against stars like it. On DR3 the drift
+correction leaves +0.08% a year at G 12-13 (big-picture review, 2026-11-10), which would move every star there
+towards brightening and hide fades. Two steps take that out. The search's own neighbour reference
+(`summary.apply_reference`: the median trend of all stars near a star on the sky and in brightness) removes what
+depends on brightness and place. What is left depends on colour: measured on DR3 on 2026-11-11, stars redder
+than BP-RP 2 brighten by 0.06 to 0.22% a year against it and the FGK dwarfs at G 18-19 sit 0.29 errors low, and
+an offset like that sends the region choice to where few stars brighten and many fade. So the searched dwarfs
+are then centred on their own median at each brightness (`offset_hist`, `offsets`, `centre`), and injected
+stars get the same two steps. A per-star table without a neighbour reference is measured against the running
+median trend of the searched stars nearest in G (`brightness_reference`), which is both steps in one.
 
 `reviewed_limit` is the limit after the list has been read: stars in a region that no check and no reviewer
 could explain, over the stars a fade would have put there and the reviewers would have kept.
@@ -177,6 +183,59 @@ def trend_z(table, g, ref=None):
         return table["slope_z"].to_numpy(float)
     with np.errstate(invalid="ignore", divide="ignore"):
         return (table["slope"].to_numpy(float) - reference_at(g, ref)) / slope_error(table)
+
+
+# -- the searched stars' own zero -----------------------------------------------------------------------------
+
+OFFSET_G = np.arange(9.0, 19.5 + 1e-9, 0.5)          # G ranges; brighter and fainter stars join the end ranges
+OFFSET_EDGES = np.linspace(-0.01, 0.01, 4001)        # trend against the neighbour reference, per year
+OFFSET_MIN_STARS = 400                               # a median from fewer stars is noisier than what it removes
+
+
+def offset_range(g):
+    """Index of each star's range of G for the offset (the pass's own magnitude, `g_mag`)."""
+    g = np.nan_to_num(np.asarray(g, float), nan=OFFSET_G[-1])
+    return np.clip(np.digitize(g, OFFSET_G) - 1, 0, len(OFFSET_G) - 2)
+
+
+def offset_hist(table):
+    """Counts of the searched stars' trends against their neighbour reference (slope - slope_ref), per G range.
+    Histograms of batches add, so a whole-sky table is read one file at a time."""
+    d = table["slope"].to_numpy(float) - np.nan_to_num(table["slope_ref"].to_numpy(float))
+    ok = np.isfinite(d)
+    h = np.zeros((len(OFFSET_G) - 1, len(OFFSET_EDGES) - 1), np.int64)
+    k = np.clip(np.digitize(d[ok], OFFSET_EDGES) - 1, 0, len(OFFSET_EDGES) - 2)
+    np.add.at(h, (offset_range(table["g_mag"].to_numpy(float)[ok]), k), 1)
+    return h
+
+
+def offsets(hist, min_stars=OFFSET_MIN_STARS):
+    """Median of each G range's histogram (to within a bin, 0.0005% a year). A range with fewer than min_stars
+    stars is pooled with its neighbours until it has them; 0 when the whole table has not."""
+    out = np.zeros(len(hist))
+    mid = (OFFSET_EDGES[:-1] + OFFSET_EDGES[1:]) / 2
+    for i in range(len(hist)):
+        for k in range(len(hist)):
+            h = hist[max(0, i - k): i + k + 1].sum(axis=0)
+            if h.sum() >= min_stars:
+                c = np.cumsum(h)
+                j = int(np.searchsorted(c, c[-1] / 2))
+                before = c[j - 1] if j else 0
+                out[i] = mid[j] + ((c[-1] / 2 - before) / h[j] - 0.5) * (OFFSET_EDGES[1] - OFFSET_EDGES[0])
+                break
+    return out
+
+
+def centre(table, offset):
+    """`table` (searched or injected stars measured against the neighbour reference) with the searched stars'
+    own median taken out: slope_ref moved by the offset of each star's G range, slope_z recomputed."""
+    out = table.copy()
+    ref = np.nan_to_num(out["slope_ref"].to_numpy(float)) + np.asarray(offset)[offset_range(out["g_mag"])]
+    ref_err = np.nan_to_num(out["slope_ref_err"].to_numpy(float)) if "slope_ref_err" in out else 0.0
+    out["slope_ref"] = ref
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out["slope_z"] = (out["slope"].to_numpy(float) - ref) / np.hypot(slope_error(out), ref_err)
+    return out
 
 
 # -- counts and recall --------------------------------------------------------------------------------------------

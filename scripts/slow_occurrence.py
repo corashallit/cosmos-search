@@ -2,23 +2,37 @@
 
     python scripts/slow_occurrence.py aux --lightcurves S/lightcurves --schema gaiadr4 --out S/aux_plx.parquet
     python scripts/slow_occurrence.py inject --lightcurves S/lightcurves --aux S/aux_plx.parquet --rule RULE --out O
-    python scripts/slow_occurrence.py limit --stars R/stats --aux AUX --injections O/injections --out O/limit
+    python scripts/slow_occurrence.py limit --stars R/summary --reference L/reference.parquet --aux AUX \\
+        --injections O/injections --out O/limit
 
-`aux`: G, BP-RP, parallax and its error for every star of a directory of light-curve files, from gaia_source: ESA's
-archive with the project's login (uploaded id lists), or with `--mirror` a partner centre by source_id range. The
-release-day threshold sample's own aux.parquet has no parallaxes.
+    python scripts/slow_occurrence.py aux --sky 4 --schema gaiadr4 --out A          # every star: the catalogue in slices
+    python scripts/slow_occurrence.py inject --lightcurves R/lightcurves --random-share 0.001 --aux A --rule RULE --out O
+
+`aux`: G, BP-RP, parallax and its error from gaia_source. The light curves carry no parallax, and only the
+parallax tells a dwarf from a giant. For a sample (`--lightcurves`): every star of a directory of light-curve
+files, from ESA's archive with the project's login (uploaded id lists), or with `--mirror` from a partner centre
+by source_id range, into one file. For the whole sky (`--sky LEVEL --out DIR`): one query and one file per HEALPix
+pixel, with the catalogue-side part of the FGK-dwarf selection in the query, so a few 10^8 rows come back
+instead of 2 x 10^9; `inject` and `limit` read only the slices a file of stars needs. A second run resumes.
 
 `inject`: steady fades at each rate of the frozen config, injected into the light curves of FGK dwarfs and scored
-as the search scores any star (the rule's drift table, no period search). Light curves are a directory of Parquet
-files in epoch.SCHEMA: the release-day threshold sample (`slow_search.py sample`), a `dr4_bulk pull`, or the
-field below. `--aux` needs phot_g_mean_mag, bp_rp, parallax and parallax_error. Done-markers let a second run
-resume.
+by the function the search's pass runs on every star (`summary.star_summary` with the rule's drift table, and the
+pass's bad-epoch options). Light curves are a directory of Parquet files in epoch.SCHEMA: the light curves a
+`slow_search.py pass --keep-lightcurves all` kept, a `dr4_bulk pull`, or the field below. `--aux` needs
+phot_g_mean_mag, bp_rp, parallax and parallax_error. Done-markers let a second run resume.
 
-`limit`: the per-star scores of the stars searched (`slow_search.py score` output, or the per-star summary of the
-bulk-file pass: source_id, slope, slope_z or slope_err, n_visits, t_first, t_last), the same `--aux` columns for
-them, and the injections. A table with a neighbour reference (`slope_ref`) is counted one file at a time. Writes limit.json (config, inputs, the limit per rate, the symmetry tables), curve.csv,
-regions.parquet (counts and recall of every region per rate), past_cut.parquet (every searched star past the first
-cut either way, strongest fades first) and, with matplotlib, the figure.
+`limit`: the per-star table of the stars searched, the same `--aux` columns for them, and the injections. The
+table is the pass's summary/ directory (`slow_search.py pass`: one row per star with source_id, g_mag, slope,
+slope_err, n_visits, t_first, t_last, and `ref`, which marks the rows that are a fair sample of their magnitude;
+only those are counted) with `--reference`, the reference.parquet of `slow_search.py flag`: each star's trend, and
+each injected star's, is then measured against the median trend of the stars near it on the sky and in brightness,
+and the searched dwarfs' own median at each brightness is taken out (the leftover instrument trend depends on
+colour). The files are read one at a time, twice, so a whole-sky table never has to fit in memory. Without
+`--reference` a table that carries no `slope_ref` is read whole and measured against the running median of the
+searched stars of similar brightness. Writes
+limit.json (config, inputs, the limit per rate, the symmetry tables), curve.csv, regions.parquet (counts and recall
+of every region per rate), past_cut.parquet (every searched star past the first cut either way, strongest fades
+first) and, with matplotlib, the figure.
 
 `planted` checks the limit on the real stars: a random share of them is given its own injected scores, so that
 share really fades, and the limit is computed again; over many draws it should fall below the planted share no
@@ -26,13 +40,14 @@ more than 5% of the time. The subtracted figure is counted the same way.
 
 `field` fetches the DR3 demonstration sample: every star of Gaia's Andromeda survey (the only part of DR3 with
 light curves for stars not flagged variable) brighter than --g-max, from the AIP mirror, one file per level-6
-HEALPix pixel. Score it with `slow_search.py score --lightcurves F/lightcurves --aux F/aux.parquet --no-period`.
+HEALPix pixel. Score it with `slow_search.py pass --lightcurves F/lightcurves --rule RULE --no-period`.
 """
 
 import argparse
 import datetime
 import json
 import os
+import re
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -45,45 +60,72 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from cosmos_search.gaia import features
-from cosmos_search.slow import drift, occurrence, recall, rule_v3
+from cosmos_search.slow import drift, occurrence, recall, rule_v3, summary
 
 AUX_COLUMNS = ["source_id", "phot_g_mean_mag", "bp_rp", "parallax", "parallax_error"]
 # What the limit reads of a per-star table, and what is kept of an injected star's scores.
-STAR_COLUMNS = ["source_id", "slope", "slope_z", "slope_err", "slope_ref", "slope_ref_err", "slope_z_raw", "n_visits",
-                "t_first", "t_last"]
-INJECTION_COLUMNS = ["slope", "slope_z", "slope_err", "n_visits", "sigma_visit", "abbe", "s_fade", "s_rise",
-                     "fade_kind"]
+STAR_COLUMNS = ["source_id", "g_mag", "slope", "slope_z", "slope_err", "slope_ref", "slope_ref_err", "slope_z_raw",
+                "n_visits", "t_first", "t_last"]
+INJECTION_COLUMNS = ["g_mag", "bp_rp", "slope", "slope_z", "slope_err", "n_visits", "t_first", "t_last", "sigma_visit",
+                     "abbe", "s_fade", "s_rise", "fade_kind"]
 _STATE = {}
 
 
-def _aux(path):
-    if path not in _STATE:
-        _STATE[path] = pd.read_parquet(path, columns=AUX_COLUMNS).drop_duplicates("source_id")
-    return _STATE[path]
+def _aux_slices(path):
+    """(first source_id, last source_id, file) of each sky slice in a directory written by `aux --sky`."""
+    key = ("slices", str(path))
+    if key not in _STATE:
+        rows = []
+        for f in sorted(Path(path).glob("aux_L*_*.parquet")):
+            level, pix = (int(x) for x in re.match(r"aux_L(\d+)_(\d+)", f.name).groups())
+            width = 2 ** 35 * 4 ** (12 - level)
+            rows.append((pix * width, (pix + 1) * width - 1, f))
+        if not rows:
+            raise SystemExit(f"no aux_L*_*.parquet sky slices in {path}")
+        _STATE[key] = rows
+    return _STATE[key]
+
+
+def aux_rows(path, lo, hi):
+    """Catalogue rows (AUX_COLUMNS) indexed by source_id. `path` is one Parquet file, read whole and once (a
+    sample), or a directory of sky slices from `aux --sky`, of which only those that overlap the source_ids
+    lo to hi are read, so the catalogue of the whole sky never has to fit in memory."""
+    path = str(path)
+    if not Path(path).is_dir():
+        if path not in _STATE:
+            _STATE[path] = pd.read_parquet(path, columns=AUX_COLUMNS).drop_duplicates("source_id").set_index("source_id")
+        return _STATE[path]
+    parts = [pd.read_parquet(f, columns=AUX_COLUMNS) for a, b, f in _aux_slices(path) if a <= hi and b >= lo]
+    d = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=AUX_COLUMNS)
+    return d[(d["source_id"] >= lo) & (d["source_id"] <= hi)].drop_duplicates("source_id").set_index("source_id")
 
 
 # -- inject -------------------------------------------------------------------------------------------------------
 
 def inject_one(item, a):
-    """Injected fades in the FGK dwarfs of one light-curve file, scored; writes its table and a done-marker."""
-    from cosmos_search.slow import search
+    """Injected fades in the FGK dwarfs of one light-curve file, scored; writes its table and a done-marker.
 
+    Each injected star is scored as the pass scores a real one: placed in its magnitude and colour cell by its
+    own (faded) median fluxes, or by the catalogue when the pass was given one (--catalogue-cells)."""
     t0 = time.time()
     cfg = occurrence.Config.load(a["config"])
-    aux = _aux(a["aux"])
     out = Path(a["out"])
     lc = pq.read_table(item["path"])
     ids = np.unique(np.asarray(lc["source_id"]))
-    mine = aux[aux["source_id"].isin(ids)]
+    aux = aux_rows(a["aux"], ids.min(), ids.max()) if len(ids) else pd.DataFrame(columns=AUX_COLUMNS[1:])
+    mine = aux.loc[aux.index.intersection(ids)].reset_index(names="source_id")
     hosts = mine.loc[occurrence.fgk_dwarf(mine, cfg) & (occurrence.stratum(mine["phot_g_mean_mag"], cfg) >= 0),
                      "source_id"].to_numpy()
+    if a["random_share"] > 0:    # the pass's random share: the kept light curves that are a fair sample
+        hosts = hosts[summary.random_share(hosts, a["random_share"])]
     if a["host_share"] < 1:
         hosts = hosts[features.control_mask(hosts, a["host_share"])]
     lc = lc.filter(pc.is_in(lc["source_id"], value_set=pa.array(hosts, pa.int64())))
-    cells = drift.star_cells(mine[mine["source_id"].isin(hosts)])
+    cells = drift.star_cells(mine[mine["source_id"].isin(hosts)]) if a["catalogue_cells"] else None
     table = rule_v3.load(a["rule"])[2]
-    res = recall.injected_scores(lc, cfg.rates, lambda t: search.score(t, cells, table, period_search=False),
-                                 columns=INJECTION_COLUMNS) if lc.num_rows else pd.DataFrame()
+    res = recall.injected_scores(lc, cfg.rates, lambda t: summary.star_summary(
+        t, table, cells=cells, marks=not a["no_marks"], own=not a["no_own_test"]),
+        columns=INJECTION_COLUMNS) if lc.num_rows else pd.DataFrame()
     (out / "injections").mkdir(parents=True, exist_ok=True)
     tmp = out / "injections" / f"{item['name']}.parquet.tmp"
     res.to_parquet(tmp, index=False)
@@ -138,7 +180,79 @@ def _each(fn, items, opts, workers):
 
 # -- aux ----------------------------------------------------------------------------------------------------------
 
+def sky_where(cfg):
+    """The catalogue-side part of the FGK-dwarf selection (`occurrence.fgk_dwarf` applies all of it again): what
+    keeps the rows sent back to a few 10^8 for the whole sky."""
+    return (f"phot_g_mean_mag < {cfg.g_edges[-1]:g} AND parallax >= {cfg.min_parallax_snr:g} * parallax_error "
+            f"AND bp_rp >= {cfg.colour_lo:g} AND bp_rp < {cfg.colour_hi:g}")
+
+
+def sky_rows(query, lo, hi, depth=6):
+    """`query(lo, hi)` (a frame of AUX_COLUMNS for a source_id range), in quarters when the service refuses the
+    whole range, as one frame sorted by source_id."""
+    parts = [d for d in _split(query, lo, hi, depth) if len(d)]
+    d = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=AUX_COLUMNS)
+    d.columns = [c.lower() for c in d.columns]
+    return d[AUX_COLUMNS].drop_duplicates("source_id").sort_values("source_id").reset_index(drop=True)
+
+
+def _sky_slice(pix, a):
+    """Catalogue rows of the FGK-dwarf candidates of one HEALPix pixel, as one file of the --out directory."""
+    from cosmos_search.gaia import epoch
+    from cosmos_search.gaia.archive import tap
+    from cosmos_search.net.tap import Tap
+
+    t0 = time.time()
+    width = 2 ** 35 * 4 ** (12 - a["sky"])
+    if not a["mirror"]:
+        t = tap()
+    else:   # one handle for every slice, so its limit on queries at once is shared
+        t = _STATE.setdefault(("tap", a["mirror"]), Tap(epoch.MIRRORS.get(a["mirror"], a["mirror"]),
+                                                        job_slots=a["workers"]))
+    where = sky_where(occurrence.Config.load(a["config"]))
+
+    def query(lo, hi):
+        return t.query(f"SELECT {', '.join(AUX_COLUMNS)} FROM {a['schema']}.gaia_source WHERE source_id BETWEEN {lo} "
+                       f"AND {hi} AND {where}", sync=bool(a["mirror"]), maxrec=10 ** 7, cache=False).to_pandas()
+
+    d = sky_rows(query, pix * width, (pix + 1) * width - 1)
+    path = Path(a["out"]) / f"aux_L{a['sky']}_{pix:07d}.parquet"
+    d.to_parquet(path.with_suffix(".tmp"), index=False)
+    path.with_suffix(".tmp").replace(path)
+    return {"pix": int(pix), "rows": int(len(d)), "seconds": round(time.time() - t0, 1)}
+
+
+def aux_sky(a):
+    """The whole sky (or --pixels of it), one HEALPix pixel per query and per file; a second run resumes."""
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    first, last = (int(x) for x in a.pixels.split("-")) if a.pixels else (0, 12 * 4 ** a.sky - 1)
+    done = {int(re.match(r"aux_L\d+_(\d+)", f.name).group(1)) for f in out.glob(f"aux_L{a.sky}_*.parquet")}
+    todo = [p for p in range(first, last + 1) if p not in done]
+    print(f"{last - first + 1} level-{a.sky} pixels, {len(todo)} to query", flush=True)
+    opts = {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(a).items() if k != "func"}
+    t0, n, failures = time.time(), 0, 0
+    with ThreadPoolExecutor(a.workers) as pool, (out / "manifest.jsonl").open("a") as fh:
+        futures = {pool.submit(_sky_slice, p, opts): p for p in todo}
+        for k, fut in enumerate(as_completed(futures), 1):
+            try:
+                rec = fut.result()
+                n += rec["rows"]
+            except Exception as exc:  # noqa: BLE001 (the pixel is retried on the next run)
+                failures += 1
+                rec = {"pix": futures[fut], "error": repr(exc)[:300]}
+            fh.write(json.dumps(rec) + "\n")
+            fh.flush()
+            if k % 50 == 0 or "error" in rec or k == len(todo):
+                print(f"[{k}/{len(todo)}] {n} rows in {(time.time() - t0) / 60:.1f} min {rec}", flush=True)
+    return failures
+
+
 def aux_cmd(a):
+    if a.sky is not None:
+        return aux_sky(a)
+    if not a.lightcurves:
+        raise SystemExit("aux needs --lightcurves (a sample) or --sky (the whole sky in slices)")
     from astropy.table import Table
 
     from cosmos_search.gaia import epoch
@@ -192,44 +306,94 @@ def _files(path):
     return sorted(f for f in p.glob("*.parquet") if pq.read_metadata(f).num_rows) if p.is_dir() else [p]
 
 
-def _population(f, aux, cfg):
+def _reference(path):
+    """The neighbour reference of `slow_search.py flag` (reference.parquet), when one is given."""
+    if path and path not in _STATE:
+        _STATE[path] = pd.read_parquet(path)
+    return _STATE.get(path)
+
+
+def _referenced(d, reference):
+    """Rows measured against the neighbour reference: `summary.apply_reference` by each row's own g_mag, which
+    adds slope_ref, slope_ref_err, slope_z_raw and replaces slope_z. Rows that already carry `slope_ref`, and
+    every row when no reference is given, are returned as they are (with slope_z = slope / slope_err when they
+    had none)."""
+    for c in d.columns:
+        if d[c].dtype == np.float32:
+            d[c] = d[c].astype(np.float64)
+    if "slope_z" not in d:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            d["slope_z"] = d["slope"] / d["slope_err"]
+    if reference is None or "slope_ref" in d or not len(d):
+        return d
+    if "g_mag" not in d:
+        raise SystemExit("--reference needs g_mag in the per-star table and the injections (the pass's own magnitude)")
+    return summary.apply_reference(d, reference)
+
+
+def read_injections(path, reference=None, offset=None):
+    """Every injected star's scores, measured as the searched stars are: against the neighbour reference when
+    one is given, then with the searched stars' own median taken out (`offset`)."""
+    inj = _referenced(pd.concat([pd.read_parquet(f) for f in _files(path)], ignore_index=True), reference)
+    return inj if offset is None else occurrence.centre(inj, offset)
+
+
+def _population(f, aux, cfg, reference=None, offset=None):
     """The searched population among one per-star score file's rows, and how many rows it held: FGK dwarfs by
-    the catalogue rows of `aux`, in the config's G range, with enough visits and a measured trend. Rows of a
+    the catalogue rows of `aux` (a file or a directory of sky slices, `aux_rows`), in the config's G range, with
+    enough visits and a measured trend. Rows of a
     bulk-file summary that are not a fair sample of their magnitude (`ref` false) are left out."""
     have = set(pq.read_schema(f).names)
     d = pd.read_parquet(f, columns=[c for c in [*STAR_COLUMNS, "ref"] if c in have])
     scored = len(d)
     if "ref" in d:
         d = d[d["ref"].astype(bool)].drop(columns="ref")
-    d = d.join(aux, on="source_id", how="inner")
-    d = d[occurrence.fgk_dwarf(d, cfg)]
+    if len(d):
+        d = d.join(aux_rows(aux, d["source_id"].min(), d["source_id"].max()), on="source_id", how="inner")
+    else:
+        d = d.assign(**{c: np.nan for c in AUX_COLUMNS[1:]})
+    d = _referenced(d[occurrence.fgk_dwarf(d, cfg)].reset_index(drop=True), reference)
+    if offset is not None:
+        d = occurrence.centre(d, offset)
     ok = (d["n_visits"] >= cfg.min_visits) & np.isfinite(d["slope_z"]) \
         & (occurrence.stratum(d["phot_g_mean_mag"], cfg) >= 0)
     return d[ok], scored
 
 
-def read_stars(path, aux_path, cfg):
-    """The searched population from per-star score files, in memory (`_population` of every file)."""
-    aux = _aux(aux_path).set_index("source_id")
-    parts = [_population(f, aux, cfg) for f in _files(path)]
-    return pd.concat([d for d, _ in parts], ignore_index=True).drop_duplicates("source_id"), sum(n for _, n in parts)
+def population_offset(path, aux, cfg, reference):
+    """The searched stars' median trend against the neighbour reference per G range, from one pass over the
+    per-star files (`occurrence.offsets`), and the stars behind each."""
+    hist = sum(occurrence.offset_hist(_population(f, aux, cfg, reference)[0]) for f in _files(path))
+    return occurrence.offsets(hist), hist.sum(axis=1)
 
 
-def gather(path, aux_path, cfg, host_ids):
+def read_stars(path, aux_path, cfg, reference=None):
+    """The searched population from per-star score files, in memory (`_population` of every file), and with a
+    neighbour reference the offset that centred it (None without one)."""
+    offset = population_offset(path, aux_path, cfg, reference)[0] if reference is not None else None
+    parts = [_population(f, aux_path, cfg, reference, offset) for f in _files(path)]
+    stars = pd.concat([d for d, _ in parts], ignore_index=True).drop_duplicates("source_id")
+    return stars, sum(n for _, n in parts), offset
+
+
+def gather(path, aux_path, cfg, host_ids, reference=None):
     """What the limit needs of the searched stars: their counts, the stars past the first cut, the hosts' rows,
     and the reference the injected stars are measured against.
 
-    Per-star tables that carry a neighbour reference (`slope_ref`) are counted one file at a time, so the
-    scores of a whole-sky pass never have to fit in memory. Others (`slow_search.py score` output) are read
-    whole, because their reference is the running median of every star's trend."""
+    Per-star tables measured against a neighbour reference (`reference`, or their own `slope_ref`) are counted
+    one file at a time, so the scores of a whole-sky pass never have to fit in memory; with `reference` the
+    files are read twice, first for the searched stars' own median per G range. Others are read whole, because
+    their reference is the running median of every star's trend."""
     files = _files(path)
-    referenced = all("slope_ref" in pq.read_schema(f).names for f in files)
+    referenced = reference is not None or all("slope_ref" in pq.read_schema(f).names for f in files)
+    offset = counts = None
     if referenced:
-        aux = _aux(aux_path).set_index("source_id")
-        batches = (_population(f, aux, cfg) for f in files)
+        if reference is not None:
+            offset, counts = population_offset(path, aux_path, cfg, reference)
+        batches = (_population(f, aux_path, cfg, reference, offset) for f in files)
         ref = None
     else:
-        stars, scored = read_stars(path, aux_path, cfg)
+        stars, scored, _ = read_stars(path, aux_path, cfg)
         batches = [(stars, scored)]
         ref = occurrence.brightness_reference(stars["phot_g_mean_mag"].to_numpy(float), stars["slope"].to_numpy(float),
                                               cfg.reference_window)
@@ -250,7 +414,7 @@ def gather(path, aux_path, cfg, host_ids):
         raise SystemExit(f"no searched FGK dwarfs in {path}")
     return {"tally": total, "past": pd.concat(past, ignore_index=True), "hosts": pd.concat(hosts, ignore_index=True),
             "ref": ref, "scored": scored, "span": _weighted_median(spans), "visits": _weighted_median(visits),
-            "referenced": referenced}
+            "referenced": referenced, "offset": offset, "offset_stars": counts}
 
 
 def _weighted_median(pairs):
@@ -294,9 +458,15 @@ def limit(a):
     cfg = occurrence.Config.load(a.config)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    inj = pd.concat([pd.read_parquet(f) for f in _files(a.injections)], ignore_index=True)
+    reference = _reference(a.reference)
+    inj = read_injections(a.injections, reference)
     t0 = time.time()
-    got = gather(a.stars, a.aux, cfg, pd.unique(inj["source_id"]))
+    got = gather(a.stars, a.aux, cfg, pd.unique(inj["source_id"]), reference)
+    centred = pd.DataFrame()
+    if got["offset"] is not None:
+        inj = occurrence.centre(inj, got["offset"])
+        centred = pd.DataFrame({"g_lo": occurrence.OFFSET_G[:-1], "g_hi": occurrence.OFFSET_G[1:],
+                                "stars": got["offset_stars"], "median_trend_per_year": got["offset"]})
     t, past, span = got["tally"], got["past"], got["span"]
     inj_z, inj_strat = occurrence.injection_significances(got["hosts"], inj, cfg, got["ref"])
     curve, cells = occurrence.curve_from_tally(t, past, inj_z, inj_strat, inj["rate"], cfg, span)
@@ -307,12 +477,15 @@ def limit(a):
                           "brightening": occurrence.regions(t.brightening)[-1].astype(int)})
     rec = {"config": json.loads(cfg.to_json()), "date": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
            "inputs": {"stars": str(a.stars), "aux": str(a.aux), "injections": str(a.injections),
+                      "reference": str(a.reference) if a.reference else None,
                       "stars_scored": int(got["scored"]), "fgk_dwarfs_searched": n_stars,
                       "injection_hosts": int((inj_strat[np.isclose(inj["rate"], inj["rate"].iloc[0])] >= 0).sum()),
                       "median_span_years": span, "median_visits": got["visits"],
                       "neighbour_reference": got["referenced"]},
            "curve": json.loads(curve.to_json(orient="records")), "symmetry": json.loads(sym.to_json(orient="records")),
-           "tails": json.loads(tails.to_json(orient="records"))}
+           "tails": json.loads(tails.to_json(orient="records")),
+           # The searched stars' median trend against the neighbour reference, taken out per G range.
+           "population_offset": json.loads(centred.to_json(orient="records"))}
     (out / "limit.json").write_text(json.dumps(rec, indent=1))
     curve.to_csv(out / "curve.csv", index=False)
     sym.to_csv(out / "symmetry.csv", index=False)
@@ -331,6 +504,9 @@ def limit(a):
                  "sky_dispersion"]
     print(show[cols].to_string(index=False))
     print(sym.round(3).to_string(index=False))
+    if len(centred):
+        print(centred[centred["stars"] > 0].assign(pct_per_year=lambda d: (100 * d["median_trend_per_year"]).round(4))
+              .drop(columns="median_trend_per_year").to_string(index=False))
     print(tails.set_index("z_min").T.to_string())
     try:
         from cosmos_search.viz import style
@@ -347,8 +523,9 @@ def planted(a):
     """Coverage on the real stars: plant fades in a random share of them (their own injected scores), compute the
     limit, and count how often it falls below the share planted."""
     cfg = occurrence.Config.load(a.config)
-    stars, _ = read_stars(a.stars, a.aux, cfg)
-    inj = pd.concat([pd.read_parquet(f) for f in _files(a.injections)], ignore_index=True)
+    reference = _reference(a.reference)
+    stars, _, offset = read_stars(a.stars, a.aux, cfg, reference)
+    inj = read_injections(a.injections, reference, offset)
     rng = np.random.default_rng(a.seed)
     rows = []
     for rate in a.rates:
@@ -356,6 +533,10 @@ def planted(a):
             below, mirror_below, p05, lims = 0, 0, 0, []
             for _ in range(a.trials):
                 s, k = occurrence.plant(stars, inj, rate, share, rng)
+                if offset is not None:
+                    # As the limit step would see such a sky: the dwarfs' own median, moved by the planted fades,
+                    # is taken out again, while recall still comes from fades injected into one star at a time.
+                    s = occurrence.centre(s, occurrence.offsets(occurrence.offset_hist(s)))
                 r = occurrence.limit_curve(s, inj, cfg, rates=[rate])[0].iloc[0]
                 below += r["limit"] < k / len(stars)
                 mirror_below += r.get("mirror_limit", np.inf) < k / len(stars)
@@ -456,31 +637,44 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     i = sub.add_parser("inject", help="steady fades injected into FGK dwarfs' light curves and scored")
     i.add_argument("--lightcurves", required=True, help="directory of light-curve Parquet files (epoch.SCHEMA)")
-    i.add_argument("--aux", required=True, help="Parquet with " + ", ".join(AUX_COLUMNS))
+    i.add_argument("--aux", required=True, help="Parquet with " + ", ".join(AUX_COLUMNS) + ", or an `aux --sky` directory")
     i.add_argument("--rule", default=str(rule_v3.RULE_DIR), help="rule directory (drift table)")
     i.add_argument("--out", required=True)
     i.add_argument("--config", default=occurrence.Config.name, help="frozen config: a name in prereg/occurrence or a path")
     i.add_argument("--host-share", type=float, default=1.0, help="share of the FGK dwarfs used as hosts (by hash)")
+    i.add_argument("--random-share", type=float, default=0.0,
+                   help="hosts are only the stars of the pass's --random-share: needed when --lightcurves is a pass's "
+                        "lightcurves/ directory, which also holds the stars near a threshold")
+    i.add_argument("--no-marks", action="store_true", help="as the pass's --no-marks (DR3 read as DR4 arrives)")
+    i.add_argument("--no-own-test", action="store_true", help="as the pass's --no-own-test")
+    i.add_argument("--catalogue-cells", action="store_true",
+                   help="place stars in magnitude and colour cells by --aux, when the pass was given --aux")
     i.add_argument("--workers", type=int, default=os.cpu_count())
     i.add_argument("--limit", type=int, default=0, help="first N files only")
     i.set_defaults(func=inject)
     x = sub.add_parser("aux", help="G, BP-RP and parallax of the stars of a light-curve directory, from gaia_source")
-    x.add_argument("--lightcurves", required=True)
-    x.add_argument("--out", required=True, help="Parquet file to write")
+    x.add_argument("--lightcurves", help="a sample: the stars of this directory of light-curve files")
+    x.add_argument("--sky", type=int, help="the whole sky: FGK-dwarf candidates of every HEALPix pixel at this level, "
+                                           "one query and one file each (4: 3,072 pixels)")
+    x.add_argument("--pixels", help="with --sky: only pixels FIRST-LAST (to split the work, or to try it)")
+    x.add_argument("--config", default=occurrence.Config.name)
+    x.add_argument("--out", required=True, help="Parquet file to write; with --sky a directory")
     x.add_argument("--schema", default="gaiadr4")
     x.add_argument("--mirror", help="a partner centre's TAP service (a name in epoch.MIRRORS, or a URL) instead of ESA")
     x.add_argument("--chunk", type=int, default=50_000, help="source_ids per uploaded query (ESA)")
     x.add_argument("--workers", type=int, default=4)
     x.set_defaults(func=aux_cmd)
     m = sub.add_parser("limit", help="the limit per rate from per-star scores and injections")
-    m.add_argument("--stars", required=True, help="per-star score files (a directory or one Parquet file)")
-    m.add_argument("--aux", required=True, help="Parquet with " + ", ".join(AUX_COLUMNS))
+    m.add_argument("--stars", required=True, help="per-star table: the pass's summary/ directory, or one Parquet file")
+    m.add_argument("--reference", help="reference.parquet of `slow_search.py flag`: trends measured against neighbours")
+    m.add_argument("--aux", required=True, help="Parquet with " + ", ".join(AUX_COLUMNS) + ", or an `aux --sky` directory")
     m.add_argument("--injections", required=True, help="the inject step's injections directory")
     m.add_argument("--out", required=True)
     m.add_argument("--config", default=occurrence.Config.name)
     m.set_defaults(func=limit)
     c = sub.add_parser("planted", help="check on real stars: how often the limit falls below a share of fades planted")
     c.add_argument("--stars", required=True)
+    c.add_argument("--reference")
     c.add_argument("--aux", required=True)
     c.add_argument("--injections", required=True)
     c.add_argument("--out", required=True)
