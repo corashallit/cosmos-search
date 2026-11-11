@@ -127,6 +127,22 @@ class Client(requests.Session):
         self._rng = rng or random.Random()
         self._limiters = {}
         self._limiters_lock = threading.Lock()
+        self._pid = os.getpid()
+
+    def _after_fork(self):
+        """In a worker process forked from one that already used this client: start with connections of its own.
+
+        The parent's open keep-alive connections are inherited by every forked worker. Two processes that send
+        requests down one socket read each other's answers: a byte range of the right length and the wrong
+        bytes (found by the practice run of 2026-11-10, where the first large file of every run failed its
+        checksum). The inherited connections are dropped without a shutdown, so the parent's stay usable; the
+        per-host limiters are rebuilt too, since a lock held by a parent thread at the fork would never be
+        released here."""
+        self._pid = os.getpid()
+        for prefix in list(self.adapters):
+            self.mount(prefix, requests.adapters.HTTPAdapter())
+        self._limiters = {}
+        self._limiters_lock = threading.Lock()
 
     # -- public helpers ------------------------------------------------------------------------------
 
@@ -192,6 +208,8 @@ class Client(requests.Session):
 
     def request(self, method, url, *args, cache=False, cache_tag=None, **kwargs):
         check_blind()
+        if os.getpid() != self._pid:
+            self._after_fork()
         if cache and kwargs.get("stream"):
             raise ValueError("cache=True cannot be combined with stream=True; use download()")
         kwargs.setdefault("timeout", self._policy_for(url).timeout)

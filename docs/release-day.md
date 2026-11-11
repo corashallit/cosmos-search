@@ -3,7 +3,8 @@
 Gaia DR4 becomes public on **2026-12-02 at about 12:00 CET** (11:00 UTC, 06:00 in Ontario). ESA's archive is
 closed from 2026-11-25 12:00 CET until then. This page is the order of work for that day: what must be in place
 before, the checks of the first hour, the run, and what to do when DR4 differs from what the code expects. Steps
-are in dependency order; the only dates are ESA's.
+are in dependency order; the only dates are ESA's. Nothing starts by itself: the day's work begins when Cora
+writes in a thread (last section).
 
 The search itself is described in [arms/slow-changes.md](arms/slow-changes.md); the routes to the light curves in
 [infra/dr4-downloads.md](infra/dr4-downloads.md).
@@ -23,7 +24,7 @@ The search itself is described in [arms/slow-changes.md](arms/slow-changes.md); 
 |---|---|
 | DR3 light curves of the 2,849 watch-list stars (fading at DR3's end, G < 17), to compare with DR4's continuation | Saved 2026-11-10: `/mnt/project-files/release-day/dr3-reference/watchlist/` |
 | DR3 light curves of 2,360 ordinary stars over G 6.7 to 20.9 from 60 sky regions, for the DR4-against-DR3 check | Saved 2026-11-10: `/mnt/project-files/release-day/dr3-reference/random/` |
-| Known answers matched to Gaia (Boyajian's star, fading alerts, R CrB / UX Ori / DY Per stars) | `/mnt/project-files/release-day/known.parquet` |
+| Known answers matched to Gaia (Boyajian's star, fading alerts, R CrB / UX Ori / DY Per stars) | Built 2026-11-11 on the AIP copy of the DR3 source table (`python -m cosmos_search.slow known --out known.parquet --mirror aip`; ESA's synchronous queries were refused for an hour): 985 stars, 967 matched. `/mnt/project-files/release-day/known.parquet`; the same table is in the fallback fetch list `/mnt/project-files/score-every-star/fallback/fallback_dr3.parquet` |
 | DR3 per-star table (G, BP-RP, classes) for the 11.6 M DR3 stars with light curves | `/mnt/project-files/data/gaia-dr3-epoch/aux/` |
 | All DR3 epoch photometry files | On kore (`~/cosmos-data`, 72.8 GB) |
 
@@ -40,14 +41,14 @@ the run goes on.
 
 | # | Check | Command | If it fails |
 |---|---|---|---|
-| 1 | Is DR4 out, and by which routes | `python -m cosmos_search.gaia.dr4_routes --out routes.json` (exit code 3: no route answers yet) | Check again each hour |
+| 1 | Is DR4 out, and by which routes | `python -m cosmos_search.gaia.dr4_routes --out routes.json` (exit code 3: no route answers yet) | Run it again later; nothing is scheduled |
 | 2 | Tables and columns the queries name | `columns_missing` in `routes.json`, or `python -m cosmos_search.targets check --release dr4` | Edit `RELEASES["dr4"]` in `targets/releases.py` (one map for every query), re-run |
 | 3 | One bulk file, smallest then largest | `python -m cosmos_search.gaia.dr4_bulk list`, then `python -m cosmos_search.gaia.dr4_check file KEY` | Column names: `ALIASES` / `COLUMNS` in `gaia/dr4.py`. Times outside DR4's span: `gaia_time_to_btjd`. Stars not contiguous: the reader sorts each file in memory, so lower `--workers` |
 | 4 | First light curves through DataLink: Boyajian's star, the known answers, the DR3 reference stars | `python -m cosmos_search.gaia.dr4_datalink --ids LIST --out DL` | The response layout is new: `read_response` in `gaia/dr4_datalink.py` names the columns it found |
 | 5 | DR4 against DR3 for the same stars | `python -m cosmos_search.gaia.dr4_check compare --dr4 DL/lightcurves --dr3 /mnt/project-files/release-day/dr3-reference/random/lightcurves.parquet` | No star in both: map ids through `dr3_neighbourhood` (`--id-map`). Flux scale or time offset: units or zero points differ from DR3's; fix the reader before anything is scored |
 | 6 | Rejected epochs | Does `routes.json` list a `vari_epoch_flags` folder among the bulk files? Does step 3 report a rejection column? | Neither is expected. The scoring uses its own rule for bad epochs (below) |
 | 7 | Class names | `SELECT phot_variable_best_class, COUNT(*) FROM gaiadr4.all_source_flags GROUP BY 1` | Update the eclipsing-binary class given to `slow_checks.py --skip-class` |
-| 8 | Trend zero point | After the threshold sample is scored: median trend in units of its error, by G magnitude and by sky region | An offset at G < 14 was +0.85 errors in DR3 and would be about +2.3 at DR4's precision; it has to be removed before thresholds are set |
+| 8 | Trend zero point | After the threshold sample is scored: `trend_offset_by_G` in `L/summary.json` (median trend in units of its error, by G magnitude), and the same by sky region | An offset at G < 14 was +0.85 errors in DR3 and would be about +2.3 at DR4's precision; it has to be removed before thresholds are set |
 
 Steps 1 to 3 need no science decision and take what the archive's load allows. Step 4 is the first data anyone
 on the project sees: Boyajian's star has no light curve in DR3 and gets one in DR4.
@@ -57,27 +58,61 @@ on the project sees: Boyajian's star has no light curve in DR3 and gets one in D
 By route, fastest first (`routes.json` says which exist):
 
 1. **Bulk files.** Thresholds from a random share of the files, then every star scored as the files pass, split
-   over machines with `--shard i/n`; each raw file is deleted once read. Commands in
-   [arms/slow-changes.md](arms/slow-changes.md), "Release day, end to end".
-2. **A mirror's table, no bulk files.** Whole-sky selection on ESA's `all_source_photometry`, light curves of the
-   selected stars from the mirror by source_id range.
-3. **DataLink only.** The watch-list, the known answers and the top of the selection, at 0.1 to 2.0 light curves
-   a second (2,849 DR3 watch-list stars took 24 min on 2026-11-10, no failed call); check the other routes daily.
+   over machines with `--shard i/n`; each raw file is deleted once read:
 
-Then lists, automated cuts, the checks per candidate and figures, as in "Release day, end to end".
+   ```
+   python scripts/slow_search.py pass --out S --dr4-bulk --files-share 0.002 --keep-lightcurves all
+   python scripts/slow_release_thresholds.py --lightcurves S/lightcurves --out RULE --check-against prereg/rules/slow-v3
+   python scripts/slow_search.py pass --out R --rule RULE --dr4-bulk [--shard i/n] [--durable DIR]
+   python scripts/slow_search.py flag --run R --rule RULE --out L
+   python scripts/slow_search.py cuts --run L
+   ```
+
+2. **A mirror's table, no bulk files**, or **DataLink only**: `scripts/slow_fallback.py` gives the order in which
+   to pull light curves (the watch-list, the known answers, then the archive's own statistics), at 0.1 to 2.0
+   light curves a second through DataLink (2,849 DR3 watch-list stars took 24 min on 2026-11-10, no failed call);
+   check the other routes daily.
+
+Then the reading of the lists, the checks per candidate, figures and the blind review:
+
+```
+python scripts/slow_checks.py --fading L/fading.parquet --lightcurves R/lightcurves --out L/checks --skip-still --skip-band --skip-class ECL --n 1000
+python scripts/slow_review.py files --checks L/checks --fading L/fading.parquet --lightcurves R/lightcurves --rule RULE --out D
+python scripts/slow_review.py launch --dir D          # arguments for scripts/stage_a_reviews.js (Workflow tool)
+python scripts/stage_a_audit.py --transcripts <session>/subagents --prompts D/prompts --replies D/replies --out D/audit.json --reviewer prereg/reviewers/slow-cal-1.json
+python -m cosmos_search.vetting commit --packets D/products.json --replies D/replies --vetter slow-cal-1 --batch D/batch --archive prereg/verdicts/<name> --audit D/audit.json
+git push
+python scripts/slow_review.py table --dir D --checks L/checks        # D/reviewed.csv, the list to read
+```
+
+Each step is described in [arms/slow-changes.md](arms/slow-changes.md), "Release day, end to end".
+
+**Launching the reviews.** The launcher hands every reviewer, before its task, the last message Cora wrote in the
+thread that launches them (found in the practice of 2026-11-10, below). A reviewer that has read a message about
+the release is not the reviewer the calibration measured, and the audit refuses its review. What is relayed is
+the last message Cora typed that is still in the launching session's context: once this thread's context had been
+summarized (2026-11-11), a reviewer launched the same way was handed its task and nothing else, and the audit
+counted it. So on release day:
+
+1. Launch one review first and run the audit on it.
+2. If the audit reports a relayed user message, launch from a session whose context holds no message typed by
+   Cora (in the practice: this thread after its context had been summarized), and audit one review again.
+3. Launch the rest only once one review counts. The audit checks every review either way, so a wrong launch costs
+   reviews, never a wrong verdict in the batch.
 
 Machines:
 
 | Machine | What it has | Use |
 |---|---|---|
 | Cloud container (one per thread) | 4 cores, 15 GB memory, about 30 GB disk, 120 MB/s from ESA's CDN | The first pass, several containers each with its own `--shard i/n` |
-| kore | 10 cores, 16 GB memory, 840 GB free disk | One or more shards with at most 6 workers; where the kept light curves and summaries are stored. Its sessions only act on messages Cora writes there |
+| kore | 10 cores, 16 GB memory, 176 GiB free disk on 2026-11-10 (261 GiB once the practice files under `~/cosmos-data/practice-dr4/` are deleted) | One or more shards with 6 workers; where the kept light curves and summaries are stored. A session there starts when Cora says so in the thread that needs it |
 | `/mnt/project-files/` | Shared by every thread, durable | Rules, thresholds, per-star summaries, lists, `routes.json`, first-hour reports |
 
-Sizing from the practice run (below): reading and converting takes 1.9 core-seconds per million transits, so
-DR4's 1.2 × 10¹¹ transits cost about 64 core-hours before any scoring; the download is 7.2 TB, 17 h for one
-container's network. A worker needs about 1.2 GB of memory per 1.4 million transits it holds (30,000 stars at
-DR3's sampling, about 15,000 at DR4's).
+Sizing from the practice runs (below): reading and converting takes 1.9 core-seconds per million transits in a
+cloud container and 1.2 on kore, so DR4's 1.2 × 10¹¹ transits cost about 64 core-hours in the cloud, or 40 on
+kore, before any scoring; the download is 7.2 TB, 17 h for one container's network. A worker needs about 1.2 GB
+of memory per 1.4 million transits it holds (30,000 stars at DR3's sampling, about 15,000 at DR4's); six workers
+on kore peaked at 1.33 GB each over all of DR3.
 
 ## Practice run
 
@@ -90,7 +125,30 @@ python -m cosmos_search.gaia.dr4_fake build --out FAKE --m31 --random 60 --keep-
 python scripts/dr4_practice.py --root FAKE --out OUT --flaky 0.02
 ```
 
-Result of 2026-11-10 (one cloud container, 4 cores), on the M31 field and 60 random DR3 files:
+On a machine that holds DR3's files (kore), all of DR3:
+
+```
+python -m cosmos_search.gaia.dr4_fake build --out FAKE --dr3 DIR --workers 6 [--resume]
+python scripts/dr4_practice.py --root FAKE --out OUT --dr3 DIR --flaky 0.02 --workers 6
+```
+
+**All of DR3 on kore (2026-11-10).** Every DR3 light curve, through the release-day reader, compared with DR3
+read directly:
+
+| | |
+|---|---|
+| Fake DR4 files | 12,288 files (every order-5 pixel), 54.3 GB, 555,868,797 transits of 11,754,237 stars, from DR3's 3,386 files (72.8 GB); largest file 322 MB. Built in 19.7 min with 6 workers |
+| Download and read | 189 s for everything with 6 workers, no failed file with 2% of requests answered 503 (254 refused, all retried); 837,000 transits per core-second |
+| Against DR3 read directly | 1,554,036,289 light-curve points of 35,222,072 star-and-band pairs: all equal (times identical, fluxes to float32 rounding, 6 × 10⁻⁸). Reading DR3 itself took 704 s |
+| DataLink reader | 200 stars through the stand-in endpoint, equal to the files |
+| First-hour file check | no problems on the smallest and the largest file; one note (no rejected epochs marked) |
+| Memory | a worker's peak 1.33 GB; the build's last step 2.7 GB in one process; no swapping |
+| Disk | 52 GB of fake files and 34 GB of output left in `~/cosmos-data/practice-dr4/` for a scoring practice |
+
+Nothing had to be changed for macOS. kore's checkout was on the branch `kore-mirror-verify-props`, not `main`;
+the practice ran from a separate working copy.
+
+**M31 field and 60 random DR3 files (2026-11-10, one cloud container, 4 cores):**
 
 | | |
 |---|---|
@@ -102,7 +160,31 @@ Result of 2026-11-10 (one cloud container, 4 cores), on the M31 field and 60 ran
 | First-hour file check | no problems; one note (no rejected epochs marked) |
 | Memory | a worker's peak over the run 1.5 GB; on the largest file alone 1.2 GB (1.7 GB before the fix below) |
 
-What the practice run and the checks leading to it found:
+**Scoring, lists, checks and review files (2026-11-10, same container, same 233 fake files through the stand-in
+server).** The commands of "The run" above, with DR3's catalogue for the lookups:
+
+| Step | Result |
+|---|---|
+| Sample pass, every light curve kept | 1,084,551 stars in 0.8 to 1.0 min on 4 cores, no failed file (after the fix below) |
+| Thresholds | G < 19: 5.41 (episode), 3.72 (trend), 6.68 (repeat), against 5.42, 3.68, 6.77 from the scoring work's own run on the M31 field |
+| Scoring pass with the thresholds | 1.4 min; 1,017,063 stars with scores |
+| Lists | 16,941 stars on the fading list |
+| Cuts | catalogue rows of 30,680 of 30,682 stars in 19 s; 9,957 without measurable motion |
+| Checks, 12 strongest | 312 s with 6 at once, no failed fetch |
+| Review files | 12 files in 2.8 min (most of it the AllWISE and 2MASS cross-match), none refused by the leak scan. Two stars fainter than G 19 had no kept light curve and were pulled through DataLink first |
+
+**Review step on real candidates (2026-11-10).** From the checks of the DR3 trial's 60 strongest fades that DPAC
+does not call eclipsing binaries: 60 review files in 10.6 min (cross-match of 60 stars scattered over the sky),
+none refused, none left out. Six of them were reviewed through `scripts/stage_a_reviews.js` by the adopted
+reviewer: six replies in 7 min, all in the reply format, about 180,000 tokens a review. **None counts**: the audit
+found the last message Cora wrote in the launching thread in every reviewer's context (below). Committed as an
+uncounted practice batch (not archived), the table step listed two of the six on the shortlist and read the two
+R CrB stars and the two repeating dimmers as their known kinds. On 2026-11-11, after this thread's context had been
+summarized, one of the six was reviewed again the same way: the reviewer was handed its task only, the audit
+counted it, `vetting commit --audit` committed that one review, and the table step listed the other five as not
+reviewed.
+
+What the practice runs and the checks leading to them found:
 
 | Finding | What was done |
 |---|---|
@@ -111,19 +193,24 @@ What the practice run and the checks leading to it found:
 | The file reader held a whole file in memory when every star is kept | Reads whole stars a piece at a time; a file whose stars are scattered is detected and sorted (PR #86) |
 | Converting 30,000 stars at once needed 1.7 GB | Converted a slice at a time: 1.2 GB, in 40% less time (PR #86) |
 | The draft table does not mark the epochs DR3's variability processing rejected (5.2% of points in the M31 field; 42% of them have an error over twice the star's median, 38% are bright outliers) | Measured on 49,902 stars of one sky pixel with DR3's thresholds: without the marks the fading list grows from 177 to 256 and 9 of its top 20 are stars absent from the list made with the marks. The scoring gets its own rule for bad epochs (`slow/drift.py`, with R1 of [plan.md](plan.md)); the reader keeps every epoch |
-| ESA's TAP answered 503 to small queries while four DataLink calls were running | Run the per-star lookups and DataLink pulls one after the other on release day, or from different containers |
+| ESA's TAP answered 503 to runs of small queries for about an hour on 2026-11-10, with and without DataLink calls running, then answered normally (30,680 rows in 19 s) | Answers are cached, so a run that stops on a 503 goes on where it stopped when started again. The refusals came back on 2026-11-11 (logged-in queries too), and the known-answers table was matched on the AIP copy of the DR3 source table instead (`--mirror aip`, 985 cone queries in 19 min) |
+| Worker processes started after the first archive call shared its open connection; two of them sending byte-range requests down one socket read each other's answers, so the first large file of every scoring pass failed its checksum (and would have been read wrongly from an archive that publishes no checksums) | A worker now opens connections of its own (`net/client.py`, with a test that hangs without the fix); three passes over the 233 files, no failed file (PR #88) |
+| The launcher of the blind reviews now hands every reviewer the last message Cora wrote in the launching thread, before its task. The audit looked for the task in the first message only and reported every review as missing | The audit finds such reviews and refuses them as not blind (`scripts/stage_a_audit.py`, PR #88). "Launching the reviews" above says how to launch reviews that count |
+| The scoring pass keeps light curves only for stars brighter than G 19, but the fading list also holds fainter stars; the checks' eclipsing-binary test and the review files need the light curve | `slow_review.py files` lists such stars in `left_out.csv` and takes a second directory of light curves pulled through DataLink; or check only stars brighter than G 19 (`slow_checks.py --max-g 19`) |
+| The comparison with DR3 held every star's sums in one process, too much for all of DR3 on a 16 GB machine; memory figures were 1000 times too high on macOS | Compared a 48th of the sky at a time; the build can resume (PR #88) |
 
-Not covered by a practice run: DR4's real file sizes and row order, the archive under release-day load, and a
-run at the size of all of DR3 on kore.
+Not covered by a practice run: DR4's real file sizes and row order, the archive under release-day load, the
+scoring pass at the size of all of DR3 (the fake files for it are on kore), and a whole batch of reviews that
+the audit counts (one review did).
 
-## Scheduled start
+## Start
 
-Proposed to Cora on 2026-11-10 and created only once she agrees. Two scheduled tasks, both delivered to the
-thread "Plan release-day order of work":
+No scheduled task starts anything (Cora's choice, 2026-11-10). The day's work begins when Cora writes in a
+thread on or after 2026-12-02; DR4 is due at about 06:00 in Ontario.
 
-| When (Ontario) | What runs |
+| When | What is run, by hand |
 |---|---|
-| 2026-12-01 09:00, once | The day-before list above: tests on `main`, the practice run on a small fake set, archive login, kore reachable. Reports anything not ready |
-| 2026-12-02 from 05:00, each hour | First-hour step 1. While DR4 is not out, nothing else happens. Once a route answers: steps 2 to 8, a message to Cora with the first light curve of Boyajian's star, then the run. The hourly task is removed at that point; if DR4 is not out by 2026-12-03 06:00 it drops to twice a day |
+| The day before (2026-12-01) | The day-before list above: tests on `main`, the practice run on a small fake set, archive login, kore on and at `main` |
+| Release day | First-hour step 1. While no route answers, nothing else; run it again later. Once a route answers: steps 2 to 8, a message to Cora with the first light curve of Boyajian's star, then the run |
 
-kore takes part once Cora writes the start message in a thread on kore; the cloud containers do not wait for it.
+kore takes part once Cora says so in the thread that runs the day; the cloud containers do not wait for it.

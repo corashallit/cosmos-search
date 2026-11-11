@@ -825,12 +825,17 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
    Stars marked `g_only` or `bp_rp_only` are not checked but stay on the fading list with their verdict and are
    read after the rest, as the still stars are.
 9. Figures for the stars worth showing: `viz_candidates.py figures --run ... --ids ...` (docs/viz.md).
-10. Blind review of the stars the checks leave (docs/vetting.md §14-§15). Launch, audit and archive exist:
-    `cosmos_search.vetting.reviewer.launch_args(dir, ids)` gives the arguments for `scripts/stage_a_reviews.js`
-    (the model and effort of `prereg/reviewers/slow-cal-1.json`), `stage_a_audit.py --reviewer
-    prereg/reviewers/slow-cal-1.json` refuses reviews served by anything else, and `vetting commit --audit
-    --archive` records the verdicts. **Not built yet:** the step that turns `L/checks` into review files. Only
-    `slow_cal.py build` makes them, for the calibration's own stars and fakes.
+10. Blind review of the stars the checks covered (docs/vetting.md §14-§15), `scripts/slow_review.py`:
+    `files --checks L/checks --fading L/fading.parquet --lightcurves R/lightcurves --rule RULE --out D` writes one
+    review file per star, built as the calibration's files were (`slow.vet.review_file`); `launch --dir D` prints
+    the arguments for `scripts/stage_a_reviews.js` (the model and effort of `prereg/reviewers/slow-cal-1.json`;
+    run with the Workflow tool, never the Agent tool); `stage_a_audit.py --reviewer
+    prereg/reviewers/slow-cal-1.json` refuses reviews served by anything else; `vetting commit --audit --archive`
+    records the verdicts; and `table --dir D --checks L/checks` writes `D/reviewed.csv`, the list to read, with
+    the eclipsing-binary check beside each verdict. The files hold the calibration's four tests: `eb_explained`
+    goes into them only with `--with-eclipse`, because no calibration batch has measured the reviewer on files
+    that carry it. A star whose NEOWISE or ZTF fetch failed in the checks is left out and listed, so that its
+    checks are run again first.
 
 ### Trial on all of DR3 (2026-10-30)
 

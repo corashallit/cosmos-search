@@ -19,9 +19,12 @@ import pandas as pd
 
 from cosmos_search.energy import budget
 from cosmos_search.inject.lightcurve import BAND_WAVELENGTH_UM, REF_UM
-from cosmos_search.slow import checks, detect
+from cosmos_search.slow import checks, detect, drift
 
 BANDS = ("G", "BP", "RP", "ztf_g", "ztf_r", "ztf_i", "W1", "W2")
+# gaia_source values a review file may show (the file builder bins or drops what could identify the star).
+SOURCE_KEYS = ("ra", "dec", "phot_g_mean_mag", "bp_rp", "parallax", "parallax_error", "ruwe", "ipd_frac_multi_peak",
+               "phot_bp_rp_excess_factor")
 FLAVOURS = ("grey", "dust", "reemit", "temperature", "g_only")
 HC_OVER_K_UM = 14387.77     # hc/k in micrometre kelvin
 SHELL_TEMPS_K = (300.0, 600.0, 1000.0)
@@ -315,3 +318,44 @@ def candidate(candidate_id, row, epochs, source, context, neowise=None, ztf=None
            "visits_in": int(inside.sum())}
     return {"candidate_id": candidate_id, "arm": "gaia", "source": source, "lightcurves": lcs, "dips": [dip],
             "tests": tests_ or {}, "context": context}
+
+
+# --- one star's review file -------------------------------------------------------------------------------------
+
+
+def corrected(lc, cells, table):
+    """Drift-corrected epochs (frac_corr) of a light-curve table (epoch.SCHEMA), for stars that have drift cells
+    (`drift.star_cells`); `table` is the rule's drift table."""
+    ep = drift.normalise(lc)
+    ep = ep[ep["source_id"].isin(cells.index)]
+    return ep.assign(frac_corr=ep["frac"].to_numpy() - drift.drift_at(ep, cells, table))
+
+
+def review_file(candidate_id, row, epochs, gaia_row, context, neowise_clean, ztf, extra_tests=None):
+    """(packet, key, tests) for one slow-change candidate: the path the calibration's files took
+    (`scripts/slow_cal.py build`, docs/vetting.md §14) and the one release day's take (`scripts/slow_review.py`),
+    so that the reviewer measured there reads the same kind of file here.
+
+    row: the star's detector features and `by`; epochs: its drift-corrected epochs (`corrected`); gaia_row:
+    gaia_source values under DR3's names; context: infrared magnitudes (`dayone.vet.CONTEXT_KEYS` names);
+    neowise_clean: `checks.neowise_clean` exposures; ztf: band, t, flux, err with each ZTF object at its own
+    median. extra_tests: tests added to the four of `tests` (none in the calibration). Raises
+    `vetting.packet.LeakError` when the finished text would identify the star."""
+    from cosmos_search.vetting import packet as packet_mod
+
+    gaia_row = dict(gaia_row)
+    changes = band_changes(epochs, row)
+    t = tests(row, changes, neowise_clean, ztf, gaia_row.get("bp_rp"))
+    t.update(extra_tests or {})
+    source = {k: float(gaia_row[k]) for k in SOURCE_KEYS if k in gaia_row and pd.notna(gaia_row[k])}
+    cand = candidate(candidate_id, row, epochs, source, context, neowise=neowise_visits(neowise_clean), ztf=ztf,
+                     tests_=t)
+    pk, key = packet_mod.build(cand, holdout=(), pipeline_flags=False, pipeline_tests=False)
+    return pk, key, t
+
+
+def measured(tests_):
+    """The checks' numbers of a review file's tests, for the key (descriptions left out)."""
+    return {"colour": tests_["colour_of_change"],
+            "neowise": {k: v for k, v in tests_["neowise_change"].items() if k != "description"},
+            "ztf": {k: v for k, v in tests_["ztf_after"].items() if k != "description"}}

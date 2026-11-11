@@ -138,6 +138,9 @@ def _build_one(path, root, order, rejected, row_group):
     finally:
         for w in writers.values():
             w.close()
+    done = root / "_parts_done" / f"{name}.json"
+    done.parent.mkdir(parents=True, exist_ok=True)
+    done.write_text(json.dumps(rows))
     return rows
 
 
@@ -158,14 +161,20 @@ def finish(root, order, row_group=200_000):
         dest = root / key_of(int(d.name), order)
         dest.parent.mkdir(parents=True, exist_ok=True)
         parts = sorted(d.glob("*.parquet"))
+        if not parts and dest.exists():      # moved into place by a build that stopped here (--resume)
+            made.append(dest)
+            continue
         if len(parts) == 1:
             parts[0].replace(dest)
         else:
             t = pa.concat_tables([pq.read_table(p) for p in parts])
-            pq.write_table(t.take(pc.sort_indices(t, sort_keys=[("source_id", "ascending")])), dest,
+            tmp = dest.with_name(dest.name + ".tmp")
+            pq.write_table(t.take(pc.sort_indices(t, sort_keys=[("source_id", "ascending")])), tmp,
                            compression="zstd", row_group_size=row_group)
+            tmp.replace(dest)
         made.append(dest)
     shutil.rmtree(root / "_parts")
+    shutil.rmtree(root / "_parts_done", ignore_errors=True)
     base = root / PRODUCT
     (base / "_MD5SUM.txt").write_text("".join(f"{_md5(p)}  {p.relative_to(base).as_posix()}\n" for p in made))
     (base / "properties").write_text("obs_collection=epoch_photometry\nhats_order=%d\n" % order)
@@ -208,18 +217,30 @@ def dr3_inputs(a, work):
 
 def build(a):
     root = Path(a.out)
-    if (root / "Gaia").exists() and not a.add:
-        raise SystemExit(f"{root} already holds fake files; remove it or pass --add")
+    if (root / "Gaia").exists() and not (a.add or a.resume):
+        raise SystemExit(f"{root} already holds fake files; remove it, or pass --add or --resume")
     t0 = time.time()
     inputs = dr3_inputs(a, root / "_dr3")
     print(f"{len(inputs)} DR3 files, {sum(p.stat().st_size for p in inputs) / 1e9:.2f} GB", flush=True)
     rows = {}
+    # A build that stopped part-way (--resume): DR3 files whose parts are complete are not read again.
+    done = {p.stem: json.loads(p.read_text()) for p in (root / "_parts_done").glob("*.json")} if a.resume else {}
+    if not a.resume and not a.add:
+        shutil.rmtree(root / "_parts", ignore_errors=True)
+        shutil.rmtree(root / "_parts_done", ignore_errors=True)
+    todo = [p for p in inputs if p.name.split(".")[0] not in done]
+    for r in done.values():
+        for pix, n in r.items():
+            rows[int(pix)] = rows.get(int(pix), 0) + n
+    if done:
+        print(f"{len(done)} DR3 files already split, {len(todo)} to do", flush=True)
     with ProcessPoolExecutor(a.workers) as pool:
-        futures = {pool.submit(_build_one, str(p), str(root), a.order, a.rejected, a.row_group): p for p in inputs}
+        futures = {pool.submit(_build_one, str(p), str(root), a.order, a.rejected, a.row_group): p for p in todo}
         for k, fut in enumerate(as_completed(futures), 1):
             for pix, n in fut.result().items():
                 rows[pix] = rows.get(pix, 0) + n
-            print(f"[{k}/{len(inputs)}] {futures[fut].name} ({time.time() - t0:.0f} s)", flush=True)
+            if k % 50 == 0 or k == len(todo) or len(todo) < 300:
+                print(f"[{k}/{len(todo)}] {futures[fut].name} ({time.time() - t0:.0f} s)", flush=True)
     made = finish(root, a.order, a.row_group)
     rec = {"files": len(made), "bytes": int(sum(p.stat().st_size for p in made)), "transits": int(sum(rows.values())),
            "order": a.order, "rejected": a.rejected, "dr3_files": [p.name for p in inputs],
@@ -239,7 +260,7 @@ def list_keys(root):
     out = []
     for p in root.rglob("*"):
         rel = p.relative_to(root).as_posix()
-        if p.is_file() and not rel.startswith(("_dr3/", "_parts/")) and rel != "build.json":
+        if p.is_file() and not rel.startswith(("_dr3/", "_parts/", "_parts_done/")) and rel != "build.json":
             out.append((rel, p.stat().st_size))
     return sorted(out)
 
@@ -451,6 +472,7 @@ def main(argv=None):
     b.add_argument("--row-group", type=int, default=200_000)
     b.add_argument("--workers", type=int, default=os.cpu_count())
     b.add_argument("--add", action="store_true", help="add to an existing ROOT")
+    b.add_argument("--resume", action="store_true", help="go on with a build that stopped before it finished")
     b.add_argument("--keep-dr3", action="store_true", help="keep the downloaded DR3 files under ROOT/_dr3")
     b.set_defaults(func=build)
     s = sub.add_parser("serve", help="stand in for ESA's file server and DataLink over ROOT")
