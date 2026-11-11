@@ -67,8 +67,7 @@ GAIA_COLS = ("source_id, ra, dec, ra_error, dec_error, ref_epoch, parallax, para
              "dec_pmra_corr, dec_pmdec_corr, parallax_pmra_corr, parallax_pmdec_corr, pmra_pmdec_corr, "
              "astrometric_params_solved, phot_g_mean_mag, phot_bp_mean_mag, phot_rp_mean_mag, bp_rp, ruwe, "
              "ipd_frac_multi_peak, phot_bp_rp_excess_factor, l, b, ecl_lat")
-SOURCE_KEYS = ("ra", "dec", "phot_g_mean_mag", "bp_rp", "parallax", "parallax_error", "ruwe", "ipd_frac_multi_peak",
-               "phot_bp_rp_excess_factor")
+SOURCE_KEYS = vet.SOURCE_KEYS
 
 _S = {}
 
@@ -80,11 +79,7 @@ def _init_score(cells, frame, table):
     _S.update(cells=cells, frame=frame, table=table)
 
 
-def corrected(lc, cells, table):
-    """Drift-corrected epochs (frac_corr) of a light-curve table, for stars that have drift cells."""
-    ep = drift.normalise(lc)
-    ep = ep[ep["source_id"].isin(cells.index)]
-    return ep.assign(frac_corr=ep["frac"].to_numpy() - drift.drift_at(ep, cells, table))
+corrected = vet.corrected
 
 
 def _score_file(path):
@@ -506,13 +501,8 @@ def cmd_build(a):
             zt_raw = pd.read_parquet(zt_path) if zt_path.exists() else pd.DataFrame(
                 columns=["oid", "band", "t", "mag", "magerr"])
             ztf = vet.ztf_normalised(zt_raw, sig)
-            changes = vet.band_changes(ep, row)
-            tests = vet.tests(row, changes, nw_clean, ztf, g["bp_rp"])
-            source = {k: float(g[k]) for k in SOURCE_KEYS if k in g.index and pd.notna(g[k])}
-            cand = vet.candidate(f"gaia_dr3:{sid}", row, ep, source, _context(xm, sid),
-                                 neowise=vet.neowise_visits(nw_clean), ztf=ztf, tests_=tests)
             try:
-                pk, key = packet_mod.build(cand, holdout=(), pipeline_flags=False, pipeline_tests=False)
+                pk, key, tests = vet.review_file(f"gaia_dr3:{sid}", row, ep, g, _context(xm, sid), nw_clean, ztf)
             except packet_mod.LeakError as e:
                 # A refused packet cannot be vetted; it is listed, and counts against the rule when scored.
                 print("refused:", kind, label, e)
@@ -525,10 +515,7 @@ def cmd_build(a):
                              signal=inj.truth(sig))
             key.update(kind=kind, label=label, source_id=sid, flagged_by=row.get("by"),
                        flagged=bool(row.get("flagged", True)), g=float(g["phot_g_mean_mag"]),
-                       measured={"colour": tests["colour_of_change"], "neowise": {
-                           k: v for k, v in tests["neowise_change"].items() if k != "description"},
-                           "ztf": {k: v for k, v in tests["ztf_after"].items() if k != "description"}},
-                       truth=truth)
+                       measured=vet.measured(tests), truth=truth)
             packets.append(pk)
             keys.append(key)
         print(fname, len(packets))

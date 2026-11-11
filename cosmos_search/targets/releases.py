@@ -31,11 +31,14 @@ DRAFT_DATA_MODEL = Path(__file__).resolve().parents[2] / "configs" / "dr4" / "dr
 
 _ASTROMETRY = ("ra", "dec", "ref_epoch", "parallax", "parallax_error", "pmra", "pmra_error", "pmdec", "pmdec_error",
                "parallax_pmra_corr", "parallax_pmdec_corr", "pmra_pmdec_corr", "ruwe", "ipd_frac_multi_peak")
+# Position errors and the correlations with position: the cross-match to other surveys propagates them.
+_POSITION_ERRORS = ("ra_error", "dec_error", "ra_dec_corr", "ra_parallax_corr", "ra_pmra_corr", "ra_pmdec_corr",
+                    "dec_parallax_corr", "dec_pmra_corr", "dec_pmdec_corr")
 _PHOTOMETRY = ("phot_g_mean_mag", "bp_rp", "phot_bp_n_obs", "phot_rp_n_obs", "phot_bp_n_blended_transits",
                "phot_rp_n_blended_transits")
 
 # Names a caller can ask for (DR3's gaia_source names, plus best_class_name / best_class_score).
-STAR_COLUMNS = (*_ASTROMETRY, "astrometric_params_solved", *_PHOTOMETRY, "phot_bp_rp_excess_factor",
+STAR_COLUMNS = (*_ASTROMETRY, *_POSITION_ERRORS, "astrometric_params_solved", *_PHOTOMETRY, "phot_bp_rp_excess_factor",
                 "has_epoch_photometry", "best_class_name", "best_class_score")
 
 RELEASES = {
@@ -47,7 +50,7 @@ RELEASES = {
         # Per table: the expression for each name, with {t} for the table alias.
         "star_tables": {
             "gaiadr3.gaia_source": {
-                **{c: "{t}." + c for c in (*_ASTROMETRY, "astrometric_params_solved", *_PHOTOMETRY,
+                **{c: "{t}." + c for c in (*_ASTROMETRY, *_POSITION_ERRORS, "astrometric_params_solved", *_PHOTOMETRY,
                                            "phot_bp_rp_excess_factor", "has_epoch_photometry")}},
             "gaiadr3.vari_classifier_result": {"best_class_name": "{t}.best_class_name",
                                                "best_class_score": "{t}.best_class_score"},
@@ -62,7 +65,7 @@ RELEASES = {
         "n_vari_summary": 403_061_676,  # draft data model row count
         "star_tables": {
             "gaiadr4.all_source_astrometry": {
-                **{c: "{t}." + c for c in _ASTROMETRY},
+                **{c: "{t}." + c for c in (*_ASTROMETRY, *_POSITION_ERRORS)},
                 "astrometric_params_solved": "{t}.astrometric_params"},
             "gaiadr4.all_source_photometry": {
                 **{c: "{t}." + c for c in _PHOTOMETRY},
