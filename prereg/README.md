@@ -22,6 +22,14 @@ To check a batch: `git fetch origin '+refs/pull/*/head:refs/remotes/pr/*'`, find
 `verdicts.jsonl` sha256 with `commit.json`, and confirm on the PR's timeline that it was pushed before the commit
 that reports the result.
 
+## Release-day review batches (from 2026-11-11)
+
+The rule for these batches is `docs/vetting.md` §16, pushed before any of them is built: how many planted fades
+a batch holds, of what kinds, and how many must be shortlisted for the batch to count as consistent with the
+calibration. `scripts/slow_review.py files` draws the plan and builds the files in one step and writes the plan
+and the key only encrypted (`D/plan.json.age`, `D/key.json.age`); steps 2 to 4 above apply unchanged, with
+`vetting commit --plan D/plan.json.age`, and `scripts/slow_review.py table` is the reveal.
+
 ## Day-one rehearsal batches 1–4: archived after the fact
 
 These four batches ran before the procedure above existed. Their verdict files lived only in the agent's

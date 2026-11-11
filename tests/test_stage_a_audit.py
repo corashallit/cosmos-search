@@ -3,6 +3,8 @@ takes the audit, and the paired comparison of two reviewers on the same packets 
 
 import importlib.util
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -175,6 +177,45 @@ def test_review_launch_script_names_no_model():
     """The launch script takes the model and effort as arguments; the reviewer's name lives in prereg/reviewers."""
     js = (ROOT / "scripts" / "stage_a_reviews.js").read_text()
     assert "agentType: 'general-purpose', model, effort" in js and "claude-" not in js
+
+
+def launch_script(check_answer, extra_args=""):
+    """Run scripts/stage_a_reviews.js as the Workflow tool would, with its hooks replaced: the check subagent
+    answers `check_answer` and every review returns "written". Returns the script's result and the agent calls."""
+    js = (ROOT / "scripts" / "stage_a_reviews.js").read_text().replace("export const meta", "const meta")
+    harness = f"""
+const calls = [];
+const args = {{dir: '/b', ids: ['aaaa', 'bbbb'], model: 'some-model', effort: 'xhigh'{extra_args}}};
+const phase = () => {{}}, log = () => {{}};
+const parallel = thunks => Promise.all(thunks.map(t => t()));
+const agent = async (prompt, opts) => {{
+  calls.push({{label: opts.label, model: opts.model, agentType: opts.agentType || null, schema: !!opts.schema}});
+  return opts.schema ? {check_answer} : 'written';
+}};
+(async () => {{ {js} }})().then(out => console.log(JSON.stringify({{out, calls}})));
+"""
+    r = subprocess.run(["node", "-e", harness], capture_output=True, text=True, check=True)
+    return json.loads(r.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the launch script")
+def test_launch_script_stops_before_any_review_when_a_thread_message_reaches_its_subagents():
+    clean = "{messages_before_task: 0, user_request_before_task: false, first_words: ''}"
+    r = launch_script(clean)
+    assert r["out"] == {"launched": 2, "returned": 2, "lost": []}
+    assert [c["label"] for c in r["calls"]] == ["launch check", "aaaa", "bbbb"]
+    # the check is not a reviewer: no general-purpose agent, not the reviewer's model; the reviews are
+    assert r["calls"][0]["agentType"] is None and r["calls"][0]["model"] != "some-model" and r["calls"][0]["schema"]
+    assert all(c["agentType"] == "general-purpose" and c["model"] == "some-model" for c in r["calls"][1:])
+
+    for seen in ("{messages_before_task: 1, user_request_before_task: true, first_words: '[Workflow harness'}",
+                 "{messages_before_task: 1, user_request_before_task: false, first_words: ''}",   # inconsistent
+                 "null"):                                                                         # check died
+        r = launch_script(seen)
+        assert r["out"]["launched"] == 0 and "stopped" in r["out"] and len(r["calls"]) == 1
+
+    r = launch_script("null", ", check: false")                       # asked to skip the check
+    assert r["out"]["launched"] == 2 and [c["label"] for c in r["calls"]] == ["aaaa", "bbbb"]
 
 
 def test_audit_can_record_a_batch_reviewed_before_the_check(batch):

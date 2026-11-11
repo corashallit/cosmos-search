@@ -831,6 +831,151 @@ above (about 1.3 million output tokens). It was not run, to save tokens.
 Data: `/mnt/project-files/slow-cal-2/` (`README.md` there; replies, transcripts, audits, `verdicts_table.csv` of
 both batches, `compare.json`).
 
+### Second amendment (2026-11-11): what a review started from the script is handed
+
+The plan above says that subagents started from a workflow script did not get the thread's messages "(4 of 4)",
+and the Log entry of 2026-11-10 says that with the script "no thread messages reach the reviewer". Both are true
+only of a thread the person has not typed in. The practice for release day (docs/release-day.md, "Practice run",
+PR #88) launched seven reviews with the same script from a thread in which Cora had written, and all seven were
+handed her last message before their task.
+
+*What the harness does (2.1.322).* Every subagent of a workflow gets a message "[Workflow harness — computed
+task]" with its task. When the context of the launching thread holds a message the person typed in that thread,
+the subagent first gets "[Workflow harness — user request]" with the last such message. A message that reached
+the thread through the coordinator, with the person's words quoted in it, is not passed on. What is passed on is
+fixed when the workflow starts.
+
+*Evidence.*
+
+- This section's own run. All 152 transcripts of 2026-11-10 (the 4 test launches and 148 reviews, started between
+  22:18:59 and 23:08:49 UTC) begin with the task and nothing else. Cora had not typed in the launching thread
+  when the workflows started: her request had come quoted by the coordinator. She answered a question in the
+  thread at 23:08:36 and typed a message at 23:08:48. Three reviews started after the first and two after the
+  second, inside workflows launched at 22:33, and those were handed the task only.
+- The release-day practice. Seven of seven reviews launched after Cora had written in that thread were handed
+  her message, also when messages from other threads had arrived in between. Once that thread's context had been
+  summarized, a test launch and one review were handed the task only.
+- 2026-11-11, this thread, context summarized and the turn started by a message from the coordinator: a test
+  launch of the script on a dummy file was handed the task only (2 of 2 subagents).
+
+*What it changes in this section.* No counted verdict: every review in `prereg/verdicts/slow-cal-2` and
+`slow-cal-2-repeat` began with its task alone. The seven reviews of the practice were not counted either. The
+audit as merged with this section looked for the task in a transcript's first message only, so a review handed a
+message first would have been reported as having no transcript and not counted; since PR #88 the audit names the
+reason and does not count such a review.
+
+*From here on.*
+
+1. Blind reviews are launched from a thread in which the person has not typed. On release day the thread doing
+   the day's work asks for a separate thread for the reviews, so that its instructions arrive through the
+   coordinator.
+2. `scripts/stage_a_reviews.js` checks before it launches anything. One small subagent, on the smallest model
+   and with no review file, reports whether anything precedes its task. If something does, the script stops with
+   no review launched. On 2026-11-11 the check passed where nothing was passed on (it and a dummy review used
+   86 thousand tokens together). A thread where a message is passed on could not be produced here, so that side
+   of the check is untested.
+3. The audit stays the record. It reads every transcript, and a review that was handed anything but its task
+   does not count, whatever the check said.
+4. PR #88's rule (launch one review, audit it, launch the rest only if it counts) is what to do when the check
+   stops a launch or the audit disagrees with it.
+
+## 16. Planted fades in release-day review batches (written 2026-11-11, before any release-day batch)
+
+**Why.** Every blind test in this project has had fakes of known answer among the real stars. The release-day
+review batches of PR #88 had none. The reviewer of such a batch is taken to be the one §14 measured, and three
+things can make that untrue without anyone noticing: the launch path (§15, "Not measured"), the files (built
+from DR4 light curves and the release-day run's scores, where §14's came from DR3 and the calibration's own
+scoring), and whatever the same model id answers with on the day. Fakes of §14's kind in every batch test all
+three together, for a few per cent more reviews.
+
+**What is planted** (`scripts/slow_review.py files`). N = 30 fakes, or 5% of the batch's stars where that is
+more. They are §14's fakes for criterion R1: grey, dust and re-emitting-dust changes in the proportions 5 : 3 : 2,
+each with one of §14's six shapes drawn with equal chance and made by the same code (`slow_cal.make_signal`),
+at signal-to-noise 20 or more. Hosts are quiet stars brighter than G 19 that are on none of the run's lists, from
+light curves that hold every star of their sky (the thresholds' sample, `S/lightcurves`), taken in an order
+drawn from the system's random source. A fake is kept when the release-day run would have flagged it: it is
+scored the way the pass scores a star, its trend is measured against the run's reference of real stars at the
+host's magnitude, its change date is compared with the real stars of its sky pixel, and the rule is applied
+(the steps of `scripts/slow_inject_test.py`). A fake whose G change disagrees with BP and RP is not kept, and a
+host without measurable parallax and proper motion is not used, because the checks pass neither on to the
+review.
+
+**The same file.** A fake's review file is built by the function that builds a star's (`slow.vet.review_file`)
+from the same kinds of input: its row as the fading list would hold it, its Gaia epochs with the rule's drift
+removed, the host's catalogue values and infrared magnitudes, and the host's NEOWISE and ZTF epochs, fetched by
+the checks' own queries, with the same change put into them (grey dims them alike, dust in front barely dims
+W1 and W2, re-emitting dust brightens them; `slow.vet.ratios`). A repeating dip keeps repeating through ZTF's
+and NEOWISE's years.
+
+Fakes are put into Gaia, NEOWISE and ZTF epochs only. So no review file, of a star or of a fake, shows anything
+the checks read from SkyMapper, NOIRLab, ATLAS, TESS or ASAS-SN (docs/arms/slow-changes.md, "Other surveys"):
+there the host would be seen unchanged and the fake given away. The files carry the four tests of §14's files
+(`slow.vet.CALIBRATED_TESTS`); `files.json` records it (`calibrated_format`) and `table` says so when a batch's
+files held anything else. Other surveys can enter the files once fakes are injected into their epochs too and a
+calibration batch has measured the reviewer on such files. With `--with-eclipse` the eclipsing-binary check is
+computed for the fakes on their own G and ZTF epochs, as the checks compute it for a star.
+
+**Blinding.** Which files are fakes, their hosts and their answers are written only encrypted to the project's
+two public keys (`D/plan.json.age`, `D/key.json.age`; `inject.sealed`). `D/plan.json` holds the counts and the
+plan's hash, which `vetting commit --plan` writes into the verdict archive. The build prints no host, lists only
+real stars as left out, and deletes the hosts' fetched catalogue rows. The files of stars and fakes are written
+in one random order. `slow_review.py table` opens the key through `vetting.commit.reveal`, which needs the
+verdict archive on origin and COSMOS_REVEAL_KEY. The number of fakes and their mix are public (this section).
+
+**The check.** k of the batch's n planted fades are shortlisted (S ≥ 0.35; a review that failed or does not
+count is a fade not shortlisted, as in §14). The batch is *consistent with the calibration* when the one-sided
+95% Clopper–Pearson upper bound of k/n is at least 78%, the lower bound of §14's 44 of 50. In numbers: at least
+20 of 30, or 34 of 50.
+
+| If the reviewer's recall on these fakes is | 88% (§14) | 78% | 70% | 60% | 50% |
+|---|---|---|---|---|---|
+| the check fails with 30 planted fades in | 0.05% | 4.9% | 27% | 71% | 95% of batches |
+| with 50 (a batch of 1,000 stars) in | <0.01% | 3.5% | 32% | 84% | 99% |
+
+So 30 planted fades show a reviewer that has lost about half of its recall, and they do not show a modest loss.
+
+**What each outcome leads to.**
+
+- *Consistent.* The batch's verdicts are used as §14 describes, after the automated cuts, and §14's rates can be
+  quoted for the batch with its planted-fade count beside them.
+- *Not consistent.* No star of the batch is set aside for not being shortlisted: the list is read in the checks'
+  order with the verdict as one more column. §14's rates are not quoted for the release. The cause is looked for
+  in this order: the audit (which model served the reviews, and what they were handed), the files (a fake's file
+  beside one of §14's), and then a calibration on the release's own stars under §14's procedure, which costs
+  about 430 reviews and is Cora's call.
+- *Reported either way* (`D/fakes.json`, `D/fakes_reviewed.csv`): k of n with both bounds, by flavour, how many
+  reviews failed, and how many planted fades the eclipsing-binary check would have explained.
+
+**What the check does not cover.**
+
+- The false-shortlist rate (§14's R2). That needs natural stars of known nature, which a release-day batch does
+  not have. A reviewer that shortlists too much costs reading time; it does not lose a star.
+- Changes of other kinds than §14's fakes.
+- Its own differences from §14. The planted fades sit in DR4 light curves (more visits over 66 months, where
+  DR3 has 34), are flagged by thresholds from DR4's stars, and carry scores from the release-day run where
+  §14's files carried the calibration's own; the host's magnitude and colour come from its light curve where
+  §14 used the catalogue. If the check fails, these are possible causes beside the reviewer.
+
+**Cost.** One review per planted fade, about 11 thousand output tokens each on the adopted reviewer (§15): 30
+add about a third of a million output tokens to a batch. Each host's NEOWISE and ZTF fetches take one to two
+minutes, four at a time.
+
+**A batch without planted fades** (`--fakes 0`) is for practice only. Its verdicts are not used to set a star
+aside.
+
+**Practice build (2026-11-11, no review launched).** One DR3 bulk file of the Andromeda field (319,051 stars)
+was scored with the field's rule, the six strongest fades that pass the checks' cuts at G < 19 were checked, and
+`files --fakes 6` was run on them with the field's light curves as hosts, sealed to a key made for the practice.
+63 hosts tried in 2 of the 16 light-curve files gave 10 flagged fakes, spares included (16%). All six wanted were
+built at the first attempt: no failed fetch, no host without measurable motion, none refused by the leak scan.
+The 12 files took 323 s, most of it the hosts' NEOWISE and ZTF fetches. The planted fades have signal-to-noise
+23 to 379 and strength 1.2 to 31 (the six stars: 3.5 to 14), flagged by the episode score, the trend or both.
+Opened with the practice key, a fake's file and a star's have the same parts and the same fields in each test.
+The practice found one fault, fixed here: with a relative `--out` the infrared cross-match was handed a path it
+could not find. Whether the adopted reviewer shortlists these DR3 fakes was not run, to save tokens: 30 reviews,
+about a third of a million output tokens, would say before release day whether release-day files read like
+§14's.
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -908,3 +1053,10 @@ both batches, `compare.json`).
   natural and chance-pass stars shortlisted 9/95 against 10/95, same decision on 106 files, S differing by about
   one model's own repeat scatter, 2.3 times the output tokens. The new model shortlisted 0 of 5 G-only fakes
   where the old one shortlisted 2. Release-day reviews stay on `claude-opus-5-5` at `xhigh`.
+- 2026-11-11. Correction to §15 (second amendment): a review started from the script is handed the last message
+  the person typed in the launching thread, when there is one (7 of 7 in the release-day practice); the 152
+  launches of §15 were clean because Cora had not typed in that thread. Reviews are launched from a thread the
+  person has not typed in, the script checks before launching, and the audit stays the record. Release-day
+  review batches now hold planted fades of §14's kind with sealed answers (§16): 30 or 5% of the batch, and the
+  batch counts as consistent with the calibration when at least 20 of 30 are shortlisted. Review files hold
+  nothing from the other surveys, where a fake's host would be seen unchanged.
