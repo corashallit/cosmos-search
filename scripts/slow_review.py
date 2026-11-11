@@ -788,6 +788,7 @@ def fakes_result(ft):
     n, k = len(ft), int(ft["shortlisted"].sum())
     f = lambda x: float(np.asarray(x).ravel()[0])
     upper = f(power.cp_upper(k, n))
+    flag = ft["by"].fillna("none").astype(str) if "by" in ft else pd.Series("none", index=ft.index)
     return {"planted": n, "shortlisted": k, "recall": k / n, "lower_95_one_sided": f(power.cp_lower(k, n)),
             "upper_95_one_sided": upper,
             "calibration": {"shortlisted": CALIBRATION_RECALL[0], "planted": CALIBRATION_RECALL[1],
@@ -796,7 +797,10 @@ def fakes_result(ft):
             "reviews_failed": int((~ft["reviewed"]).sum()),
             "explained_by_the_eclipsing_binary_check": int(ft["eb_explained"].eq(True).sum()),
             "by_flavour": {fl: {"planted": len(g), "shortlisted": int(g["shortlisted"].sum())}
-                           for fl, g in ft.groupby("flavour")}}
+                           for fl, g in ft.groupby("flavour")},
+            # by what flagged the fake (episode, trend, repeat): reported, no part of the check
+            "by_flag": {b: {"planted": len(g), "shortlisted": int(g["shortlisted"].sum())}
+                        for b, g in ft.groupby(flag)}}
 
 
 def cmd_table(a):

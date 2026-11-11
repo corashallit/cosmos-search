@@ -1315,6 +1315,11 @@ or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet
 
 ## Log
 
+- **2026-11-11.** Trial of the planted fades on DR3 (docs/vetting.md §16, "Trial on DR3"). 30 planted fades and
+  one real star of the Andromeda field went through step 10 as written, with the reviews launched from a
+  separate thread. 24 of 30 were shortlisted, which passes the check (at least 20 of 30). Fades flagged by the
+  trend alone were shortlisted 2 of 6 times, the others 22 of 24; too few to establish, and reported for every
+  batch from now on. Each review took 15 thousand output tokens.
 - **2026-11-11.** Found by the occurrence limit on the pass with the colour term (docs/arms/occurrence.md, "Stars
   mixed with a neighbour"): the G trend of a star falls with its excess of (BP + RP) over G mean flux, the sign
   of a second source within about 2 arcsec. On DR3's FGK dwarfs it is −0.04% a year at an excess of 0.02 to
