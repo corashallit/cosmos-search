@@ -317,12 +317,13 @@ def test_fallback_predictions_order_and_archive_query():
     out = fallback.outcome([-0.02, -0.02, -0.02, -0.02, np.nan], [-0.015, -0.004, -0.001, 0.01, -0.02],
                            [0.001, 0.001, 0.001, 0.001, 0.001])
     assert out.tolist() == ["continued", "slowed", "stopped", "reversed", ""]
-    known = pd.DataFrame({"source_id": [12, 20, None], "name": ["a", "b", "c"]})
+    known = pd.DataFrame({"source_id": [12, 20, None], "name": ["a", "b", "c"], "g_mag": [9.0, 15.5, 12.0]})
     abbe = pd.DataFrame({"source_id": [30, 31, 11], "phot_g_mean_mag": 14.0, "phot_g_abbe_value": [0.5, 0.2, 0.1],
                          "abbe_max": 0.6})
     lst = fallback.ordered(watch, known, abbe)
     assert lst["source_id"].tolist() == [12, 11, 20, 31, 30]            # brightest watch star first, no repeats
     assert lst["list"].tolist() == ["watch", "watch", "known", "abbe", "abbe"] and lst["order"].tolist() == [0, 1, 2, 3, 4]
+    assert lst["phot_g_mean_mag"].iloc[2] == 15.5 and "g_mag" not in lst  # a known answer's G, in the list's column
     sample = pd.DataFrame({"source_id": np.arange(400), "phot_g_mean_mag": np.r_[np.full(200, 12.5), np.full(200, 15.5)],
                            "bp_rp": 1.0,
                            "phot_g_abbe_value": np.r_[np.linspace(0, 1, 200), np.linspace(0.5, 1, 200)]})

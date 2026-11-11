@@ -101,6 +101,8 @@ def ordered(watch=None, known=None, abbe=None):
     if known is not None and len(known):
         k = known[known["source_id"].notna()].copy()
         k["source_id"] = k["source_id"].astype(np.int64)
+        if "phot_g_mean_mag" not in k and "g_mag" in k:
+            k = k.rename(columns={"g_mag": "phot_g_mean_mag"})
         parts.append(k.assign(list="known"))
     if abbe is not None and len(abbe):
         a = abbe.copy()
