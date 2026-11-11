@@ -161,8 +161,8 @@ def test_a_stop_takes_the_waiting_request_off_the_atlas_queue(sc, tmp_path, monk
             sc.atlas_step(stars, row_of, {}, "gaiadr4", lambda: None, at_once=1, log=lambda text, flush=False: None)
     finally:
         archive.close()
-    assert archive.methods[0] == ("POST", "/queue/") and archive.methods[-1] == ("DELETE", "/queue/1/")
-    assert [m for m, _ in archive.methods].count("POST") == 1          # the second star was never sent
+    # one task was sent and then deleted; the second star was never sent
+    assert [m for m in archive.methods if m[0] != "GET"] == [("POST", "/queue/"), ("DELETE", "/queue/1/")]
     assert row_of[31] == {"source_id": 31, "strength": 9.0, "errors": ""}
 
 
