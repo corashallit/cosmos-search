@@ -20,10 +20,12 @@ Nulls are built from the data so that they keep its systematics:
   of transits), estimates the dimming statistic's null. Brightening has its own astrophysics (flares,
   microlensing), which makes this null conservative in some strata. Measure that, don't assume it.
   Measured for trends of FGK dwarfs on DR3 (arms/occurrence.md, 2026-11-11): beyond 6 errors brightening
-  stars outnumber fading ones 89 to 61 and beyond 8 errors 28 to 12, while between 3 and 5 errors fading stars
-  outnumber brightening ones 1,664 to 1,477. An upper limit that subtracts the brightening count is then below
-  the truth in most simulated samples, so the occurrence limit counts every fading star and uses the
-  brightening count only to choose where to count.
+  stars outnumber fading ones 80 to 55 and beyond 8 errors 26 to 12. Between 3 and 5 errors fading stars
+  outnumbered brightening ones 1,664 to 1,477 until two instrument effects were taken out (a trend that
+  depends on colour, and a G drift in stars whose light is mixed with a neighbour's); the counts are now 1,366
+  to 1,411. An upper limit that subtracts the brightening count is below the truth in most simulated samples
+  when the two sides differ, so the occurrence limit counts every fading star and uses the brightening count
+  only to choose where to count.
 - **Per-source competition.** Each source's dimming statistic competes with its own brightening
   statistic, and the bright winners above a threshold estimate the false discoveries among the dim winners
   (knockoff+, Barber & Candès 2015; the same idea as target–decoy competition in proteomics). FDR control

@@ -1,3 +1,4 @@
+import dataclasses
 import importlib.util
 import json
 import sys
@@ -170,7 +171,67 @@ def test_fgk_dwarf_places_stars_by_parallax_and_colour():
 
 def test_frozen_config_is_the_code_default():
     assert oc.Config.load() == oc.Config()
-    assert oc.Config.load(oc.CONFIG_DIR / "steady-fades-v1.json") == oc.Config()
+    assert oc.Config.load(oc.CONFIG_DIR / "steady-fades-v2.json") == oc.Config()
+    # v1 was frozen before stars mixed with a neighbour were left out: it loads with no such cut and is
+    # otherwise the same.
+    v1 = oc.Config.load("steady-fades-v1")
+    assert v1.max_flux_excess is None and oc.Config().max_flux_excess == 0.05
+    assert dataclasses.replace(v1, name="steady-fades-v2", max_flux_excess=0.05) == oc.Config()
+
+
+def _catalogue(n, rng, mixed=0.04):
+    """FGK dwarfs' catalogue rows with a flux ratio that rises with colour, and a share of stars with a
+    neighbour's light in BP and RP."""
+    col = rng.uniform(0.5, 1.8, n)
+    g = rng.uniform(13.0, 19.0, n)
+    ratio = 1.15 + 0.03 * col + 0.03 * col ** 2 + rng.normal(0, 0.004, n)
+    extra = np.where(rng.random(n) < mixed, rng.uniform(0.06, 0.6, n), 0.0)
+    cat = pd.DataFrame({"source_id": np.arange(1, n + 1), "phot_g_mean_mag": g, "bp_rp": col,
+                        "parallax": 10 ** ((4.0 + 3.2 * col - g + 10) / 5), "flux_ratio": ratio + extra})
+    return cat.assign(parallax_error=cat["parallax"] / 50), extra > 0
+
+
+def test_flux_excess_is_measured_against_the_dwarfs_own_median_ratio():
+    """(BP + RP) / G of a star with a neighbour in the BP and RP windows sits above that of single stars of its
+    colour. The single stars' ratio is taken from the catalogue rows themselves, per colour step, from
+    histograms that add up over slices, so nothing depends on a release's passbands."""
+    cfg = oc.Config()
+    cat, mixed = _catalogue(30_000, np.random.default_rng(61))
+    assert oc.fgk_dwarf(cat, cfg).all()
+    whole = oc.locus_hist(cat, cfg)
+    assert np.array_equal(whole, oc.locus_hist(cat.iloc[:9_000], cfg) + oc.locus_hist(cat.iloc[9_000:], cfg))
+    assert whole.sum() == len(cat) and len(whole) == 13
+    median = oc.locus(whole)
+    mid = (oc.locus_colours(cfg)[:-1] + oc.locus_colours(cfg)[1:]) / 2
+    assert np.allclose(median, 1.15 + 0.03 * mid + 0.03 * mid ** 2, atol=0.002)
+    excess = oc.flux_excess(cat, median, cfg)
+    assert abs(np.median(excess[~mixed])) < 5e-4 and np.std(excess[~mixed]) < 0.006
+    keep = oc.unblended(excess, cfg)
+    assert keep[~mixed].all() and not keep[mixed].any()
+    assert oc.unblended(excess, oc.Config.load("steady-fades-v1")).all()
+    # The same ratio under DR3's column name, or from the three mean fluxes.
+    g_flux = 10 ** (-0.4 * (cat["phot_g_mean_mag"] - 25.7))
+    by_name = cat.drop(columns="flux_ratio").assign(phot_bp_rp_excess_factor=cat["flux_ratio"])
+    by_flux = cat.drop(columns="flux_ratio").assign(phot_g_mean_flux=g_flux, phot_bp_mean_flux=0.4 * cat["flux_ratio"] * g_flux,
+                                                    phot_rp_mean_flux=0.6 * cat["flux_ratio"] * g_flux)
+    for other in (by_name, by_flux):
+        assert np.allclose(oc.flux_ratio(other), cat["flux_ratio"])
+    assert oc.flux_ratio(cat.drop(columns="flux_ratio")) is None
+    with pytest.raises(ValueError):
+        oc.flux_excess(cat.drop(columns="flux_ratio"), median, cfg)
+    # Too few dwarfs for a median per colour step: every step takes the median of what there is.
+    few = oc.locus(oc.locus_hist(cat.iloc[:50], cfg))
+    assert np.allclose(few, few[0]) and few[0] == pytest.approx(np.median(cat["flux_ratio"].iloc[:50]), abs=0.01)
+    assert np.isnan(oc.locus(oc.locus_hist(cat.iloc[:0], cfg))).all()
+    # The trend-by-excess table: stars by class of excess, which classes are searched, and each class's median.
+    stars = pd.DataFrame({"g_mag": cat["phot_g_mean_mag"], "slope_ref": 1e-4,
+                          "slope": 1e-4 - 0.012 * np.clip(excess, 0, None)})
+    table = oc.excess_table(oc.offset_hist(stars, oc.excess_class(excess), len(oc.EXCESS_EDGES) + 2), cfg)
+    assert table["stars"].sum() == len(cat) and table["searched"].tolist() == [False, True, True, True, True, True, False, False, False, False]
+    assert table["stars"][~table["searched"]].sum() == mixed.sum()
+    top = table.iloc[-1]
+    assert top["median_trend_per_year"] == pytest.approx(-0.012 * np.median(excess[excess >= 0.5]), abs=2e-5)
+    assert abs(table["median_trend_per_year"][3]) < 1e-5
 
 
 def test_strata_and_bins():
@@ -386,7 +447,7 @@ def test_script_pass_inject_and_limit(tmp_path):
     (tmp_path / "lc").mkdir()
     pq.write_table(lc, tmp_path / "lc" / "a.parquet")
     aux = pd.DataFrame({"source_id": np.arange(1, n + 1), "phot_g_mean_mag": 14.5, "bp_rp": 0.9,
-                        "parallax": 2.5, "parallax_error": 0.03})
+                        "parallax": 2.5, "parallax_error": 0.03, "flux_ratio": 1.2})
     aux.loc[:9, "parallax"] = 0.01           # ten giants by parallax: not hosts, not searched
     aux.to_parquet(tmp_path / "aux.parquet", index=False)
     # A rule directory with an empty drift table: nothing to correct in synthetic light curves.
@@ -418,12 +479,16 @@ def test_script_pass_inject_and_limit(tmp_path):
     rec = json.loads((out / "limit" / "limit.json").read_text())
     assert rec["inputs"]["fgk_dwarfs_searched"] == 50 and rec["inputs"]["stars_scored"] == 60
     assert rec["inputs"]["neighbour_reference"] and rec["inputs"]["injection_hosts"] == 50
+    assert rec["inputs"]["fgk_dwarfs_mixed_with_a_neighbour"] == 0
+    by_excess = pd.DataFrame(rec["trend_by_flux_excess"])
+    assert by_excess["stars"].tolist() == [0, 0, 0, 50, 0, 0, 0, 0, 0, 0] and by_excess["searched"].sum() == 5
     fast = [r for r in rec["curve"] if r["rate"] >= 0.01]
     assert all(r["recall"] > 0.9 and r["limit"] == pytest.approx(3.0 / (50 * r["recall"]), rel=0.02) for r in fast)
     # Stars and injected stars are measured against the same reference table, each by its own magnitude.
     reference = pd.read_parquet(lists / "reference.parquet")
     stars, _, offset = script.read_stars(run / "summary", str(tmp_path / "aux.parquet"), oc.Config(), reference)
-    inj_ref = script.read_injections(out / "injections", reference, offset)
+    inj_ref = script.read_injections(out / "injections", reference, offset, stars)
+    assert inj_ref["flux_excess"].abs().max() < 1e-3 and len(offset) == 21 * 11
     for d in (stars, inj_ref[np.isfinite(inj_ref["slope"])]):
         assert np.allclose(d["slope_z"], (d["slope"] - d["slope_ref"]) / np.hypot(d["slope_err"], d["slope_ref_err"]))
         assert np.allclose(d["slope_z_raw"], d["slope"] / d["slope_err"])
@@ -458,7 +523,7 @@ def test_catalogue_in_sky_slices(tmp_path):
     rng = np.random.default_rng(51)
     ids = np.sort(rng.choice(np.arange(3 * width, 5 * width, 2 ** 31), 3_000, replace=False))
     cat = pd.DataFrame({"source_id": ids, "phot_g_mean_mag": rng.uniform(12, 19, len(ids)), "bp_rp": 0.9,
-                        "parallax": 2.0, "parallax_error": 0.1})
+                        "parallax": 2.0, "parallax_error": 0.1, "flux_ratio": rng.normal(1.2, 0.01, len(ids))})
     calls = []
 
     def query(lo, hi):
@@ -475,7 +540,13 @@ def test_catalogue_in_sky_slices(tmp_path):
         d.to_parquet(tmp_path / f"aux_L2_{pix:07d}.parquet", index=False)
     assert len(calls) == 10 and max(hi - lo for lo, hi in calls) == width - 1     # each pixel: refused, then 4 quarters
     rows = script.aux_rows(tmp_path, ids[1_000], ids[2_000])            # spans both slices
-    assert rows.index.tolist() == ids[1_000:2_001].tolist() and list(rows.columns) == script.AUX_COLUMNS[1:]
+    assert rows.index.tolist() == ids[1_000:2_001].tolist()
+    assert list(rows.columns) == [*script.AUX_COLUMNS[1:], "flux_ratio"]
+    # The query asks the archive for the ratio of the mean fluxes, which every release has.
+    assert script.aux_select("g.").endswith("(g.phot_bp_mean_flux + g.phot_rp_mean_flux) / g.phot_g_mean_flux AS flux_ratio")
+    assert script.aux_select().startswith("source_id, phot_g_mean_mag, bp_rp, parallax, parallax_error, (")
+    # The dwarfs' median ratio comes from every slice of the directory.
+    assert script.flux_locus(tmp_path, cfg) == pytest.approx(np.full(13, 1.2), abs=0.002)
     assert script.aux_rows(tmp_path, ids[10], ids[20]).index.tolist() == ids[10:21].tolist()
     assert not len(script.aux_rows(tmp_path, 7 * width, 8 * width - 1))
     (tmp_path / "empty").mkdir()
@@ -485,8 +556,8 @@ def test_catalogue_in_sky_slices(tmp_path):
 
 def test_limit_counts_a_referenced_table_file_by_file(tmp_path):
     """A per-star table with its own neighbour reference, in two files: the limit step tallies them one at a
-    time and gets what the in-memory route gets. Giants by parallax and rows marked as not a fair sample of
-    their magnitude (`ref` false) are left out."""
+    time and gets what the in-memory route gets. Giants by parallax, rows marked as not a fair sample of their
+    magnitude (`ref` false) and dwarfs whose light is mixed with a neighbour's are left out."""
     script = _script("slow_occurrence")
     cfg = oc.Config()
     stars = population(6_000, np.random.default_rng(31), faders=20, rate=0.02)
@@ -499,6 +570,8 @@ def test_limit_counts_a_referenced_table_file_by_file(tmp_path):
     aux = pd.DataFrame({"source_id": stars["source_id"], "phot_g_mean_mag": stars["phot_g_mean_mag"], "bp_rp": 0.9,
                         "parallax": 10 ** ((5.9 - stars["phot_g_mean_mag"] + 10) / 5) * np.where(k % 12 == 5, 0.01, 1.0)})
     aux["parallax_error"] = aux["parallax"] / 50
+    # One star in 25 has a neighbour's light in its BP and RP fluxes.
+    aux["flux_ratio"] = 1.2 + np.random.default_rng(32).normal(0, 0.004, len(aux)) + np.where(k % 25 == 3, 0.2, 0.0)
     aux.to_parquet(tmp_path / "aux.parquet", index=False)
     inj = injected(stars, cfg).assign(slope_err=np.tile(err, len(cfg.rates)))
     (tmp_path / "summary").mkdir()
@@ -510,10 +583,13 @@ def test_limit_counts_a_referenced_table_file_by_file(tmp_path):
     assert script.main(["limit", "--stars", str(tmp_path / "summary"), "--aux", str(tmp_path / "aux.parquet"),
                         "--injections", str(tmp_path / "inj"), "--out", str(tmp_path / "limit")]) == 0
     rec = json.loads((tmp_path / "limit" / "limit.json").read_text())
-    dwarfs = table[(k % 12 != 5) & (k % 20 != 7)].drop(columns="ref")
-    assert 5_000 < len(dwarfs) < 5_300
+    dwarfs = table[(k % 12 != 5) & (k % 20 != 7) & (k % 25 != 3)].drop(columns="ref")
+    mixed = int(((k % 12 != 5) & (k % 20 != 7) & (k % 25 == 3)).sum())
+    assert 4_900 < len(dwarfs) < 5_300 and mixed > 150
     assert rec["inputs"]["neighbour_reference"] and rec["inputs"]["stars_scored"] == 6_000
     assert rec["inputs"]["fgk_dwarfs_searched"] == len(dwarfs) == rec["inputs"]["injection_hosts"]
+    assert rec["inputs"]["fgk_dwarfs_mixed_with_a_neighbour"] == mixed
+    assert all(r["median_ratio"] == pytest.approx(1.2, abs=0.002) for r in rec["flux_ratio_by_colour"])
     curve, _, sym = oc.limit_curve(dwarfs, inj, cfg)
     got = pd.DataFrame(rec["curve"])
     for col in ("limit", "mirror_limit", "fading", "brightening", "recall", "excess_p", "g_max", "z_min"):
@@ -528,6 +604,22 @@ def test_limit_counts_a_referenced_table_file_by_file(tmp_path):
     past = pd.read_parquet(tmp_path / "limit" / "past_cut.parquet")
     assert (past["z"].abs() >= cfg.z_cuts[0]).all() and past["z"].is_monotonic_increasing
     assert len(past) == sym["fading"].sum() + sym["brightening"].sum()
+    assert past["flux_excess"].abs().max() < 0.05
+    # The settings frozen first (v1) search every FGK dwarf, and need no flux ratio in the catalogue rows; the
+    # current ones stop when it is missing, so a population is never changed without a word.
+    assert script.main(["limit", "--stars", str(tmp_path / "summary"), "--aux", str(tmp_path / "aux.parquet"),
+                        "--injections", str(tmp_path / "inj"), "--out", str(tmp_path / "limit_v1"),
+                        "--config", "steady-fades-v1"]) == 0
+    v1 = json.loads((tmp_path / "limit_v1" / "limit.json").read_text())
+    assert v1["inputs"]["fgk_dwarfs_searched"] == len(dwarfs) + mixed
+    assert v1["inputs"]["fgk_dwarfs_mixed_with_a_neighbour"] == 0 and "flux_ratio_by_colour" not in v1
+    aux.drop(columns="flux_ratio").to_parquet(tmp_path / "aux_old.parquet", index=False)
+    old = ["limit", "--stars", str(tmp_path / "summary"), "--aux", str(tmp_path / "aux_old.parquet"),
+           "--injections", str(tmp_path / "inj"), "--out", str(tmp_path / "limit_old")]
+    with pytest.raises(SystemExit, match="flux ratio"):
+        script.main(old)
+    assert script.main([*old, "--config", "steady-fades-v1"]) == 0
+    assert json.loads((tmp_path / "limit_old" / "limit.json").read_text())["curve"] == v1["curve"]
     # Planted fades in a table with its own reference are measured against it too.
     out, k = oc.plant(dwarfs, inj, 0.02, 0.05, np.random.default_rng(1))
     moved = out.set_index("source_id").loc[lambda d: ~np.isclose(d["slope"], dwarfs.set_index("source_id")["slope"])]
@@ -567,6 +659,53 @@ def test_searched_stars_are_centred_on_their_own_median():
     # An injected star is moved by its own G range's offset, whatever its trend.
     inj = stars.iloc[:5].assign(slope=-0.02)
     assert np.allclose(oc.centre(inj, off)["slope_ref"], 2e-4 + off[oc.offset_range(inj["g_mag"])])
+
+
+def test_searched_stars_are_centred_among_stars_of_their_flux_excess():
+    """The G trend falls with the flux excess right through zero, so inside the cut each star is measured against
+    the median of stars of its brightness and its step of excess. An injected star takes its host's step."""
+    rng = np.random.default_rng(43)
+    n = 120_000
+    g = rng.uniform(14.0, 18.0, n)
+    err = 3e-4 * 10 ** (0.2 * (g - 13))
+    excess = np.clip(rng.normal(0, 0.012, n), -0.049, 0.049)
+    stars = pd.DataFrame({"source_id": np.arange(n), "g_mag": g, "slope_err": err, "slope_ref": 0.0,
+                          "slope_ref_err": 0.1 * err, "flux_excess": excess,
+                          "slope": rng.normal(0, err) - 0.017 * excess - np.where(g >= 17, 2e-4, 0.0)})
+    stars["slope_z"] = stars["slope"] / np.hypot(err, 0.1 * err)
+    whole = oc.offset_hist(stars)
+    assert whole.shape[0] == 21 * 11 and whole.sum() == n            # 21 G ranges, 11 steps of excess
+    assert np.array_equal(whole, oc.offset_hist(stars.iloc[:50_000]) + oc.offset_hist(stars.iloc[50_000:]))
+    off = oc.offsets(whole)
+    out = oc.centre(stars, off)
+    edges = [-np.inf, *oc.EXCESS_STEPS, np.inf]
+    for a, b in zip(edges[:-1], edges[1:]):
+        k = (excess >= a) & (excess < b)
+        # The outermost steps hold few stars: their cells at the ends of the G range fall back on the median of
+        # every step, so they are moved part of the way.
+        if k.sum() > 3_000:
+            assert abs(np.median(out["slope_z"][k])) < 0.05, (a, b)
+        else:
+            assert abs(np.median(out["slope_z"][k])) < 0.7 * abs(np.median(stars["slope_z"][k])), (a, b)
+    high = excess >= 0.02
+    assert np.median(stars["slope_z"][high]) < -0.3 and np.median(stars["slope_z"][excess < -0.02]) > 0.3
+    # Centred by G alone the two ends of the excess would stay apart.
+    by_g = oc.centre(stars.drop(columns="flux_excess"), oc.offsets(oc.offset_hist(stars.drop(columns="flux_excess"))))
+    assert len(oc.offsets(oc.offset_hist(stars.drop(columns="flux_excess")))) == 21
+    assert np.median(by_g["slope_z"][high]) < -0.3
+    # A step with too few stars within 1 mag takes the median of every step at that G; the table lists each cell.
+    cell = oc.offset_index(pd.DataFrame({"g_mag": [10.2, 16.1], "flux_excess": [0.04, 0.04]}))
+    by_g_alone = oc.offsets(oc.offset_hist(stars.drop(columns="flux_excess")))
+    assert off[cell[0]] == by_g_alone[oc.offset_range(10.2)] and off[cell[1]] == pytest.approx(-0.017 * 0.036, abs=2e-4)
+    table = oc.offset_table(off, whole.sum(axis=1))
+    assert len(table) == 231 and table["stars"].sum() == n and table["excess_lo"].iloc[-1] == 0.03
+    assert len(oc.offset_table(off[:21], whole.sum(axis=1)[:21]).columns) == 4
+    # Injected stars: their host's step, their own G range; without the column the offsets cannot be applied.
+    inj = stars.iloc[:4].assign(slope=-0.02)
+    assert np.allclose(oc.centre(inj, off)["slope_ref"], off[oc.offset_index(stars.iloc[:4])])
+    with pytest.raises(KeyError):
+        oc.centre(inj.drop(columns="flux_excess"), off)
+    assert oc.offset_index(pd.DataFrame({"g_mag": [15.2], "flux_excess": [np.nan]}))[0] == 12 + 21 * 5
 
 
 def test_tallies_add_up():

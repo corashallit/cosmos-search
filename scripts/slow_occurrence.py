@@ -8,8 +8,9 @@
     python scripts/slow_occurrence.py aux --sky 4 --schema gaiadr4 --out A          # every star: the catalogue in slices
     python scripts/slow_occurrence.py inject --lightcurves R/lightcurves --random-share 0.001 --aux A --rule RULE --out O
 
-`aux`: G, BP-RP, parallax and its error from gaia_source. The light curves carry no parallax, and only the
-parallax tells a dwarf from a giant. For a sample (`--lightcurves`): every star of a directory of light-curve
+`aux`: G, BP-RP, parallax and its error from gaia_source, and the ratio (BP + RP) / G of the mean fluxes. The
+light curves carry no parallax, and only the parallax tells a dwarf from a giant; the ratio tells which dwarfs
+have a neighbour's light mixed with theirs. For a sample (`--lightcurves`): every star of a directory of light-curve
 files, from ESA's archive with the project's login (uploaded id lists), or with `--mirror` from a partner centre
 by source_id range, into one file. For the whole sky (`--sky LEVEL --out DIR`): one query and one file per HEALPix
 pixel, with the catalogue-side part of the FGK-dwarf selection in the query, so a few 10^8 rows come back
@@ -19,19 +20,23 @@ instead of 2 x 10^9; `inject` and `limit` read only the slices a file of stars n
 by the function the search's pass runs on every star (`summary.star_summary` with the rule's drift table, and the
 pass's bad-epoch options). Light curves are a directory of Parquet files in epoch.SCHEMA: the light curves a
 `slow_search.py pass --keep-lightcurves all` kept, a `dr4_bulk pull`, or the field below. `--aux` needs
-phot_g_mean_mag, bp_rp, parallax and parallax_error. Done-markers let a second run resume.
+phot_g_mean_mag, bp_rp, parallax and parallax_error. Done-markers let a second run resume. Every FGK dwarf is a
+host here; `limit` uses the ones it searches.
 
 `limit`: the per-star table of the stars searched, the same `--aux` columns for them, and the injections. The
 table is the pass's summary/ directory (`slow_search.py pass`: one row per star with source_id, g_mag, slope,
 slope_err, n_visits, t_first, t_last, and `ref`, which marks the rows that are a fair sample of their magnitude;
 only those are counted) with `--reference`, the reference.parquet of `slow_search.py flag`: each star's trend, and
 each injected star's, is then measured against the median trend of the stars near it on the sky and in brightness,
-and the searched dwarfs' own median at each brightness is taken out (the leftover instrument trend depends on
-colour). The files are read one at a time, twice, so a whole-sky table never has to fit in memory. Without
+and the searched dwarfs' own median at each brightness and flux excess is taken out. Dwarfs whose flux ratio is
+more than the config's `max_flux_excess` from the dwarfs' median at their colour are not searched (their G
+photometry drifts), so `--aux` must carry the ratio: `flux_ratio` as `aux` writes it, DR3's
+`phot_bp_rp_excess_factor`, or the three mean fluxes. `--config steady-fades-v1` searches every FGK dwarf and
+needs none. The files are read one at a time, twice, so a whole-sky table never has to fit in memory. Without
 `--reference` a table that carries no `slope_ref` is read whole and measured against the running median of the
 searched stars of similar brightness. Writes
-limit.json (config, inputs, the limit per rate, the symmetry tables), curve.csv, regions.parquet (counts and recall
-of every region per rate), past_cut.parquet (every searched star past the first cut either way, strongest fades
+limit.json (config, inputs, the limit per rate, the symmetry tables, the trend by flux excess), curve.csv,
+regions.parquet (counts and recall of every region per rate), past_cut.parquet (every searched star past the first cut either way, strongest fades
 first) and, with matplotlib, the figure.
 
 `planted` checks the limit on the real stars: a random share of them is given its own injected scores, so that
@@ -63,6 +68,21 @@ from cosmos_search.gaia import features
 from cosmos_search.slow import drift, occurrence, recall, rule_v3, summary
 
 AUX_COLUMNS = ["source_id", "phot_g_mean_mag", "bp_rp", "parallax", "parallax_error"]
+# (BP + RP) / G mean flux, for the stars whose light is mixed with a neighbour's (`occurrence.flux_excess`). The
+# catalogue step asks the archive for the ratio; a file from elsewhere can carry DR3's own column or the fluxes.
+RATIO_COLUMNS = [*occurrence.RATIO_COLUMNS, "phot_g_mean_flux", "phot_bp_mean_flux", "phot_rp_mean_flux"]
+
+
+def aux_select(prefix=""):
+    """The columns the catalogue step asks for, as the SELECT list of a query on gaia_source."""
+    bp, rp, g = (f"{prefix}phot_{band}_mean_flux" for band in ("bp", "rp", "g"))
+    return ", ".join([*(prefix + c for c in AUX_COLUMNS), f"({bp} + {rp}) / {g} AS flux_ratio"])
+
+
+def _read_aux(f):
+    """AUX_COLUMNS of one catalogue file, with whichever flux-ratio columns it has."""
+    have = set(pq.read_schema(f).names)
+    return pd.read_parquet(f, columns=[*AUX_COLUMNS, *(c for c in RATIO_COLUMNS if c in have)])
 # What the limit reads of a per-star table, and what is kept of an injected star's scores.
 STAR_COLUMNS = ["source_id", "g_mag", "slope", "slope_z", "slope_err", "slope_ref", "slope_ref_err", "slope_z_raw",
                 "n_visits", "t_first", "t_last"]
@@ -86,16 +106,32 @@ def _aux_slices(path):
     return _STATE[key]
 
 
+def flux_locus(path, cfg):
+    """The FGK dwarfs' median flux ratio per colour step (`occurrence.locus`), from every catalogue row of
+    `path` (a file, or a directory of sky slices read one at a time), computed once."""
+    key = ("locus", str(path), cfg.name)
+    if key not in _STATE:
+        files = [f for _a, _b, f in _aux_slices(path)] if Path(path).is_dir() else [path]
+        hist = sum(occurrence.locus_hist(_read_aux(f), cfg) for f in files)
+        if not hist.sum():
+            raise SystemExit(f"{path} has no flux ratio for its FGK dwarfs ({', '.join(RATIO_COLUMNS[:2])}, or the "
+                             f"mean fluxes), which {cfg.name} needs to leave out stars mixed with a neighbour: "
+                             "fetch the catalogue rows again with `aux`, or use --config steady-fades-v1")
+        _STATE[key] = occurrence.locus(hist)
+    return _STATE[key]
+
+
 def aux_rows(path, lo, hi):
-    """Catalogue rows (AUX_COLUMNS) indexed by source_id. `path` is one Parquet file, read whole and once (a
-    sample), or a directory of sky slices from `aux --sky`, of which only those that overlap the source_ids
-    lo to hi are read, so the catalogue of the whole sky never has to fit in memory."""
+    """Catalogue rows (AUX_COLUMNS and the flux ratio, where the file has one) indexed by source_id. `path` is
+    one Parquet file, read whole and once (a sample), or a directory of sky slices from `aux --sky`, of which
+    only those that overlap the source_ids lo to hi are read, so the catalogue of the whole sky never has to fit
+    in memory."""
     path = str(path)
     if not Path(path).is_dir():
         if path not in _STATE:
-            _STATE[path] = pd.read_parquet(path, columns=AUX_COLUMNS).drop_duplicates("source_id").set_index("source_id")
+            _STATE[path] = _read_aux(path).drop_duplicates("source_id").set_index("source_id")
         return _STATE[path]
-    parts = [pd.read_parquet(f, columns=AUX_COLUMNS) for a, b, f in _aux_slices(path) if a <= hi and b >= lo]
+    parts = [_read_aux(f) for a, b, f in _aux_slices(path) if a <= hi and b >= lo]
     d = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=AUX_COLUMNS)
     return d[(d["source_id"] >= lo) & (d["source_id"] <= hi)].drop_duplicates("source_id").set_index("source_id")
 
@@ -188,12 +224,13 @@ def sky_where(cfg):
 
 
 def sky_rows(query, lo, hi, depth=6):
-    """`query(lo, hi)` (a frame of AUX_COLUMNS for a source_id range), in quarters when the service refuses the
-    whole range, as one frame sorted by source_id."""
+    """`query(lo, hi)` (a frame of AUX_COLUMNS and the flux ratio for a source_id range), in quarters when the
+    service refuses the whole range, as one frame sorted by source_id."""
     parts = [d for d in _split(query, lo, hi, depth) if len(d)]
-    d = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=AUX_COLUMNS)
+    d = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=[*AUX_COLUMNS, "flux_ratio"])
     d.columns = [c.lower() for c in d.columns]
-    return d[AUX_COLUMNS].drop_duplicates("source_id").sort_values("source_id").reset_index(drop=True)
+    cols = [*AUX_COLUMNS, *(c for c in ("flux_ratio",) if c in d)]
+    return d[cols].drop_duplicates("source_id").sort_values("source_id").reset_index(drop=True)
 
 
 def _sky_slice(pix, a):
@@ -212,7 +249,7 @@ def _sky_slice(pix, a):
     where = sky_where(occurrence.Config.load(a["config"]))
 
     def query(lo, hi):
-        return t.query(f"SELECT {', '.join(AUX_COLUMNS)} FROM {a['schema']}.gaia_source WHERE source_id BETWEEN {lo} "
+        return t.query(f"SELECT {aux_select()} FROM {a['schema']}.gaia_source WHERE source_id BETWEEN {lo} "
                        f"AND {hi} AND {where}", sync=bool(a["mirror"]), maxrec=10 ** 7, cache=False).to_pandas()
 
     d = sky_rows(query, pix * width, (pix + 1) * width - 1)
@@ -261,7 +298,7 @@ def aux_cmd(a):
 
     files = sorted(Path(a.lightcurves).glob("*.parquet"))
     ids = [np.unique(np.asarray(pq.read_table(f, columns=["source_id"])["source_id"])) for f in files]
-    cols = ", ".join(AUX_COLUMNS)
+    cols = aux_select()
     t0 = time.time()
     if a.mirror:
         t = Tap(epoch.MIRRORS.get(a.mirror, a.mirror))
@@ -280,7 +317,7 @@ def aux_cmd(a):
         jobs = [every[i:i + a.chunk] for i in range(0, len(every), a.chunk)]
 
         def fetch(x):
-            q = (f"SELECT {', '.join('g.' + c for c in AUX_COLUMNS)} FROM TAP_UPLOAD.ids AS u "
+            q = (f"SELECT {aux_select('g.')} FROM TAP_UPLOAD.ids AS u "
                  f"JOIN {a.schema}.gaia_source AS g ON g.source_id = u.source_id")
             for attempt in (0, 1):
                 try:
@@ -331,18 +368,31 @@ def _referenced(d, reference):
     return summary.apply_reference(d, reference)
 
 
-def read_injections(path, reference=None, offset=None):
+def with_host_excess(inj, hosts):
+    """Injected stars with their hosts' flux excess (`hosts`: searched stars' rows), which a fade in all three
+    bands leaves as it was; NaN for a host that is not searched."""
+    if "flux_excess" not in hosts:
+        return inj
+    excess = hosts.drop_duplicates("source_id").set_index("source_id")["flux_excess"]
+    return inj.assign(flux_excess=excess.reindex(inj["source_id"].to_numpy()).to_numpy())
+
+
+def read_injections(path, reference=None, offset=None, hosts=None):
     """Every injected star's scores, measured as the searched stars are: against the neighbour reference when
-    one is given, then with the searched stars' own median taken out (`offset`)."""
+    one is given, then with the searched stars' own median taken out (`offset`, by each host's flux excess when
+    the offsets have steps of it: `hosts`, the searched stars' rows)."""
     inj = _referenced(pd.concat([pd.read_parquet(f) for f in _files(path)], ignore_index=True), reference)
+    if hosts is not None:
+        inj = with_host_excess(inj, hosts)
     return inj if offset is None else occurrence.centre(inj, offset)
 
 
-def _population(f, aux, cfg, reference=None, offset=None):
-    """The searched population among one per-star score file's rows, and how many rows it held: FGK dwarfs by
-    the catalogue rows of `aux` (a file or a directory of sky slices, `aux_rows`), in the config's G range, with
-    enough visits and a measured trend. Rows of a
-    bulk-file summary that are not a fair sample of their magnitude (`ref` false) are left out."""
+def _dwarfs(f, aux, cfg, reference=None):
+    """The FGK dwarfs among one per-star score file's rows, and how many rows it held: by the catalogue rows of
+    `aux` (a file or a directory of sky slices, `aux_rows`), in the config's G range, with enough visits and a
+    measured trend, measured against `reference`. Rows of a bulk-file summary that are not a fair sample of
+    their magnitude (`ref` false) are left out. With a cut on the flux excess in the config, each star's excess
+    is in `flux_excess`."""
     have = set(pq.read_schema(f).names)
     d = pd.read_parquet(f, columns=[c for c in [*STAR_COLUMNS, "ref"] if c in have])
     scored = len(d)
@@ -353,18 +403,47 @@ def _population(f, aux, cfg, reference=None, offset=None):
     else:
         d = d.assign(**{c: np.nan for c in AUX_COLUMNS[1:]})
     d = _referenced(d[occurrence.fgk_dwarf(d, cfg)].reset_index(drop=True), reference)
-    if offset is not None:
-        d = occurrence.centre(d, offset)
     ok = (d["n_visits"] >= cfg.min_visits) & np.isfinite(d["slope_z"]) \
         & (occurrence.stratum(d["phot_g_mean_mag"], cfg) >= 0)
-    return d[ok], scored
+    d = d[ok].reset_index(drop=True)
+    if cfg.max_flux_excess is not None:
+        ratio = occurrence.flux_ratio(d) if len(d) else np.empty(0)
+        if ratio is None or not np.isfinite(ratio).all():
+            raise SystemExit(f"FGK dwarfs of {f} have no flux ratio in {aux}, which {cfg.name} needs: fetch the "
+                             "catalogue rows again with `aux`, or use --config steady-fades-v1")
+        d = d.assign(flux_excess=occurrence.flux_excess(d, flux_locus(aux, cfg), cfg) if len(d) else ratio)
+    return d, scored
+
+
+def _population(f, aux, cfg, reference=None, offset=None):
+    """The searched population among one per-star score file's rows (`_dwarfs` less the stars whose light is
+    mixed with a neighbour's, with the searched stars' own median taken out when `offset` is given), how many
+    rows the file held, and how many dwarfs were left out as mixed."""
+    d, scored = _dwarfs(f, aux, cfg, reference)
+    n = len(d)
+    if "flux_excess" in d:
+        d = d[occurrence.unblended(d["flux_excess"], cfg)].reset_index(drop=True)
+    if offset is not None:
+        d = occurrence.centre(d, offset)
+        d = d[np.isfinite(d["slope_z"])]
+    return d, scored, n - len(d)
 
 
 def population_offset(path, aux, cfg, reference):
-    """The searched stars' median trend against the neighbour reference per G range, from one pass over the
-    per-star files (`occurrence.offsets`), and the stars behind each."""
-    hist = sum(occurrence.offset_hist(_population(f, aux, cfg, reference)[0]) for f in _files(path))
-    return occurrence.offsets(hist), hist.sum(axis=1)
+    """One pass over the per-star files for what the searched stars are then measured against: their median
+    trend against the neighbour reference per G range (`occurrence.offsets`) with the stars behind each, and, as
+    a check on the cut, the median trend of every FGK dwarf by class of flux excess (`occurrence.excess_table`;
+    None when the config has no cut)."""
+    hist, by_excess = 0, 0
+    rows = len(occurrence.EXCESS_EDGES) + 2
+    for f in _files(path):
+        d = _dwarfs(f, aux, cfg, reference)[0]
+        if "flux_excess" in d:
+            by_excess = by_excess + occurrence.offset_hist(d, occurrence.excess_class(d["flux_excess"]), rows)
+            d = d[occurrence.unblended(d["flux_excess"], cfg)]
+        hist = hist + occurrence.offset_hist(d)
+    table = occurrence.excess_table(by_excess, cfg) if cfg.max_flux_excess is not None else None
+    return occurrence.offsets(hist), hist.sum(axis=1), table
 
 
 def read_stars(path, aux_path, cfg, reference=None):
@@ -372,8 +451,8 @@ def read_stars(path, aux_path, cfg, reference=None):
     neighbour reference the offset that centred it (None without one)."""
     offset = population_offset(path, aux_path, cfg, reference)[0] if reference is not None else None
     parts = [_population(f, aux_path, cfg, reference, offset) for f in _files(path)]
-    stars = pd.concat([d for d, _ in parts], ignore_index=True).drop_duplicates("source_id")
-    return stars, sum(n for _, n in parts), offset
+    stars = pd.concat([p[0] for p in parts], ignore_index=True).drop_duplicates("source_id")
+    return stars, sum(p[1] for p in parts), offset
 
 
 def gather(path, aux_path, cfg, host_ids, reference=None):
@@ -386,20 +465,22 @@ def gather(path, aux_path, cfg, host_ids, reference=None):
     their reference is the running median of every star's trend."""
     files = _files(path)
     referenced = reference is not None or all("slope_ref" in pq.read_schema(f).names for f in files)
-    offset = counts = None
+    offset = counts = by_excess = None
     if referenced:
         if reference is not None:
-            offset, counts = population_offset(path, aux_path, cfg, reference)
+            offset, counts, by_excess = population_offset(path, aux_path, cfg, reference)
         batches = (_population(f, aux_path, cfg, reference, offset) for f in files)
         ref = None
     else:
-        stars, scored, _ = read_stars(path, aux_path, cfg)
-        batches = [(stars, scored)]
+        parts = [_population(f, aux_path, cfg) for f in files]
+        stars = pd.concat([p[0] for p in parts], ignore_index=True).drop_duplicates("source_id")
+        batches = [(stars, sum(p[1] for p in parts), sum(p[2] for p in parts))]
         ref = occurrence.brightness_reference(stars["phot_g_mean_mag"].to_numpy(float), stars["slope"].to_numpy(float),
                                               cfg.reference_window)
-    total, past, hosts, scored, spans, visits = None, [], [], 0, [], []
-    for d, n in batches:
+    total, past, hosts, scored, mixed, spans, visits = None, [], [], 0, 0, [], []
+    for d, n, left_out in batches:
         scored += n
+        mixed += left_out
         if not len(d):
             continue
         z, z_raw, strat = occurrence.star_significances(d, cfg, ref)
@@ -407,14 +488,15 @@ def gather(path, aux_path, cfg, host_ids, reference=None):
         total = t if total is None else total + t
         past.append(occurrence.past_cut(d, z, strat, cfg))
         hosts.append(d.loc[d["source_id"].isin(host_ids), [c for c in ("source_id", "phot_g_mean_mag", "slope_ref",
-                                                                      "slope_ref_err") if c in d]])
+                                                                      "slope_ref_err", "flux_excess") if c in d]])
         spans.append((float(np.nanmedian(d["t_last"] - d["t_first"])) / 365.25, len(d)))
         visits.append((float(d["n_visits"].median()), len(d)))
     if total is None:
         raise SystemExit(f"no searched FGK dwarfs in {path}")
     return {"tally": total, "past": pd.concat(past, ignore_index=True), "hosts": pd.concat(hosts, ignore_index=True),
             "ref": ref, "scored": scored, "span": _weighted_median(spans), "visits": _weighted_median(visits),
-            "referenced": referenced, "offset": offset, "offset_stars": counts}
+            "referenced": referenced, "offset": offset, "offset_stars": counts, "mixed": mixed,
+            "by_excess": by_excess}
 
 
 def _weighted_median(pairs):
@@ -464,9 +546,8 @@ def limit(a):
     got = gather(a.stars, a.aux, cfg, pd.unique(inj["source_id"]), reference)
     centred = pd.DataFrame()
     if got["offset"] is not None:
-        inj = occurrence.centre(inj, got["offset"])
-        centred = pd.DataFrame({"g_lo": occurrence.OFFSET_G[:-1], "g_hi": occurrence.OFFSET_G[1:],
-                                "stars": got["offset_stars"], "median_trend_per_year": got["offset"]})
+        inj = occurrence.centre(with_host_excess(inj, got["hosts"]), got["offset"])
+        centred = occurrence.offset_table(got["offset"], got["offset_stars"])
     t, past, span = got["tally"], got["past"], got["span"]
     inj_z, inj_strat = occurrence.injection_significances(got["hosts"], inj, cfg, got["ref"])
     curve, cells = occurrence.curve_from_tally(t, past, inj_z, inj_strat, inj["rate"], cfg, span)
@@ -479,13 +560,23 @@ def limit(a):
            "inputs": {"stars": str(a.stars), "aux": str(a.aux), "injections": str(a.injections),
                       "reference": str(a.reference) if a.reference else None,
                       "stars_scored": int(got["scored"]), "fgk_dwarfs_searched": n_stars,
+                      # FGK dwarfs not searched because their light is mixed with a neighbour's (flux excess).
+                      "fgk_dwarfs_mixed_with_a_neighbour": int(got["mixed"]),
                       "injection_hosts": int((inj_strat[np.isclose(inj["rate"], inj["rate"].iloc[0])] >= 0).sum()),
                       "median_span_years": span, "median_visits": got["visits"],
                       "neighbour_reference": got["referenced"]},
            "curve": json.loads(curve.to_json(orient="records")), "symmetry": json.loads(sym.to_json(orient="records")),
            "tails": json.loads(tails.to_json(orient="records")),
-           # The searched stars' median trend against the neighbour reference, taken out per G range.
+           # The searched stars' median trend against the neighbour reference, taken out per G range (and, with
+           # a cut on the flux excess, per step of it).
            "population_offset": json.loads(centred.to_json(orient="records"))}
+    if cfg.max_flux_excess is not None:
+        edges = occurrence.locus_colours(cfg)
+        # The dwarfs' median (BP + RP) / G flux ratio by colour, and their median trend by excess over it.
+        rec["flux_ratio_by_colour"] = [{"bp_rp_lo": float(a), "bp_rp_hi": float(b), "median_ratio": float(r)}
+                                       for a, b, r in zip(edges[:-1], edges[1:], flux_locus(a.aux, cfg))]
+        if got["by_excess"] is not None:
+            rec["trend_by_flux_excess"] = json.loads(got["by_excess"].to_json(orient="records"))
     (out / "limit.json").write_text(json.dumps(rec, indent=1))
     curve.to_csv(out / "curve.csv", index=False)
     sym.to_csv(out / "symmetry.csv", index=False)
@@ -493,8 +584,9 @@ def limit(a):
     # Every searched star past the first cut either way, strongest fades first: the stars behind the counts.
     past.sort_values("z").to_parquet(out / "past_cut.parquet", index=False)
     pd.options.display.width = 250
-    print(f"{n_stars} FGK dwarfs searched of {got['scored']} stars scored; median span {span:.2f} yr; "
-          f"{rec['inputs']['injection_hosts']} hosts; {time.time() - t0:.0f} s")
+    print(f"{n_stars} FGK dwarfs searched of {got['scored']} stars scored ({got['mixed']} more left out as mixed "
+          f"with a neighbour); median span {span:.2f} yr; {rec['inputs']['injection_hosts']} hosts; "
+          f"{time.time() - t0:.0f} s")
     show = curve.assign(rate_pct=100 * curve["rate"], recall=curve["recall"].round(3), one_in=curve["one_in"].round(0))
     cols = ["rate_pct", "g_max", "z_min", "stars", "fading", "brightening", "recall", "one_in"]
     if "mirror_limit" in curve:
@@ -504,10 +596,17 @@ def limit(a):
                  "sky_dispersion"]
     print(show[cols].to_string(index=False))
     print(sym.round(3).to_string(index=False))
-    if len(centred):
+    if len(centred) and "excess_lo" in centred:
+        # % a year taken out, by G range (rows) and step of flux excess (columns, by their lower edge).
+        print((100 * centred[centred["g_lo"] >= 12].pivot(index="g_lo", columns="excess_lo", values="median_trend_per_year"))
+              .round(3).to_string())
+    elif len(centred):
         print(centred[centred["stars"] > 0].assign(pct_per_year=lambda d: (100 * d["median_trend_per_year"]).round(4))
               .drop(columns="median_trend_per_year").to_string(index=False))
     print(tails.set_index("z_min").T.to_string())
+    if got["by_excess"] is not None:
+        print(got["by_excess"].assign(pct_per_year=lambda d: (100 * d["median_trend_per_year"]).round(4))
+              .drop(columns="median_trend_per_year").to_string(index=False))
     try:
         from cosmos_search.viz import style
     except ImportError:
@@ -525,7 +624,7 @@ def planted(a):
     cfg = occurrence.Config.load(a.config)
     reference = _reference(a.reference)
     stars, _, offset = read_stars(a.stars, a.aux, cfg, reference)
-    inj = read_injections(a.injections, reference, offset)
+    inj = read_injections(a.injections, reference, offset, stars)
     rng = np.random.default_rng(a.seed)
     rows = []
     for rate in a.rates:
@@ -554,7 +653,8 @@ def planted(a):
 # -- field --------------------------------------------------------------------------------------------------------
 
 FIELD_COLUMNS = ("source_id, ra, dec, phot_g_mean_mag, bp_rp, parallax, parallax_error, pmra, pmra_error, pmdec, "
-                 "pmdec_error, ruwe, phot_variable_flag, astrometric_params_solved, phot_g_n_obs")
+                 "pmdec_error, ruwe, phot_variable_flag, astrometric_params_solved, phot_g_n_obs, "
+                 "phot_bp_rp_excess_factor")
 M31 = (10.6847, 41.2687)   # Gaia's Andromeda photometric survey: 5.5 degrees around M31
 FIELD_LEVEL = 6
 
