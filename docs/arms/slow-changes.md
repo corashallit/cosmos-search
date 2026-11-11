@@ -973,10 +973,12 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
 8. Reading: the fading list in its reading order, kind by kind, each down to where its fades stop standing
    clear of the same kind's brightenings. The checks:
    `slow_checks.py --fading L/fading.parquet --lightcurves R/lightcurves --out L/checks --skip-still --skip-band
-   --skip-class ECL --n 1000`. DR4's eclipsing-binary class is left out first; `--lightcurves` adds the
-   eclipsing-binary filter on G and ZTF (`eb_explained`, its period and duration), kept beside each star's
+   --skip-class ECL --n 1000 --atlas-n 24`. DR4's eclipsing-binary class is left out first; `--lightcurves` adds
+   the eclipsing-binary filter on G and ZTF (`eb_explained`, its period and duration), kept beside each star's
    review as information (its test failed for repeating long dips, "Eclipsing binaries among the candidates"
-   below).
+   below). ATLAS answers about one star an hour, so it is asked last and only about the strongest stars
+   (`--atlas-n`, "Other surveys" below, "Running it"): the files are written without it first and no later step
+   waits for it.
    The pass keeps light curves only for stars brighter than G 19, and the fading list also holds fainter ones:
    the checks name the stars with no kept light curve (`no_lightcurve.csv`, `g_lightcurve` in `checks.csv`) and
    take a second `--lightcurves` directory for light curves fetched through DataLink.
@@ -1410,14 +1412,31 @@ better measure of activity and are not read yet.
 give itself away. Until the fakes are also injected into these epochs (`dayone.external.apply` takes this table:
 same columns and band names), the survey columns must stay out of what a reviewer of fakes sees.
 
-**Running it.** `scripts/slow_checks.py` reads ZTF, ATLAS, SkyMapper and NOIRLab by default and names once any
-survey it cannot reach; `--surveys none` turns the comparison off and `--no-tess` the TESS step. SkyMapper takes
-about 3 s a star, NOIRLab 15-25 s, TESS a few seconds. Gaia neighbours for the dilution come from ESA's archive,
-or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet` and the TESS rows per sector to
+**Running it.** `scripts/slow_checks.py` reads ZTF, SkyMapper and NOIRLab by default and names once any survey
+it cannot reach; `--surveys none` turns the comparison off and `--no-tess` the TESS step. SkyMapper takes about
+3 s a star, NOIRLab 15-25 s, TESS a few seconds. Gaia neighbours for the dilution come from ESA's archive, or
+from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet` and the TESS rows per sector to
 `tess.parquet`.
+
+ATLAS is asked only with `--atlas-n N`. One star's forced photometry takes about 18.5 minutes of ATLAS's server
+time in a queue shared by all its users, about one star an hour for one account (measured 2026-11-11), so the
+checks of 10^3 stars cannot wait for it. The script writes every file without ATLAS first, then sends ATLAS the
+N strongest stars it covers, strongest first and two at a time, and after each answer works out that star's
+comparison again with ATLAS among the surveys and rewrites `checks.csv` and `surveys.parquet` (each replaced in
+one step, so a step reading them never sees half a file). A failed request is in the star's `atlas_error`. A
+stop (Ctrl-C or a TERM signal) takes the unanswered requests off ATLAS's queue. `--atlas-only` carries on from
+the checks already written and fetches nothing else: it sends the N strongest of their stars that ATLAS covers
+and has not answered yet, and with `--ids D/reviewed.csv --ids-where shortlisted` only the stars a review
+shortlisted.
 
 ## Log
 
+- **2026-11-11.** ATLAS in the checks ("Other surveys", "Running it"). On live data ATLAS answers about one
+  star an hour for one account, and `slow_checks.py` asked it about every star along with the other surveys, so
+  the checks of 1,000 stars would have taken about as many hours. ATLAS is now asked last and only with
+  `--atlas-n N`, about the N strongest stars it covers, strongest first; the files are written before it and
+  rewritten after each answer, and `--atlas-only` carries on from them (after a stop, or for a review's
+  shortlist with `--ids`). Without `--atlas-n` the script does not contact ATLAS.
 - **2026-11-11.** Trial of the planted fades on DR3 (docs/vetting.md §16, "Trial on DR3"). 30 planted fades and
   one real star of the Andromeda field went through step 10 as written, with the reviews launched from a
   separate thread. 24 of 30 were shortlisted, which passes the check (at least 20 of 30). Fades flagged by the
