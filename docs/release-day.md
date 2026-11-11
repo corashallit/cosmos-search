@@ -50,7 +50,7 @@ the run goes on.
 | 5 | DR4 against DR3 for the same stars | `python -m cosmos_search.gaia.dr4_check compare --dr4 DL/lightcurves --dr3 /mnt/project-files/release-day/dr3-reference/random/lightcurves.parquet` | No star in both: map ids through `dr3_neighbourhood` (`--id-map`). Flux scale or time offset: units or zero points differ from DR3's; fix the reader before anything is scored |
 | 6 | Rejected epochs | Does `routes.json` list a `vari_epoch_flags` folder among the bulk files? Does step 3 report a rejection column? | Neither is expected. The scoring uses its own rule for bad epochs (below) |
 | 7 | Class names | `SELECT phot_variable_best_class, COUNT(*) FROM gaiadr4.all_source_flags GROUP BY 1` | Update the eclipsing-binary class given to `slow_checks.py --skip-class` |
-| 8 | Trend zero point | After the threshold sample is scored: `trend_offset_by_G` in `L/summary.json` (median trend in units of its error, by G magnitude), and the same by sky region | An offset at G < 14 was +0.85 errors in DR3 and would be about +2.3 at DR4's precision; it has to be removed before thresholds are set |
+| 8 | Trend zero point | After the threshold sample is scored: `trend_offset_by_G` and `trend_offset_by_BP_RP` in `L/summary.json` (median trend in units of its error, by G magnitude and by colour), and the same by sky region | Measured against neighbouring stars the median was 0.003 to 0.007 errors in every magnitude bin over all of DR3, and within 0.013 errors in every colour range on DR3's Andromeda field. Before that comparison an offset at G < 14 was +0.85 errors in DR3 and would be about +2.3 at DR4's precision; a bin or a colour range off zero has to be removed before thresholds are set |
 
 Steps 1 to 3 need no science decision and take what the archive's load allows. Step 4 is the first data anyone
 on the project sees: Boyajian's star has no light curve in DR3 and gets one in DR4.
@@ -134,7 +134,7 @@ Machines:
 | Machine | What it has | Use |
 |---|---|---|
 | Cloud container (one per thread) | 4 cores, 15 GB memory, about 30 GB disk, 120 MB/s from ESA's CDN | The first pass, several containers each with its own `--shard i/n` |
-| kore | 10 cores, 16 GB memory, 171 GiB free disk on 2026-11-11 (263 GiB once the practice files under `~/cosmos-data/practice-dr4/` are deleted) | One or more shards with 6 workers; where the kept light curves and summaries are stored. A session there starts when Cora says so in the thread that needs it |
+| kore | 10 cores, 16 GB memory, 263 GiB free disk on 2026-11-11, after the practice files were deleted | One or more shards with 6 workers; where the kept light curves and summaries are stored. A session there starts when Cora says so in the thread that needs it |
 | `/mnt/project-files/` | Shared by every thread, durable | Rules, thresholds, per-star summaries, lists, `routes.json`, first-hour reports |
 
 Sizing from the practice runs (below): reading and converting takes 1.9 core-seconds per million transits in a
@@ -175,7 +175,7 @@ read directly:
 | DataLink reader | 200 stars through the stand-in endpoint, equal to the files |
 | First-hour file check | no problems on the smallest and the largest file; one note (no rejected epochs marked) |
 | Memory | a worker's peak 1.33 GB; the build's last step 2.7 GB in one process; no swapping |
-| Disk | 52 GB of fake files and 34 GB of output under `~/cosmos-data/practice-dr4/`, with the scoring practice's 6 GB; all of it is deleted once both practices are recorded (Cora's choice, 2026-11-11), and the fake files can be built again in 20 min |
+| Disk | 52 GB of fake files and 34 GB of output under `~/cosmos-data/practice-dr4/`, with the scoring practice's 6 GB. All of it was deleted on 2026-11-11 once both practices were recorded (Cora's choice); the fake files can be built again in 20 min |
 
 Nothing had to be changed for macOS. kore's checkout was on the branch `kore-mirror-verify-props`, not `main`;
 the practice ran from a separate working copy.
@@ -248,7 +248,7 @@ What the practice runs and the checks leading to them found:
 | ESA's TAP answered 503 to runs of small queries for about an hour on 2026-11-10, with and without DataLink calls running, then answered normally (30,680 rows in 19 s) | Answers are cached, so a run that stops on a 503 goes on where it stopped when started again. The refusals came back on 2026-11-11 (logged-in queries too), and the known-answers table was matched on the AIP copy of the DR3 source table instead (`--mirror aip`, 985 cone queries in 19 min) |
 | Worker processes started after the first archive call shared its open connection; two of them sending byte-range requests down one socket read each other's answers, so the first large file of every scoring pass failed its checksum (and would have been read wrongly from an archive that publishes no checksums) | A worker now opens connections of its own (`net/client.py`, with a test that hangs without the fix); three passes over the 233 files, no failed file (PR #88) |
 | The launcher of the blind reviews now hands every reviewer the last message Cora wrote in the launching thread, before its task. The audit looked for the task in the first message only and reported every review as missing | The audit finds such reviews and refuses them as not blind (`scripts/stage_a_audit.py`, PR #88). "Launching the reviews" above says how to launch reviews that count |
-| The scoring pass keeps light curves only for stars brighter than G 19, but the fading list also holds fainter stars; the checks' eclipsing-binary test and the review files need the light curve | `slow_review.py files` lists such stars in `left_out.csv` and takes a second directory of light curves pulled through DataLink; or check only stars brighter than G 19 (`slow_checks.py --max-g 19`) |
+| The scoring pass keeps light curves only for stars brighter than G 19, but the fading list also holds fainter stars; the checks' eclipsing-binary test and the review files need the light curve | `slow_checks.py` lists such stars in `no_lightcurve.csv` and prints a warning, `slow_review.py files` lists them in `left_out.csv`, and both take a second `--lightcurves` directory pulled through DataLink (PRs #88, #93); or check only stars brighter than G 19 (`slow_checks.py --max-g 19`) |
 | On macOS a worker process starts as a new interpreter and does not see what the parent put in the script's module state; the thresholds step stopped on kore with `KeyError: 'drift_share'` (scoring practice, 2026-11-11) | The thresholds, injection-test, blind-test and period-check scripts hand the state to their workers; a test runs the thresholds step with macOS's start method (PR #92) |
 | The comparison with DR3 held every star's sums in one process, too much for all of DR3 on a 16 GB machine; memory figures were 1000 times too high on macOS | Compared a 48th of the sky at a time; the build can resume (PR #88) |
 
