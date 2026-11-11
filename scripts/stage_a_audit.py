@@ -13,7 +13,9 @@ paths, so pass absolute directories.
 *Which reviewer it was.* The transcript records, for every model turn, the model that served it, the model that was
 asked for, the reasoning effort and the agent type. A review counts only if one model served every turn, that model
 is the one asked for (the harness can fall back to another model when the first is unavailable), no turn is an API
-error, and nothing from the launching thread's conversation was copied into the reviewer's context. With --model
+error, and nothing from the launching thread's conversation was copied into the reviewer's context (a message
+forwarded to the subagent, or, from harness 2.1.322, the user message of the turn that launched the workflow, which
+the harness hands to every subagent first: launch reviews from a turn that no user message started). With --model
 (and optionally --effort, --agent-type), or --reviewer pointing at the record of a calibration batch, the model,
 effort and agent type must also equal the expected ones; without them, every review must share one configuration,
 which is reported. docs/vetting.md §7: any change to the reviewer's configuration is a new reviewer, whose recall
@@ -37,6 +39,11 @@ ID = re.compile(r"prompts/([a-z]{16})\.md")
 SYNTHETIC = "<synthetic>"          # the harness's placeholder model on an API-error turn
 FORWARDED = "queued_command"       # a message from the launching thread's conversation, copied into the subagent
 WORKFLOW_MARK = "[Workflow harness"
+# From harness 2.1.322 a workflow's subagent is first given the user message of the turn that launched the workflow
+# ("[Workflow harness — user request] ... relays, verbatim ..."), and the launch text comes second, marked
+# "computed task". That first message is the launching thread's conversation in the reviewer's context.
+RELAYED_REQUEST = "user request]"
+COMPUTED_TASK = "computed task]"
 KEYS = ("model", "effort", "agent_type")
 
 
@@ -44,6 +51,7 @@ def read(path):
     """First user text, tool calls and reviewer record of one transcript."""
     first, tools = None, []
     served, asked, effort, agent, harness, errors, forwarded = set(), set(), set(), set(), set(), 0, 0
+    relayed, workflow, task_seen = 0, False, False
     usage, stamps = {}, []
     for line in Path(path).read_text().splitlines():
         try:
@@ -58,8 +66,19 @@ def read(path):
             forwarded += 1
         m = d.get("message") or {}
         c = m.get("content")
-        if first is None and m.get("role") == "user" and isinstance(c, str):
-            first = c
+        if m.get("role") == "user" and isinstance(c, str):
+            head = c.lstrip()[:80]
+            if head.startswith(WORKFLOW_MARK):
+                workflow = True
+                if RELAYED_REQUEST in head:
+                    relayed += 1
+                    continue
+                if COMPUTED_TASK in head:
+                    if not task_seen:        # the launch text, whatever came before it
+                        first, task_seen = c, True
+                    continue
+            if first is None:
+                first = c
         if d.get("type") == "assistant":
             if m.get("model") == SYNTHETIC or d.get("isApiErrorMessage"):
                 errors += 1
@@ -79,8 +98,8 @@ def read(path):
     tok = {k: sum(int(u.get(k) or 0) for u in usage.values())
            for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")}
     rec = {"served": _sorted(served), "asked": _sorted(asked), "effort": _sorted(effort), "agent_type": _sorted(agent),
-           "harness": _sorted(harness), "api_errors": errors, "forwarded_messages": forwarded,
-           "launch": "workflow" if first.lstrip().startswith(WORKFLOW_MARK) else "agent tool",
+           "harness": _sorted(harness), "api_errors": errors, "forwarded_messages": forwarded + relayed,
+           "relayed_user_request": relayed, "launch": "workflow" if workflow else "agent tool",
            "tokens": sum(tok.values()), "output_tokens": tok["output_tokens"],
            "start": min(stamps) if stamps else None, "end": max(stamps) if stamps else None}
     return first, tools, rec
@@ -111,7 +130,9 @@ def reviewer_problems(rec, expected=None, allow_thread_messages=False):
     if rec["api_errors"]:
         out.append(f"{rec['api_errors']} API-error turn(s)")
     if rec["forwarded_messages"] and not allow_thread_messages:
-        out.append("a message from the launching thread was copied into the reviewer's context")
+        out.append("a message from the launching thread was copied into the reviewer's context"
+                   + (" (the user message of the turn that launched the workflow)"
+                      if rec.get("relayed_user_request") else ""))
     for key, got in (("model", rec["served"]), ("effort", rec["effort"]), ("agent_type", rec["agent_type"])):
         want = (expected or {}).get(key)
         if want and got != [want]:
