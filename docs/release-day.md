@@ -32,7 +32,9 @@ The search itself is described in [arms/slow-changes.md](arms/slow-changes.md); 
 
 1. `main` is green and `python scripts/dr4_practice.py` passes in a fresh container (below).
 2. `GAIA_USER` and `GAIA_PASSWORD` are set in the environment; the first archive call on release day logs in.
-3. kore is on, awake and on mains power, with `~/cosmos-data/cosmos-search` at `main`.
+3. kore is on, awake and on mains power, with `~/cosmos-data/cosmos-search` at `main` and its environment
+   reinstalled from it (`uv pip install -e '.[dev,plots]'`; on 2026-11-11 it lacked `healpy`, which only the
+   population code imports).
 
 ## First hour
 
@@ -67,6 +69,10 @@ By route, fastest first (`routes.json` says which exist):
    python scripts/slow_search.py flag --run R --rule RULE --out L
    python scripts/slow_search.py cuts --run L
    ```
+
+   Before the scoring pass, read `RULE/release.json`: the sample has to hold at least `stars_needed_for_20pct`
+   quiet stars (25,000). With fewer, the thresholds' intervals are wide; raise `--files-share` and repeat the
+   first two commands.
 
 2. **A mirror's table, no bulk files**, or **DataLink only**: `scripts/slow_fallback.py` gives the order in which
    to pull light curves (the watch-list, the known answers, then the archive's own statistics), at 0.1 to 2.0
@@ -114,14 +120,17 @@ Machines:
 | Machine | What it has | Use |
 |---|---|---|
 | Cloud container (one per thread) | 4 cores, 15 GB memory, about 30 GB disk, 120 MB/s from ESA's CDN | The first pass, several containers each with its own `--shard i/n` |
-| kore | 10 cores, 16 GB memory, 176 GiB free disk on 2026-11-10 (261 GiB once the practice files under `~/cosmos-data/practice-dr4/` are deleted) | One or more shards with 6 workers; where the kept light curves and summaries are stored. A session there starts when Cora says so in the thread that needs it |
+| kore | 10 cores, 16 GB memory, 171 GiB free disk on 2026-11-11 (263 GiB once the practice files under `~/cosmos-data/practice-dr4/` are deleted) | One or more shards with 6 workers; where the kept light curves and summaries are stored. A session there starts when Cora says so in the thread that needs it |
 | `/mnt/project-files/` | Shared by every thread, durable | Rules, thresholds, per-star summaries, lists, `routes.json`, first-hour reports |
 
 Sizing from the practice runs (below): reading and converting takes 1.9 core-seconds per million transits in a
 cloud container and 1.2 on kore, so DR4's 1.2 × 10¹¹ transits cost about 64 core-hours in the cloud, or 40 on
 kore, before any scoring; the download is 7.2 TB, 17 h for one container's network. A worker needs about 1.2 GB
 of memory per 1.4 million transits it holds (30,000 stars at DR3's sampling, about 15,000 at DR4's); six workers
-on kore peaked at 1.33 GB each over all of DR3.
+on kore peaked at 1.33 GB each over all of DR3. Download, reading and scoring together cost 10 core-seconds per million
+transits on kore (all of DR3 in 15.5 min with 6 workers), which is about 330 core-hours for DR4. That is an upper
+figure: DR3's stars were selected as variable, and 14% of them got the full scoring against 4% of
+the Andromeda field's ordinary stars.
 
 ## Practice run
 
@@ -152,7 +161,7 @@ read directly:
 | DataLink reader | 200 stars through the stand-in endpoint, equal to the files |
 | First-hour file check | no problems on the smallest and the largest file; one note (no rejected epochs marked) |
 | Memory | a worker's peak 1.33 GB; the build's last step 2.7 GB in one process; no swapping |
-| Disk | 52 GB of fake files and 34 GB of output left in `~/cosmos-data/practice-dr4/` for a scoring practice |
+| Disk | 52 GB of fake files and 34 GB of output under `~/cosmos-data/practice-dr4/`, with the scoring practice's 6 GB; all of it is deleted once both practices are recorded (Cora's choice, 2026-11-11), and the fake files can be built again in 20 min |
 
 Nothing had to be changed for macOS. kore's checkout was on the branch `kore-mirror-verify-props`, not `main`;
 the practice ran from a separate working copy.
@@ -182,6 +191,26 @@ server).** The commands of "The run" above, with DR3's catalogue for the lookups
 | Checks, 12 strongest | 312 s with 6 at once, no failed fetch |
 | Review files | 12 files in 2.8 min (most of it the AllWISE and 2MASS cross-match), none refused by the leak scan. Two stars fainter than G 19 had no kept light curve and were pulled through DataLink first |
 
+**Scoring at the size of all DR3 on kore (2026-11-11).** The 12,288 fake files of the practice above through the
+stand-in server (2% of requests answered 503), 6 workers, the commands of "The run" as far as the lists:
+
+| Step | Result |
+|---|---|
+| Sample pass, 5% of the files, every light curve kept | 615 files, 552,224 stars in 39 s, no failed file |
+| Thresholds | 42 s, 1.6 GB of memory. Stopped on the first try with a fault that only macOS shows (below); passed once fixed |
+| Scoring pass | 12,288 files, no failed file (247 requests refused, all retried). 11,754,237 stars read and 11,606,315 scored in 15.5 min: 12,700 stars a second. 1,593,355 stars got the full scoring and 414,761 a period search. A worker used 1.0 to 1.4 GB |
+| Lists | 110 s, 2.8 GB of memory in one process. Fading: 407,925 stars brighter than G 19 (4.5%) and 92,166 fainter |
+| Trend zero point (first-hour check 8) | Median trend in units of its error, by G magnitude: between -0.18 and +0.24 before the comparison with neighbouring stars (largest at G 13 to 14), 0.003 to 0.007 after it in every magnitude bin |
+| Disk | sample 1.6 GB, thresholds 0.15 GB, scoring output 4.1 GB (624,396 kept light curves 2.1 GB, statistics 1.0 GB, per-star summaries 0.9 GB), lists 0.3 GB |
+
+The thresholds of this run say nothing about DR4's. Outside the Andromeda field DR3 has light curves only for
+stars DPAC selected as variable: 3.6% of the sample were quiet stars (19,702, under the 25,000 the rule asks
+for), and the thresholds at G < 19 came out at 5.55 (episode), 6.76 (trend) and 6.45 (repeat), the trend's
+interval 5.66 to 7.37. The same split shows on the 233-file set: its Andromeda-field stars alone (903,292 stars,
+60% quiet) give 5.41, 3.72 and 6.69, and its other 201 files alone (181,259 stars, 1.2% quiet) give 4.88, 4.47
+and 7.02. DR4 has a light curve for every star, so its sample is of the first kind. The selection also makes
+this run's lists long.
+
 **Review step on real candidates (2026-11-10).** From the checks of the DR3 trial's 60 strongest fades that DPAC
 does not call eclipsing binaries: 60 review files in 10.6 min (cross-match of 60 stars scattered over the sky),
 none refused, none left out. Six of them were reviewed through `scripts/stage_a_reviews.js` by the adopted
@@ -206,11 +235,12 @@ What the practice runs and the checks leading to them found:
 | Worker processes started after the first archive call shared its open connection; two of them sending byte-range requests down one socket read each other's answers, so the first large file of every scoring pass failed its checksum (and would have been read wrongly from an archive that publishes no checksums) | A worker now opens connections of its own (`net/client.py`, with a test that hangs without the fix); three passes over the 233 files, no failed file (PR #88) |
 | The launcher of the blind reviews now hands every reviewer the last message Cora wrote in the launching thread, before its task. The audit looked for the task in the first message only and reported every review as missing | The audit finds such reviews and refuses them as not blind (`scripts/stage_a_audit.py`, PR #88). "Launching the reviews" above says how to launch reviews that count |
 | The scoring pass keeps light curves only for stars brighter than G 19, but the fading list also holds fainter stars; the checks' eclipsing-binary test and the review files need the light curve | `slow_review.py files` lists such stars in `left_out.csv` and takes a second directory of light curves pulled through DataLink; or check only stars brighter than G 19 (`slow_checks.py --max-g 19`) |
+| On macOS a worker process starts as a new interpreter and does not see what the parent put in the script's module state; the thresholds step stopped on kore with `KeyError: 'drift_share'` (scoring practice, 2026-11-11) | The thresholds, injection-test, blind-test and period-check scripts hand the state to their workers; a test runs the thresholds step with macOS's start method (PR #92) |
 | The comparison with DR3 held every star's sums in one process, too much for all of DR3 on a 16 GB machine; memory figures were 1000 times too high on macOS | Compared a 48th of the sky at a time; the build can resume (PR #88) |
 
 Not covered by a practice run: DR4's real file sizes and row order, the archive under release-day load, the
-scoring pass at the size of all of DR3 (the fake files for it are on kore), and a whole batch of reviews that
-the audit counts (one review did).
+cuts, checks and review files at the size of all of DR3 (they ran on the 233-file set), and a whole batch of
+reviews that the audit counts (one review did).
 
 ## Start
 

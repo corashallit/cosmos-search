@@ -88,6 +88,12 @@ def factors(kind, sid, band, t, seed):
     return np.maximum(f, 1e-3), size
 
 
+def _init(state):
+    """Give a worker the state. A forked worker (Linux) has it already; one started as a new interpreter (macOS)
+    imports this script again and would see it empty."""
+    _STATE.update(state)
+
+
 def _file(path):
     """One light-curve file: the archive-style statistics of every real star in it, and every fake of its hosts."""
     s = _STATE
@@ -200,7 +206,7 @@ def main(argv=None):
                   real=real[["source_id", "s_fade", "s_rise", "dim_t0", "rise_t0"]],
                   real_pix=drift.sky_pixel(real["source_id"].to_numpy(), rule_v3.SHARED_LEVEL))
     files = [f for f in sorted(Path(a.lightcurves).glob("*.parquet")) if pq.read_metadata(f).num_rows]
-    with Pool(a.workers) as pool:
+    with Pool(a.workers, initializer=_init, initargs=(_STATE,)) as pool:
         parts = pool.map(_file, files, chunksize=1)
     arch = pd.concat([p[0] for p in parts], ignore_index=True)
     fakes = pd.concat([p[1] for p in parts if len(p[1])], ignore_index=True)
