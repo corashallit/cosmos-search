@@ -32,7 +32,9 @@ dwarfs fading at that rate.
    there towards brightening and hide fades. First the search's own reference: the median trend of all stars in
    the same sky pixel and 0.5 mag of G, and of the run's stars of the same colour (`summary.apply_reference`
    with the flag step's `reference.parquet`; the colour term came with PR #93, after "The leftover trend depends
-   on colour" below). Then the searched dwarfs' own median is taken out as well (`occurrence.centre`;
+   on colour" below). Since PR #98 that reference also has a part by flux excess, made from stars of every
+   kind; the limit leaves that part out, because the next step does the same among the dwarfs themselves.
+   Then the searched dwarfs' own median is taken out as well (`occurrence.centre`;
    `limit.json` lists it under `population_offset`), because the dwarfs are one kind of star and the reference
    is made from all kinds. The median is taken among dwarfs of the same 0.5 mag of G and the same step of flux
    excess (11 steps inside the cut), since the G trend follows the excess all the way through zero. On DR3 that
@@ -349,9 +351,16 @@ error for a bright star, and without these two steps the mixed stars would fill 
 threshold, which is where the slow rates are measured. The cut stays at 0.05 on DR4 whatever its table shows; a
 tighter one would be a new settings file, reported beside v2.
 
-For the search's own lists the same stars will stand on the fading list. That was passed to the bulk-file
-scoring work on 2026-11-11: the pass has each star's median flux in the three bands and can form the ratio
-without the catalogue.
+The search's own lists held the same stars. That was passed to the bulk-file scoring work on 2026-11-11 and
+changed there in PR #98 (docs/arms/slow-changes.md, "Stars with a flux excess"): the pass keeps each star's
+flux ratio from its own median fluxes, the search's reference has a part by flux excess, and stars with an
+excess above 0.05 are read as a kind of their own, after the others. That work found the same trend in every
+kind of star of the field (−0.11% a year at an excess of 0.05 to 0.1, −0.65% above 0.5).
+
+The limit does not use the reference's part by flux excess (`flux_ratio=False` in the script's `_referenced`).
+Its real stars would be placed there by the catalogue's ratio while its injected stars carry none, and the
+dwarfs' own median by excess already takes the trend out. Run on a pass and a reference made with PR #98, the
+DR3 limit, its counts and its offsets are the same to the last digit as in the tables above.
 
 ## After the list is read
 
@@ -479,3 +488,6 @@ left out as mixed (3.6% on DR3) and the medians taken out (`population_offset`);
   are now 1,366 fading to 1,411 brightening. The cut alone was tried first: inside it the stars at an excess of
   0.02 to 0.05 still split 352 to 108, so the centring by excess was added. RUWE and the share of double-peaked
   images were tried as the indicator and are less sharp.
+- **2026-11-11, PR #98.** The search's reference gained a part by flux excess and the pass's per-star table a
+  flux ratio. The limit leaves the reference's new part out and keeps its own centring among the dwarfs. The
+  field was run again through the new pass, reference and limit: every number of the DR3 tables is unchanged.
