@@ -174,7 +174,8 @@ def _atlas_script(archive, result=ATLAS_TEXT, error=None):
     done = {"finishtimestamp": "2026-11-10T00:00:00Z", "result_url": f"{archive.url}/static/results/job1.txt"}
     if error:
         done = {"finishtimestamp": "2026-11-10T00:00:00Z", "error_msg": error, "result_url": None}
-    archive.script["/queue/"] = [(201, js, json.dumps({"url": f"{archive.url}/queue/1/"}).encode())]
+    archive.script["/queue/"] = [(200, js, json.dumps({"results": []}).encode()),      # the task list
+                                 (201, js, json.dumps({"url": f"{archive.url}/queue/1/"}).encode())]
     archive.script["/queue/1/"] = [(200, js, json.dumps({"finishtimestamp": None}).encode()),
                                    (200, js, json.dumps(done).encode())]
     archive.script["/static/results/job1.txt"] = [(200, {}, result.encode())]
@@ -187,12 +188,47 @@ def test_atlas_job_runs_polls_reads_and_deletes(archive, tmp_path, monkeypatch):
     c = make_client(tmp_path)
     t = atlas.fetch(9, 10.0, -5.0, client=c, cache=True, base_url=archive.url, poll=7.0, sleep=waits.append)
     assert len(t) == 4 and waits == [7.0]
-    assert archive.hits == {"/queue/": 1, "/queue/1/": 3, "/static/results/job1.txt": 1}   # two polls and the delete
-    form = archive.bodies[0].decode()
+    # The task list (no unfinished task like it), the job, two polls and the delete.
+    assert archive.hits == {"/queue/": 2, "/queue/1/": 3, "/static/results/job1.txt": 1}
+    form = archive.bodies[1].decode()
     assert "use_reduced=True" in form and "ra=10.0000000" in form and "send_email=False" in form
     # A second call answers from the cache: no new job.
     assert len(atlas.fetch(9, 10.0, -5.0, client=c, cache=True, base_url=archive.url)) == 4
-    assert archive.hits["/queue/"] == 1
+    assert archive.hits["/queue/"] == 2
+
+
+def test_atlas_waits_for_its_own_unfinished_task_instead_of_queueing_again(archive, tmp_path, monkeypatch):
+    monkeypatch.setenv(atlas.TOKEN_ENV, "abc123")
+    _atlas_script(archive)
+    left = {"url": f"{archive.url}/queue/1/", "ra": 10.0, "dec": -5.0, "mjd_min": atlas.MJD_MIN, "mjd_max": None,
+            "use_reduced": True, "propermotion_ra": None, "propermotion_dec": None, "radec_epoch_year": None,
+            "finishtimestamp": None}
+    other = {**left, "url": f"{archive.url}/queue/2/", "ra": 11.0}
+    js = {"Content-Type": "application/json"}
+    archive.script["/queue/"] = [(200, js, json.dumps({"results": [other, left]}).encode())]
+    t = atlas.fetch(9, 10.0, -5.0, client=make_client(tmp_path), cache=False, base_url=archive.url,
+                    sleep=lambda s: None)
+    assert len(t) == 4 and archive.hits["/queue/"] == 1 and "/queue/2/" not in archive.hits   # no new job
+    assert atlas._waiting == 0
+
+
+def test_atlas_sends_the_proper_motion_and_its_epoch(archive, tmp_path, monkeypatch):
+    monkeypatch.setenv(atlas.TOKEN_ENV, "abc123")
+    _atlas_script(archive)
+    c = make_client(tmp_path)
+    ra, dec, moves = surveys.placed("atlas", 10.0, -5.0, 80.0, -40.0, 2016.0)
+    assert moves == {"pm": (80.0, -40.0), "epoch": surveys.MEAN_YEAR["atlas"]}
+    assert dec == pytest.approx(-5.0 - 40.0 * 4.5 / 3.6e6)
+    atlas.fetch(9, ra, dec, client=c, cache=False, base_url=archive.url, sleep=lambda s: None, **moves)
+    form = archive.bodies[1].decode()
+    assert "propermotion_ra=80.0000" in form and "propermotion_dec=-40.0000" in form
+    assert "radec_epoch_year=2020.5" in form
+    # No proper motion, no fields; and the other readers get none.
+    _atlas_script(archive)
+    atlas.fetch(9, ra, dec, client=c, cache=False, base_url=archive.url, sleep=lambda s: None, pm=(np.nan, None),
+                epoch=2020.5)
+    assert "propermotion" not in archive.bodies[-1].decode()
+    assert surveys.placed("skymapper", 10.0, -5.0, 80.0, -40.0, 2016.0)[2] == {}
 
 
 def test_atlas_token_goes_in_the_header_only_when_set(monkeypatch):
