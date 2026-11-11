@@ -77,12 +77,12 @@ Then the reading of the lists, the checks per candidate, figures and the blind r
 
 ```
 python scripts/slow_checks.py --fading L/fading.parquet --lightcurves R/lightcurves --out L/checks --skip-still --skip-band --skip-class ECL --n 1000
-python scripts/slow_review.py files --checks L/checks --fading L/fading.parquet --lightcurves R/lightcurves --rule RULE --out D
+python scripts/slow_review.py files --checks L/checks --fading L/fading.parquet --lightcurves R/lightcurves --rule RULE --hosts S/lightcurves --out D
 python scripts/slow_review.py launch --dir D          # arguments for scripts/stage_a_reviews.js (Workflow tool)
 python scripts/stage_a_audit.py --transcripts <session>/subagents --prompts D/prompts --replies D/replies --out D/audit.json --reviewer prereg/reviewers/slow-cal-1.json
-python -m cosmos_search.vetting commit --packets D/products.json --replies D/replies --vetter slow-cal-1 --batch D/batch --archive prereg/verdicts/<name> --audit D/audit.json
+python -m cosmos_search.vetting commit --packets D/products.json --replies D/replies --vetter slow-cal-1 --batch D/batch --archive prereg/verdicts/<name> --audit D/audit.json --plan D/plan.json.age
 git push
-python scripts/slow_review.py table --dir D --checks L/checks        # D/reviewed.csv, the list to read
+python scripts/slow_review.py table --dir D --checks L/checks        # D/reviewed.csv, the list to read; D/fakes.json
 ```
 
 The limit on how common steady fades are among FGK dwarfs, which is reported with or without a find
@@ -96,18 +96,32 @@ python scripts/slow_occurrence.py limit --stars R/summary --reference L/referenc
 
 Each step is described in [arms/slow-changes.md](arms/slow-changes.md), "Release day, end to end".
 
-**Launching the reviews.** The launcher hands every reviewer, before its task, the last message Cora wrote in the
-thread that launches them (found in the practice of 2026-11-10, below). A reviewer that has read a message about
-the release is not the reviewer the calibration measured, and the audit refuses its review. What is relayed is
-the last message Cora typed that is still in the launching session's context: once this thread's context had been
-summarized (2026-11-11), a reviewer launched the same way was handed its task and nothing else, and the audit
-counted it. So on release day:
+**Planted fades.** `files` puts fakes of known answer among the stars' review files: 30, or 5% of the stars
+where that is more, in quiet stars of the thresholds' sample (`--hosts S/lightcurves`, so keep S until the
+review files are built). Which files are fakes is written only encrypted, and `table` opens it once the verdicts
+are pushed. `D/fakes.json` then says how many the reviewer shortlisted. At least 20 of 30 (34 of 50) is
+consistent with the calibration. With fewer, no star is set aside on that batch's verdicts: the list is read in
+the checks' order with the verdict as a column ([vetting.md](vetting.md) §16). The review files hold nothing
+from the other surveys the checks read, where a fake's host would be seen unchanged, and the eclipsing-binary
+check stays beside each verdict in the table.
 
-1. Launch one review first and run the audit on it.
-2. If the audit reports a relayed user message, launch from a session whose context holds no message typed by
-   Cora (in the practice: this thread after its context had been summarized), and audit one review again.
-3. Launch the rest only once one review counts. The audit checks every review either way, so a wrong launch costs
-   reviews, never a wrong verdict in the batch.
+**Launching the reviews.** The launcher hands every reviewer, before its task, the last message Cora typed in
+the thread that launches them, when that thread's context holds one (found in the practice of 2026-11-10,
+below; [vetting.md](vetting.md) §15, second amendment). A reviewer that has read a message about the release is
+not the reviewer the calibration measured, and its review does not count. A message that reached the thread
+through the coordinator is not handed on. So on release day:
+
+1. Launch the reviews from a thread Cora has not typed in. The thread doing the day's work, which starts when
+   Cora writes in it, asks the coordinator for a separate thread for the reviews. That thread needs D's
+   `prompts/` and an empty `replies/` where it can reach them (D built under `/mnt/project-files/`, or those two
+   copied there and the replies copied back). It also runs the audit, because the reviewers' transcripts are in
+   the session that launched them, and hands back `audit.json` with the replies. It never needs the key.
+2. `scripts/stage_a_reviews.js` checks first: one small subagent reports whether anything precedes its task, and
+   if something does the script stops with no review launched. Then launch from another thread, or from this
+   one after its context has been summarized (in the practice, a launch after that was handed the task only).
+3. The audit reads every transcript whatever the check said, and a review that was handed more than its task
+   does not count. If the audit and the check disagree, launch one review, audit it, and launch the rest only
+   when it counts. A wrong launch costs reviews, never a wrong verdict in the batch.
 
 Machines:
 

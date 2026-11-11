@@ -26,6 +26,9 @@ BANDS = ("G", "BP", "RP", "ztf_g", "ztf_r", "ztf_i", "W1", "W2")
 SOURCE_KEYS = ("ra", "dec", "phot_g_mean_mag", "bp_rp", "parallax", "parallax_error", "ruwe", "ipd_frac_multi_peak",
                "phot_bp_rp_excess_factor")
 FLAVOURS = ("grey", "dust", "reemit", "temperature", "g_only")
+# The tests in every review file of the calibration (432 files of slow-cal-1, docs/vetting.md §14): what `tests`
+# returns. A file with any other test is not the kind of file the reviewer's rates were measured on (§7).
+CALIBRATED_TESTS = ("slow_change", "colour_of_change", "neowise_change", "ztf_after")
 HC_OVER_K_UM = 14387.77     # hc/k in micrometre kelvin
 SHELL_TEMPS_K = (300.0, 600.0, 1000.0)
 ZTF_SPLIT_MJD = checks.DR4_END_MJD

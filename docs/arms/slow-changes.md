@@ -820,22 +820,30 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
    clear of the same kind's brightenings. The checks:
    `slow_checks.py --fading L/fading.parquet --lightcurves R/lightcurves --out L/checks --skip-still --skip-band
    --skip-class ECL --n 1000`. DR4's eclipsing-binary class is left out first; `--lightcurves` adds the
-   eclipsing-binary filter on G and ZTF (`eb_explained`, its period and duration), shown to the reviewer as
-   information (its test failed for repeating long dips, "Eclipsing binaries among the candidates" below).
+   eclipsing-binary filter on G and ZTF (`eb_explained`, its period and duration), kept beside each star's
+   review as information (its test failed for repeating long dips, "Eclipsing binaries among the candidates"
+   below).
    Stars marked `g_only` or `bp_rp_only` are not checked but stay on the fading list with their verdict and are
    read after the rest, as the still stars are.
 9. Figures for the stars worth showing: `viz_candidates.py figures --run ... --ids ...` (docs/viz.md).
-10. Blind review of the stars the checks covered (docs/vetting.md §14-§15), `scripts/slow_review.py`:
-    `files --checks L/checks --fading L/fading.parquet --lightcurves R/lightcurves --rule RULE --out D` writes one
-    review file per star, built as the calibration's files were (`slow.vet.review_file`); `launch --dir D` prints
-    the arguments for `scripts/stage_a_reviews.js` (the model and effort of `prereg/reviewers/slow-cal-1.json`;
-    run with the Workflow tool, never the Agent tool); `stage_a_audit.py --reviewer
-    prereg/reviewers/slow-cal-1.json` refuses reviews served by anything else; `vetting commit --audit --archive`
+10. Blind review of the stars the checks covered (docs/vetting.md §14-§16), `scripts/slow_review.py`:
+    `files --checks L/checks --fading L/fading.parquet --lightcurves R/lightcurves --rule RULE --hosts
+    S/lightcurves --out D` writes one review file per star, built as the calibration's files were
+    (`slow.vet.review_file`), and among them planted fades of known answer: 30, or 5% of the stars where that is
+    more, put into quiet stars of the thresholds' sample, kept when the run would have flagged them, and built
+    into files by the same function (docs/vetting.md §16). Which files are fakes is written only encrypted.
+    `launch --dir D` prints the arguments for `scripts/stage_a_reviews.js` (the model and effort of
+    `prereg/reviewers/slow-cal-1.json`; run with the Workflow tool, never the Agent tool, from a thread Cora has
+    not typed in); `stage_a_audit.py --reviewer prereg/reviewers/slow-cal-1.json` counts only reviews served by
+    that reviewer and handed nothing but their task; `vetting commit --audit --archive --plan D/plan.json.age`
     records the verdicts; and `table --dir D --checks L/checks` writes `D/reviewed.csv`, the list to read, with
-    the eclipsing-binary check beside each verdict. The files hold the calibration's four tests: `eb_explained`
-    goes into them only with `--with-eclipse`, because no calibration batch has measured the reviewer on files
-    that carry it. A star whose NEOWISE or ZTF fetch failed in the checks is left out and listed, so that its
-    checks are run again first.
+    the eclipsing-binary check beside each verdict, and `D/fakes.json`: how many planted fades the reviewer
+    shortlisted and whether that is consistent with the calibration (at least 20 of 30). If it is not, no star
+    is set aside on the batch's verdicts. The files hold the calibration's four tests and nothing from the other
+    surveys of "Other surveys" below, where a fake's host would be seen unchanged. `eb_explained` goes into the
+    files only with `--with-eclipse` ("Eclipsing binaries among the candidates", decision of 2026-11-11). A star
+    whose NEOWISE or ZTF fetch failed in the checks is left out and listed, so that its checks are run again
+    first.
 11. The limit on how common steady fades are among FGK dwarfs, find or no find (docs/arms/occurrence.md, "On
     DR4"): on day one `slow_occurrence.py` on the light curves of step 2, with the pass and flag steps run on
     that directory; then on every star, from `R/summary`, `L/reference.parquet`, the light curves the pass keeps
@@ -1070,6 +1078,32 @@ it. A strictly periodic long dip and a long-period eclipsing binary differ only 
 the kind of object this search is for. Measuring duration from the folded light curve, rather than from unbroken
 runs of epochs, would tell them apart; it would need its own test. Data: `/mnt/project-files/slow-changes/eb-test/`.
 
+**Decision (2026-11-11): the check stays out of the review files and stands beside each verdict.** The consequence
+written above for a failed E1 has two parts. The first, that no star leaves the review on `eb_explained`, holds.
+The second, that the verdict is shown to the reviewer, was never built into a calibration: the 432 files of the
+reviewer's calibration (docs/vetting.md §14, run the same day) carry four tests and no eclipsing-binary check,
+and no batch since has carried it. When release day's review files were written (`scripts/slow_review.py`, PR
+#88) the check was left out unless `--with-eclipse` is given. That default is kept, and this is a departure from
+the text above, for these reasons:
+
+- A reviewer is measured on one kind of file (docs/vetting.md §7). Recall of 44 of 50 and a false shortlist of
+  5.0% at the flagged mix belong to files without the check. Adding a test that says "explained: 1" makes a
+  reviewer whose rates nobody has measured, on the day the rates are quoted.
+- The check is wrong in the direction that matters. It explains 9 of 48 repeating long dips, the objects this
+  search is for. How far the reviewer follows it is unknown, so the loss of recall on that shape could be
+  anything from nothing to a fifth.
+- The gain is unmeasured too. DPAC's eclipsing binaries are left out before the checks (`--skip-class ECL`), and
+  of the 23 other fades with ZTF epochs the check explained 3.
+- Nothing is lost by waiting. `eb_explained`, its period and whether the period is unphysical are in
+  `checks.csv`, in the batch's key, and beside every verdict in `D/reviewed.csv`, where the person reading the
+  list sees both. From 2026-11-11 each batch also reports how many of its planted fades the check would have
+  explained (`D/fakes.json`, docs/vetting.md §16).
+
+Showing it to the reviewer needs a calibration batch whose files carry it, scored as §14 was: about 250 reviews
+(the 50 fakes of R1, the repeating long dips among them, and 200 natural stars), about 2.7 million output tokens
+on the adopted reviewer. It has not been run. `--with-eclipse` remains for that batch; `files.json` then records
+that the files are not of the calibrated kind, and `table` says that §14's rates do not describe their reviews.
+
 ## Other surveys (2026-11-10)
 
 A fade in Gaia can be Gaia's own doing (an instrument or calibration effect, or a neighbour that only Gaia's
@@ -1227,6 +1261,13 @@ or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet
 
 ## Log
 
+- **2026-11-11.** Blind review on release day (Release day, end to end, step 10; docs/vetting.md §16). Every
+  review batch now holds planted fades of known answer, built into review files by the function that builds a
+  star's and written with sealed answers; the batch's result says whether its reviewer still finds what the
+  calibration's reviewer found. The eclipsing-binary check stays out of the review files and beside each
+  verdict, a recorded departure from E1's written consequence (Eclipsing binaries among the candidates), because
+  no calibration has measured the reviewer on files that carry it. Review files hold nothing from the other
+  surveys.
 - **2026-11-11.** Other surveys as checks on a fade (Other surveys, above; PR #87). Readers for SkyMapper,
   NOIRLab, ATLAS, ASAS-SN and TESS, and a comparison in every candidate's row: whether another telescope saw
   Gaia's change over Gaia's own dates, what happened after Gaia's last visit, and how variable TESS shows the star
