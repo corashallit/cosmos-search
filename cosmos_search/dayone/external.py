@@ -46,9 +46,10 @@ def _empty():
                          zip(COLUMNS, ("int64", "object", "float64", "float64", "float64"))})
 
 
-def ztf(source_id, ra, dec):
+def ztf(source_id, ra, dec, groups=False):
     """ZTF epochs within ZTF_RADIUS_ARCSEC of (ra, dec) from IRSA's light-curve service, one block per ZTF object
-    (field, CCD quadrant, filter), each normalised to its own median.
+    (field, CCD quadrant, filter), each normalised to its own median. With groups, a `group` column names the ZTF
+    object each epoch belongs to (levels are only comparable within one).
 
     Not the HATS copy: its partitions are single row groups of whole light curves, so a cone search reads ~10 GB."""
     import io
@@ -60,7 +61,7 @@ def ztf(source_id, ra, dec):
     body = get_client().get_bytes(ZTF_LC.format(ra=ra, dec=dec, r=ZTF_RADIUS_ARCSEC / 3600), cache=persistent())
     rows = pd.read_csv(io.BytesIO(body)) if body else pd.DataFrame()
     out = []
-    for _, r in rows.groupby("oid") if len(rows) else ():
+    for oid, r in rows.groupby("oid") if len(rows) else ():
         ok = (r["catflags"] == 0) & np.isfinite(r["mag"]) & np.isfinite(r["magerr"])
         band = ZTF_BANDS.get(str(r["filtercode"].iloc[0]))
         if ok.sum() < ZTF_MIN_EPOCHS or band is None:
@@ -70,7 +71,10 @@ def ztf(source_id, ra, dec):
         out.append(pd.DataFrame({"source_id": int(source_id), "band": band,
                                  "t": r.loc[ok, "hjd"].to_numpy(float) - 2457000.0,
                                  "flux": flux, "err": flux * magerr * np.log(10) / 2.5}))
-    return pd.concat(out, ignore_index=True) if out else _empty()
+        if groups:
+            out[-1]["group"] = str(oid)
+    out = pd.concat(out, ignore_index=True) if out else _empty()
+    return out.assign(group=pd.Series(dtype="object")) if groups and "group" not in out else out
 
 
 def tess_sectors(ra, dec):
