@@ -78,16 +78,19 @@ def vsx_slow(hats=VSX_HATS):
                         ).reset_index(drop=True)
 
 
-def match_gaia(known, tap, radius_arcsec=RADIUS_ARCSEC):
+def match_gaia(known, tap, radius_arcsec=RADIUS_ARCSEC, workers=1, log=None):
     """Nearest Gaia DR3 source within radius_arcsec of each row (source_id <NA> when none).
 
     One cone query per row: the archive answers a single cone in ~0.3 s, while a positional join against an
-    uploaded table timed out (HTTP 408) even for 50 rows on 2026-10-23.
+    uploaded table timed out (HTTP 408) even for 50 rows on 2026-10-23. `tap` is ESA's archive or a mirror
+    with the same gaia_source table (`python -m cosmos_search.slow known --mirror aip`); `workers` queries run
+    at once.
     """
     import time
+    from concurrent.futures import ThreadPoolExecutor
 
-    rows = []
-    for i, r in enumerate(known.itertuples(index=False)):
+    def one(job):
+        i, r = job
         q = ("SELECT source_id, phot_g_mean_mag AS g_mag, bp_rp, phot_variable_flag, has_epoch_photometry, "
              f"DISTANCE(POINT({r.ra}, {r.dec}), POINT(ra, dec)) * 3600 AS sep_arcsec FROM gaiadr3.gaia_source "
              f"WHERE 1 = CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {r.ra}, {r.dec}, {radius_arcsec / 3600}))")
@@ -99,21 +102,26 @@ def match_gaia(known, tap, radius_arcsec=RADIUS_ARCSEC):
                 if attempt == 5:
                     raise
                 time.sleep(5 * 2 ** attempt)
-        if len(res):
-            rows.append(res.sort_values("sep_arcsec").iloc[0].to_dict() | {"row": i})
-    m = pd.DataFrame(rows)
+        if log and (i + 1) % 100 == 0:
+            log(f"{i + 1} of {len(known)} positions matched")
+        return res.sort_values("sep_arcsec").iloc[0].to_dict() | {"row": i} if len(res) else None
+
+    with ThreadPoolExecutor(max(1, workers)) as pool:
+        rows = [r for r in pool.map(one, enumerate(known.itertuples(index=False))) if r is not None]
+    m = pd.DataFrame(rows, columns=None if rows else ["source_id", "g_mag", "bp_rp", "phot_variable_flag",
+                                                      "has_epoch_photometry", "sep_arcsec", "row"])
     m["phot_variable_flag"] = m["phot_variable_flag"].astype(str)
     res = known.reset_index(drop=True).join(m.set_index("row"))
     res["source_id"] = res["source_id"].astype("Int64")
     return res
 
 
-def build(tap, alerts_text=None, hats=VSX_HATS):
+def build(tap, alerts_text=None, hats=VSX_HATS, workers=1, log=None):
     """All known answers as one DataFrame, matched to Gaia DR3."""
     if alerts_text is None:
         alerts_text = get_client().get(ALERTS_URL).text
     known = pd.concat([pd.DataFrame([BOYAJIAN]), fading_alerts(alerts_text), vsx_slow(hats)], ignore_index=True)
-    return match_gaia(known, tap)
+    return match_gaia(known, tap, workers=workers, log=log)
 
 
 def alert_lightcurve(text, name):
