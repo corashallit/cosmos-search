@@ -28,7 +28,7 @@ class FakeArchive:
     """A local HTTP server with scripted responses: path -> list of (status, headers, body)."""
 
     def __init__(self):
-        self.script, self.hits, self.agents, self.bodies = {}, {}, [], []
+        self.script, self.hits, self.agents, self.bodies, self.methods = {}, {}, [], [], []
         self.active = self.max_active = 0
         self.delay = 0.0
         lock = threading.Lock()
@@ -47,6 +47,7 @@ class FakeArchive:
                     archive.agents.append(self.headers.get("User-Agent"))
                     archive.bodies.append(body)
                     path = self.path.split("?")[0]
+                    archive.methods.append((self.command, path))
                     k = archive.hits.get(path, 0)
                     archive.hits[path] = k + 1
                     steps = archive.script.get(path, [(404, {}, b"missing")])

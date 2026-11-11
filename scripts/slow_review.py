@@ -863,7 +863,7 @@ def main(argv=None):
     s.add_argument("--with-eclipse", action="store_true",
                    help="put the eclipsing-binary check into the files (not what the calibration's files held)")
     s.add_argument("--fakes", type=int,
-                   help=f"planted fades with known answers (default {FAKE_FLOOR}, or {FAKE_SHARE:.0%} of the stars' "
+                   help=f"planted fades with known answers (default {FAKE_FLOOR}, or {FAKE_SHARE:.0%}% of the stars' "
                         "files where that is more); 0 for a practice batch without them")
     s.add_argument("--hosts", help="light-curve files that hold every star of their sky (the thresholds' sample "
                                    "S/lightcurves): the quiet stars the planted fades are put into")

@@ -50,7 +50,7 @@ the run goes on.
 | 5 | DR4 against DR3 for the same stars | `python -m cosmos_search.gaia.dr4_check compare --dr4 DL/lightcurves --dr3 /mnt/project-files/release-day/dr3-reference/random/lightcurves.parquet` | No star in both: map ids through `dr3_neighbourhood` (`--id-map`). Flux scale or time offset: units or zero points differ from DR3's; fix the reader before anything is scored |
 | 6 | Rejected epochs | Does `routes.json` list a `vari_epoch_flags` folder among the bulk files? Does step 3 report a rejection column? | Neither is expected. The scoring uses its own rule for bad epochs (below) |
 | 7 | Class names | `SELECT phot_variable_best_class, COUNT(*) FROM gaiadr4.all_source_flags GROUP BY 1` | Update the eclipsing-binary class given to `slow_checks.py --skip-class` |
-| 8 | Trend zero point | After the threshold sample is scored: `trend_offset_by_G` and `trend_offset_by_BP_RP` in `L/summary.json` (median trend in units of its error, by G magnitude and by colour), and the same by sky region | Measured against neighbouring stars the median was 0.003 to 0.007 errors in every magnitude bin over all of DR3, and within 0.013 errors in every colour range on DR3's Andromeda field. Before that comparison an offset at G < 14 was +0.85 errors in DR3 and would be about +2.3 at DR4's precision; a bin or a colour range off zero has to be removed before thresholds are set |
+| 8 | Trend zero point | After the threshold sample is scored: `trend_offset_by_G`, `trend_offset_by_BP_RP` and `trend_offset_by_flux_excess` in `L/summary.json` (median trend in units of its error, by G magnitude, by colour, and by how much more BP and RP light a star has than its G light predicts, which is light from a neighbour), and the same by sky region | Measured against neighbouring stars (`median_trend_z_against_neighbours`) the median was 0.003 to 0.007 errors in every magnitude bin over all of DR3, and on DR3's Andromeda field within 0.013 errors in every colour range and within 0.006 in every range of flux excess; expect within about 0.02 in every range with a few hundred stars. Before that comparison an offset at G < 14 was +0.85 errors in DR3 and would be about +2.3 at DR4's precision, and stars with a flux excess above 0.02 sat at −0.1 to −0.25 errors (a false fade; `median_trend_z` says whether DR4 has it too); a bin or a range off zero has to be removed before thresholds are set |
 
 Steps 1 to 3 need no science decision and take what the archive's load allows. Step 4 is the first data anyone
 on the project sees: Boyajian's star has no light curve in DR3 and gets one in DR4.
@@ -82,14 +82,36 @@ By route, fastest first (`routes.json` says which exist):
 Then the reading of the lists, the checks per candidate, figures and the blind review:
 
 ```
-python scripts/slow_checks.py --fading L/fading.parquet --lightcurves R/lightcurves --out L/checks --skip-still --skip-band --skip-class ECL --n 1000
+python scripts/slow_checks.py --fading L/fading.parquet --lightcurves R/lightcurves --out L/checks --skip-still --skip-band --skip-class ECL --n 1000 --atlas-n 24     # go on when it prints that the files are written; it stays running for ATLAS
 python scripts/slow_review.py files --checks L/checks --fading L/fading.parquet --lightcurves R/lightcurves --rule RULE --hosts S/lightcurves --out D
 python scripts/slow_review.py launch --dir D          # arguments for scripts/stage_a_reviews.js (Workflow tool)
 python scripts/stage_a_audit.py --transcripts <session>/subagents --prompts D/prompts --replies D/replies --out D/audit.json --reviewer prereg/reviewers/slow-cal-1.json
 python -m cosmos_search.vetting commit --packets D/products.json --replies D/replies --vetter slow-cal-1 --batch D/batch --archive prereg/verdicts/<name> --audit D/audit.json --plan D/plan.json.age
 git push
 python scripts/slow_review.py table --dir D --checks L/checks        # D/reviewed.csv, the list to read; D/fakes.json
+python scripts/slow_checks.py --fading L/fading.parquet --out L/checks --atlas-only --atlas-n 100 --ids D/reviewed.csv --ids-where shortlisted     # ATLAS for the shortlist, strongest first
 ```
+
+**ATLAS answers about one star an hour.** Of the other surveys the checks read, ATLAS covers Gaia's last years
+and the years since over the whole sky, and south of declination −30° the years since rest on it. Its service
+takes about 18.5 minutes of server time per star in a queue shared by all its users, so one account gets through
+about one star an hour, a few dozen a day (measured 2026-11-11, PR #99). ATLAS is therefore asked last, about the
+strongest stars only, and no step waits for it:
+
+- `--atlas-n 24` sends ATLAS the 24 strongest stars it covers (G 12.5 to 19), strongest first and two at a time,
+  after `checks.csv` and every star's epochs from the other surveys are written. Build the review files as soon
+  as the script prints that the files are written, and leave it running as a background job of a cloud session,
+  which has the token (`ATLAS_TOKEN`). Never give `--atlas-n` on kore: ATLAS is run by the University of Hawaii,
+  whose network blocked Cora's home address on 2026-11-10, and nothing on that address contacts it without her
+  go-ahead. Without `--atlas-n` the script does not contact ATLAS at all.
+- After each answer it rewrites `checks.csv` (`atlas_same`, `atlas_after`, and `same_years` and `after` with
+  ATLAS among the surveys) and `surveys.parquet`. Stopping it (Ctrl-C or a TERM signal) loses nothing that is
+  written and takes its unanswered requests off ATLAS's queue. If it ends early, the same line with
+  `--atlas-only` in place of `--n 1000` carries on from the files in `L/checks` and fetches nothing else.
+- The review files hold nothing from the other surveys, so the review does not use ATLAS. Once `D/reviewed.csv`
+  exists, stop the first run and start the last command above: it sends the shortlisted stars ATLAS has not
+  answered yet, strongest first, and their answers go into the same `checks.csv`. A star read before its answer
+  arrives is read without one; south of −30° that leaves open whether its fade went on after Gaia's last visit.
 
 The limit on how common steady fades are among FGK dwarfs, which is reported with or without a find
 ([arms/occurrence.md](arms/occurrence.md), "On DR4": first on the threshold sample, then on every star):
@@ -235,7 +257,8 @@ this run's lists long.
 **Review step on real candidates (2026-11-10).** From the checks of the DR3 trial's 60 strongest fades that DPAC
 does not call eclipsing binaries: 60 review files in 10.6 min (cross-match of 60 stars scattered over the sky),
 none refused, none left out. Six of them were reviewed through `scripts/stage_a_reviews.js` by the adopted
-reviewer: six replies in 7 min, all in the reply format, about 180,000 tokens a review. **None counts**: the audit
+reviewer: six replies in 7 min, all in the reply format, about 180,000 tokens a review as the launcher counts them,
+what the reviewer read included (what a reviewer writes is about 15 thousand, "Planted fades" above). **None counts**: the audit
 found the last message Cora wrote in the launching thread in every reviewer's context (below). Committed as an
 uncounted practice batch (not archived), the table step listed two of the six on the shortlist and read the two
 R CrB stars and the two repeating dimmers as their known kinds. On 2026-11-11, after this thread's context had been
