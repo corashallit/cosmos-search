@@ -87,6 +87,35 @@ def test_fading_alerts_keeps_fades_in_dr4_span():
     assert "dG 1.5" in f["note"].iloc[0]
 
 
+def test_match_gaia_keeps_the_nearest_source_and_retries_a_refused_query(monkeypatch):
+    from astropy.table import Table
+
+    class Service:
+        """Answers each cone with two sources, none for the third position; refuses every first try."""
+        def __init__(self):
+            self.seen = set()
+
+        def query(self, adql, sync=False):
+            ra = float(adql.split("DISTANCE(POINT(")[1].split(",")[0])
+            if ra not in self.seen:
+                self.seen.add(ra)
+                raise RuntimeError("503 Service Unavailable")
+            if ra == 12.0:
+                return Table({"source_id": np.array([], np.int64), "g_mag": [], "bp_rp": [],
+                              "phot_variable_flag": np.array([], str), "has_epoch_photometry": np.array([], bool),
+                              "sep_arcsec": []})
+            return Table({"source_id": [int(ra) * 100 + 1, int(ra) * 100 + 2], "g_mag": [17.6, 11.8],
+                          "bp_rp": [np.nan, 0.78], "phot_variable_flag": ["NOT_AVAILABLE", "VARIABLE"],
+                          "has_epoch_photometry": [False, True], "sep_arcsec": [1.7, 0.2]})
+
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    k = pd.DataFrame({"name": ["a", "b", "c"], "ra": [10.0, 11.0, 12.0], "dec": [1.0, 2.0, 3.0]})
+    m = known.match_gaia(k, Service(), workers=3)
+    assert list(m["name"]) == ["a", "b", "c"]
+    assert m["source_id"].tolist()[:2] == [1002, 1102] and m["source_id"].isna().tolist() == [False, False, True]
+    assert m["sep_arcsec"].iloc[0] == 0.2 and m["phot_variable_flag"].iloc[1] == "VARIABLE"
+
+
 def test_sky_pixel_and_offsets():
     sid = np.array([5 * 2**35 * 4**7, 5 * 2**35 * 4**7 + 1, 6 * 2**35 * 4**7], dtype=np.int64)
     assert list(drift.sky_pixel(sid, level=5)) == [5, 5, 6]
