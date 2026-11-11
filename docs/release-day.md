@@ -92,9 +92,10 @@ python scripts/slow_review.py table --dir D --checks L/checks        # D/reviewe
 python scripts/slow_checks.py --fading L/fading.parquet --out L/checks --atlas-only --atlas-n 100 --ids D/reviewed.csv --ids-where shortlisted     # ATLAS for the shortlist, strongest first
 ```
 
-**ATLAS answers about one star an hour.** Of the other surveys the checks read, ATLAS covers Gaia's last years
-and the years since over the whole sky, and south of declination −30° the years since rest on it. Its service
-takes about 18.5 minutes of server time per star in a queue shared by all its users, so one account gets through
+**ATLAS answers about one star an hour.** Of the other surveys the checks read, ATLAS covers DR4's last 1.2 years
+(it is read from 2018-10-26, before which its fluxes are unstable) and the years since over the whole sky, and
+south of declination −30° the years since rest on it. Its service takes up to about 18.5 minutes of server time
+per star in a queue shared by all its users, so one account gets through
 about one star an hour, a few dozen a day (measured 2026-11-11, PR #99). ATLAS is therefore asked last, about the
 strongest stars only, and no step waits for it:
 

@@ -26,7 +26,7 @@ Every reader returns COLUMNS:
 |---|---|---|---|---|
 | ztf (IRSA) | 2018-03 on | dec > -30 | 13-20.5 | anywhere |
 | asassn (Sky Patrol v2) | 2012 on (V to 2018, g from 2017) | all | 10.5-16.5 | only where port 9006 is open: not cloud containers |
-| atlas (forced photometry) | 2015-07 on; south of -50 from 2022 | all | 12.5-19 | anywhere, with ATLAS_TOKEN |
+| atlas (forced photometry) | 2018-10 on (read from then); south of -50 from 2022 | all | 12.5-19 | anywhere, with ATLAS_TOKEN |
 | skymapper (DR4) | 2014-03 to 2021-09 | dec < +16 | 9-18.5 | anywhere |
 | noirlab (NSC DR2) | 2012-09 to 2019-11 | mostly dec < +30 | 14.5-21 | anywhere |
 

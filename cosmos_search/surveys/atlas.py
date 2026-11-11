@@ -1,9 +1,11 @@
 """ATLAS forced photometry (fallingstar-data.com/forcedphot): cyan (c, 420-650 nm) and orange (o, 560-820 nm)
 fluxes at a given position on every ATLAS image, 2015-07 on from Hawaii (two telescopes from 2017) and from 2022
-also from Chile and South Africa, which opened the sky south of dec -50.
+also from Chile and South Africa, which opened the sky south of dec -50. This reader asks only from 2018-10-26
+(MJD_MIN; module notes below).
 
-Of the surveys read here it is the one that covers both Gaia's last years and the years since for most of the
-sky, at four 30 s exposures a night every one to two nights, from about 12.5 mag (saturation) to 19.
+Of the surveys read here it is the one that covers the years since Gaia's last visit for the whole sky, at four
+30 s exposures a night every one to two nights, from about 12.5 mag (saturation) to 19; over DR4's own dates it
+has only the last 1.2 years.
 
 Access needs a free account. The token on the site's "API token" page goes in the header
 `Authorization: Token <token>`. This reader takes it from the environment variable ATLAS_TOKEN; without that it
@@ -42,6 +44,15 @@ the sky can be overestimated (ATLAS FAQ); `slow.independent` treats neighbours i
 dilution. Difference mode stays available with `use_reduced=False` and needs the star's flux in the reference
 image (`ref_ujy`) to turn differences into fractions.
 
+Reduced fluxes are not stable across that first change either (measured 2026-11-11 on 32 constant stars of G 12.5
+to 18.5): in 150 days after MJD 58417 they are 1.3% higher than in 150 days before (median over 30 combinations of
+star, telescope and filter, about six times its error; at control dates a year either side and in between, under
+0.5%), and before it the half-year medians scatter about the later level by 1-2% at G < 17 and by 7-35% at G
+17-18.5, against 0.5% and 2% after it. So the reader asks only from MJD 58417 (MJD_MIN) and `clean` drops anything
+earlier; ATLAS then covers DR4's last 1.2 years and everything since. On those dates the scatter of 180-day bins
+beyond their errors (the season floor in `slow.independent`) is 0.53%: 0.64% at G 12.5-13, 0.38% at 13-15, 0.46% at
+15-17 and 1.2% at 17-18.5.
+
 Kept measurements are the ATLAS FAQ's own cuts (`keep`): a finite flux error under 10 mJy, error flag 0, away
 from the detector's edges, a point-spread function between 1.6 and 5 pixels, a sensible aperture correction, and
 a clear, dark enough sky (5-sigma limit and sky brightness both fainter than 17 mag). One group per site and
@@ -63,7 +74,7 @@ from . import MJD_TO_BTJD, MissingCredential, empty, table
 
 BASE_URL = "https://fallingstar-data.com/forcedphot"
 TOKEN_ENV = "ATLAS_TOKEN"
-MJD_MIN = 57200.0            # 2015-06-27, before ATLAS's first survey images
+MJD_MIN = 58417.0           # 2018-10-26, ATLAS's reference change; earlier reduced fluxes are unstable (notes)
 POLL_SECONDS = 30.0         # the API guide polls every 10 s; a job takes about 20 minutes to run
 TIMEOUT_SECONDS = 6 * 3600.0
 MAX_WAITING = 2             # this process's tasks waiting to start, at most (module notes)
@@ -221,13 +232,14 @@ def keep(r):
             & (c["apfit"] > -1) & (c["apfit"] < -0.1) & (c["mag5sig"] > 17) & (c["Sky"] > 17))
 
 
-def clean(rows, source_id, ref_ujy=None):
-    """Kept measurements (module notes) as a COLUMNS table. ref_ujy: {filter: flux in microjansky of the star in the
-    reference image}, for difference-image results, whose fluxes are changes and are turned into ref + change."""
+def clean(rows, source_id, ref_ujy=None, start=MJD_MIN):
+    """Kept measurements (module notes) from MJD `start` on, as a COLUMNS table. ref_ujy: {filter: flux in
+    microjansky of the star in the reference image}, for difference-image results, whose fluxes are changes and
+    are turned into ref + change."""
     if not len(rows):
         return empty()
     r = rows[keep(rows)]
-    r = r[r["F"].astype(str).isin(list(BANDS)) & (r["duJy"] > 0)]
+    r = r[r["F"].astype(str).isin(list(BANDS)) & (r["duJy"] > 0) & (pd.to_numeric(r["MJD"]) >= start)]
     if not len(r):
         return empty()
     filt = r["F"].astype(str)
@@ -263,4 +275,4 @@ def fetch(source_id, ra, dec, mjd_min=MJD_MIN, mjd_max=None, use_reduced=True, r
         text = request(ra, dec, mjd_min, mjd_max, use_reduced, pm=moves, epoch=epoch, client=client, **job)
         if cache:
             client.cache.put(key, text.encode(), {"service": "atlas"})
-    return clean(parse(text), source_id, ref_ujy)
+    return clean(parse(text), source_id, ref_ujy, start=mjd_min)

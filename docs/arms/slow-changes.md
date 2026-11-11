@@ -1298,7 +1298,7 @@ DR4's dates, and again with that trend injected into the survey's epochs.
 | SkyMapper DR4 | 2014-03 to 2021-09 | δ < +16° | 279 of 316 | 0.44% | 0.22 (G 11-13), 0.21 (13-15), 0.33 (15-17), 0.97 (17-18.5) | 86%, 93%, 79%, 33% | 0 / 1 of 279 |
 | NOIRLab NSC DR2 | 2012-09 to 2019-11 | mostly δ < +30°, G > 14.5 | 62 of 167 | 0.57% | 0.35 (G 15-17), 1.9 (17-18.5) | 64%, 42% | 0 / 0 of 62 |
 | ZTF (IRSA) | 2018-03 on | δ > −30°, G > 13 | 224 of 232 | 0.30% | 0.33 (G 13-15), 0.29 (15-17), 0.63 (17-18.5) | 82%, 80%, 59% | 2 / 3 of 224 |
-| ATLAS | 2015-07 on | all (south of −50° from 2022) | not measured | provisional 1.5% | | | |
+| ATLAS (reduced images) | 2018-10 on (earlier fluxes unstable, below) | all (south of −50° from 2022) | 29 of 32 | 0.53% | 1.1 (G 12.5-13), 1.0 (13-15), 2.2 (15-17), 5.2 (17-18.5) | 41% (12 of 29) | 1 / 0 of 29 |
 | ASAS-SN | 2012 on | all, G 10.5-16.5 | not measured | provisional 1.5% | | | |
 
 The ratio of k to its error has a scatter of 0.9 on SkyMapper's constants, so its errors are about right.
@@ -1315,6 +1315,18 @@ ZTF starts. About two quiet stars in a hundred drift by that much, and a `seen` 
 that false-match rate. Brighter than G 13 ZTF saturates (floor 0.45%, and 4 of 58 constant stars read
 `opposite`), so it is not read for those stars.
 
+ATLAS was measured on 32 of the constant stars at G 12.5-18.5 (`configs/surveys/constants-atlas.csv`, 8 per G
+range, half from each list), since one star takes about an hour of the service's queue. Its reduced-image fluxes
+are not stable before 2018-10-26 (MJD 58417), when ATLAS replaced its reference images: in the 150 days after that
+date they are 1.3% higher than in the 150 days before (median over 30 combinations of star, telescope and filter,
+about six times its error; at control dates a year either side and in between, under 0.5%), and before it the
+half-year medians scatter about the later level by 1-2% at G < 17 and by 7-35% at G 17-18.5, against 0.5% and 2%
+since. Read from 2015 with one level per telescope and filter, 5 of 29 constant stars read `opposite` over DR4's
+dates and the errors of k were too small by half; with a separate level before and after the change, 4 read `seen`.
+So the reader asks only from 2018-10-26, which leaves ATLAS DR4's last 1.2 years (trend error 1-2% per year at G <
+17) and everything since. On those dates its errors are about right (scatter of k over its error 1.1) and 1 of 29
+constant stars, at G 17.3, reads `seen`.
+
 Every trend error includes 0.1% per year for the survey's own drift (`TREND_FLOOR`). ZTF showed why: with six
 years of data after 2020 its bin errors predict a trend error of 0.06% per year, while the trends of 230 constant
 stars scatter by 0.12% per year around a median fade of 0.03% per year. Without the floor 11 of the 230 read as
@@ -1327,7 +1339,11 @@ only say `went_on` for fast fades. ZTF carries the years since for the northern 
 is 0.11 to 0.13% per year at every G from 13 to 18.5 (the drift floor dominates), so it tells whether a fade of
 0.4% per year or more went on. With the made-up trend continued into ZTF's epochs, 97% of 230 stars read
 `went_on`; left constant, 91% read `stopped`. South of −30° the years since rest on ATLAS, and for stars brighter
-than G 13 on ASAS-SN.
+than G 12.5 on ASAS-SN. ATLAS's trend error after 2020 is 0.12 to 0.14% per year at G 12.5-17 and 0.25% at
+17-18.5; with the made-up trend continued, 31 of 32 constant stars read `went_on`, and left constant 29 read
+`stopped`, 2 `undecided` and 1 `reversed`. At G 17-18.5 its errors there are about 1.4 times too small and the
+constant stars brightened by a median 0.5% per year since 2020, so a `stopped` or `reversed` from ATLAS for a
+faint star needs a second look.
 
 SkyMapper needed one change from the first version: with one group per filter, constant stars of G 17-18.5 read
 as fading (median k / error +0.5, 4 of 62 `seen`), because the short early exposures catch a faint star only when
@@ -1343,6 +1359,7 @@ faint, recovers, or dims by as much again.
 | SkyMapper, DR3 (2017-05) | 1.8%, 53%, 1 / 0 of 151 | 1.0%, 38%, 69%, 1 / 0 of 229 |
 | ZTF, DR4 (dimming from 2019-01) | 0.47%, 96%, 0 / 0 of 222 | 0.33%, 90%, 99%, 2 / 0 of 227 |
 | NOIRLab, DR4 | 1.1%, 65%, 0 / 0 of 23 | no epochs after 2019-11 |
+| ATLAS, DR4 | no epochs before the dimming (they start 2018-10) | 0.49%, 72%, 90%, 0 / 0 of 29 |
 
 This test found two faults, both fixed. Survey bins from the 30 days after Gaia's last visit were counted as
 "back to normal" over Gaia's dates and as "still faint" afterwards, which pulled ZTF's depth down to 0.9 of the
@@ -1397,11 +1414,6 @@ better measure of activity and are not read yet.
 
 **Not yet tested against the live service.**
 
-- ATLAS needs an account's token (`ATLAS_TOKEN`). The reader runs a job on reduced images (difference images
-  step when ATLAS replaced its reference images in 2018-10 and 2020-02, inside Gaia's last years), and its
-  protocol is tested against a local server. The first session started after the token was added runs
-  `survey_calibrate.py fetch --surveys atlas`, `floors` and `null` on the constant stars and replaces the
-  provisional floor.
 - ASAS-SN answers only on port 9006, which cloud containers cannot open. On 2026-11-10 the first try from kore
   ended within two minutes with the whole hawaii.edu network dropping kore's address, most likely because the
   reachability check opened two empty connections that looked like a port scan. The check is now one ordinary
@@ -1431,6 +1443,12 @@ shortlisted.
 
 ## Log
 
+- **2026-11-11.** ATLAS against the live service ("Other surveys"). Measured on 32 constant stars: its
+  reduced-image fluxes step by 1.3% at ATLAS's reference change of 2018-10-26 and scatter far more before it
+  (7-35% per half-year at G 17-18.5), so the reader now asks only from that date; floor 0.53% (was a provisional
+  1.5%). The request carries Gaia's proper motion so that the server follows a moving star (a fixed position
+  loses 10-15% of a 200 mas/yr star's flux at the ends of 2015-2026), at most two tasks wait in ATLAS's shared
+  queue at a time, and a rerun takes up its own queued tasks instead of sending them again (PR #99).
 - **2026-11-11.** ATLAS in the checks ("Other surveys", "Running it"). On live data ATLAS answers about one
   star an hour for one account, and `slow_checks.py` asked it about every star along with the other surveys, so
   the checks of 1,000 stars would have taken about as many hours. ATLAS is now asked last and only with
