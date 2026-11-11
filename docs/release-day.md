@@ -161,7 +161,7 @@ read directly:
 | DataLink reader | 200 stars through the stand-in endpoint, equal to the files |
 | First-hour file check | no problems on the smallest and the largest file; one note (no rejected epochs marked) |
 | Memory | a worker's peak 1.33 GB; the build's last step 2.7 GB in one process; no swapping |
-| Disk | 52 GB of fake files and 34 GB of output left in `~/cosmos-data/practice-dr4/` for a scoring practice |
+| Disk | 52 GB of fake files and 34 GB of output under `~/cosmos-data/practice-dr4/`, with the scoring practice's 6 GB; all of it is deleted once both practices are recorded (Cora's choice, 2026-11-11), and the fake files can be built again in 20 min |
 
 Nothing had to be changed for macOS. kore's checkout was on the branch `kore-mirror-verify-props`, not `main`;
 the practice ran from a separate working copy.
