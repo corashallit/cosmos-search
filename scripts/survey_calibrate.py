@@ -4,7 +4,7 @@
     python scripts/survey_calibrate.py fetch  --stars C/sample.parquet --surveys skymapper,noirlab --out C/lc
     python scripts/survey_calibrate.py tess   --stars C/sample.parquet --out C/tess.parquet
     python scripts/survey_calibrate.py floors --stars C/sample.parquet --lc C/lc --out C/floors.json
-    python scripts/survey_calibrate.py null   --stars C/sample.parquet --lc C/lc --out C/null
+    python scripts/survey_calibrate.py null   --stars C/sample.parquet --lc C/lc --out C/null [--kind episode]
     python scripts/survey_calibrate.py known  --stars W/watch.parquet --lc W/lc --out W/known [--tess W/tess.parquet]
 
 `sample` draws constant stars: random Gaia DR3 sources in four G ranges (11-13, 13-15, 15-17, 17-18.5) that DPAC
@@ -25,6 +25,11 @@ value f for which (bin - group median) / sqrt(err^2 + f^2) has unit robust scatt
 all, the median error of the survey's own slope (so 3 times it is the smallest trend it can confirm), the scatter
 of k / k_err (1 if the errors are right), and how often a constant star reads "seen" or "opposite" (false
 confirmations). Then the same with the made-up trend injected into the epochs, where k should come back as 1.
+The errors are in percent per year. `--kind episode` does the same for a dimming of --depth still under way at
+Gaia's last visit (errors in percent of the flux): over Gaia's dates k is 1 when the survey saw it; afterwards the
+share recovered is 0 when the star stays as faint ("injected", and what a constant star reads as), 1 when it comes
+back ("recovers") and -1 when the dimming doubles ("deeper"). `--last` moves Gaia's last visit, to test with the
+years a survey has after DR3 instead of DR4.
 
 `known`: on stars with a measured Gaia change (the DR3 fading list or the watch-list, joined with positions),
 the comparison itself: k, its error and the verdicts, per star and summarised.
@@ -239,26 +244,54 @@ def _fake_change(slope, span=DR4_SPAN):
             "d_rp": np.nan, "e_rp": np.nan}
 
 
+def _fake_episode(depth, start, span=DR4_SPAN):
+    return {"kind": "episode", "t_first": span[0], "t_last": span[1], "depth": depth, "t0": start, "t1": span[1],
+            "to_end": True, "d_bp": np.nan, "e_bp": np.nan, "d_rp": np.nan, "e_rp": np.nan}
+
+
+def _cases(a, span):
+    """(change, [(label, epochs -> epochs, true k over Gaia's dates, true value after them)]) for the made-up
+    change: a trend that goes on after Gaia's last visit, or a dimming from --start to that visit which afterwards
+    stays ("injected"), ends ("recovers") or doubles ("deeper")."""
+    if a.kind == "trend":
+        ramp = lambda d: d.assign(flux=d["flux"] * (1 + a.slope * (d["t"] - span[0]) / 365.25))
+        return _fake_change(a.slope, span), [("null", lambda d: d, 0, 0), ("injected", ramp, 1, 1)]
+    start = a.start if a.start is not None else span[1] - 2 * 365.25
+
+    def dim(inside, later):
+        return lambda d: d.assign(flux=d["flux"] * np.where(d["t"] > span[1], later, np.where(d["t"] >= start,
+                                                                                             inside, 1.0)))
+    low = 1 - a.depth
+    return _fake_episode(a.depth, start, span), [("null", lambda d: d, 0, 0), ("injected", dim(low, low), 1, 0),
+                                                 ("recovers", dim(low, 1.0), 1, 1),
+                                                 ("deeper", dim(low, 1 - 2 * a.depth), 1, -1)]
+
+
 def null(a):
     stars = read_stars(a.stars)[["source_id", "phot_g_mean_mag"]]
     lc = load(a.lc)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    change = _fake_change(a.slope)
+    span = (DR4_SPAN[0], a.last) if a.last is not None else DR4_SPAN
+    change, cases = _cases(a, span)
+    size = abs(a.slope) if a.kind == "trend" else a.depth
     fl = _floors_arg(a)
     rows = []
     for sid, d in lc.groupby("source_id"):
-        for label, dd in (("null", d), ("injected", d.assign(
-                flux=d["flux"] * (1 + a.slope * (d["t"] - DR4_SPAN[0]) / 365.25)))):
+        for label, make, true_same, true_after in cases:
+            dd = make(d)
             same, aft = ind.same_years(dd, change, floors=fl), ind.after(dd, change, floors=fl)
             for s in (k for k in same if k != "all"):
-                rows.append({"source_id": sid, "survey": s, "case": label, "which": "same", **same[s]})
+                rows.append({"source_id": sid, "survey": s, "case": label, "which": "same", "truth": true_same,
+                             **same[s]})
             for s in (k for k in aft if k != "all"):
-                rows.append({"source_id": sid, "survey": s, "case": label, "which": "after", "k": aft[s]["ratio"],
-                             "k_err": aft[s]["ratio_err"], "n_bins": aft[s]["n_bins"],
-                             "verdict": aft[s]["verdict"]})
+                v = aft[s]
+                rows.append({"source_id": sid, "survey": s, "case": label, "which": "after", "truth": true_after,
+                             "k": v.get("ratio", v.get("recovered")),
+                             "k_err": v.get("ratio_err", v.get("recovered_err")), "n_bins": v["n_bins"],
+                             "verdict": v["verdict"]})
     r = pd.DataFrame(rows).merge(stars, on="source_id")
-    r["slope_err"] = r["k_err"] * abs(a.slope)
+    r["size_err"] = r["k_err"] * size
     r.to_parquet(out / "null.parquet", index=False)
     n_stars = lc.groupby("survey")["source_id"].nunique()
     summ = []
@@ -267,10 +300,10 @@ def null(a):
             m = d[d["phot_g_mean_mag"].between(lo, hi) & np.isfinite(d["k"])]
             if len(m) < 5:
                 continue
-            z = (m["k"] - (1 if case == "injected" else 0)) / m["k_err"]
+            z = (m["k"] - m["truth"]) / m["k_err"]
             summ.append({"survey": s, "which": which, "case": case, "G": "all" if hi == 99 else f"{lo:g}-{hi:g}",
-                         "stars_tested": len(m), "median_slope_err_pct_yr": 100 * m["slope_err"].median(),
-                         "p10_slope_err_pct_yr": 100 * m["slope_err"].quantile(0.1),
+                         "stars_tested": len(m), "median_err_pct": 100 * m["size_err"].median(),
+                         "p10_err_pct": 100 * m["size_err"].quantile(0.1),
                          "median_k": m["k"].median(), "z_robust_sd": robust_sd(z), "z_median": float(z.median()),
                          "beyond_3": float((z.abs() > 3).mean()),
                          **{v: float((m["verdict"] == v).mean()) for v in pd.unique(m["verdict"])}})
@@ -358,7 +391,11 @@ def main(argv=None):
     p.add_argument("--stars", required=True)
     p.add_argument("--lc", required=True)
     p.add_argument("--out", required=True)
+    p.add_argument("--kind", choices=("trend", "episode"), default="trend")
     p.add_argument("--slope", type=float, default=-0.02, help="made-up Gaia trend, fraction per year")
+    p.add_argument("--depth", type=float, default=0.05, help="made-up dimming, fraction of the flux")
+    p.add_argument("--start", type=float, help="BTJD the dimming starts (default: two years before the last visit)")
+    p.add_argument("--last", type=float, help="BTJD of Gaia's last visit (default: DR4's; DR3's is about 900)")
     p.add_argument("--floors", help="season floors to use in place of the module's (output of `floors`)")
     p.set_defaults(fn=null)
     p = sub.add_parser("known")

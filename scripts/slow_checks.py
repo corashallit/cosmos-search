@@ -141,8 +141,9 @@ def other_surveys(r, z, names, schema, with_tess):
             c = ind.dilutions(nb, r.source_id, r.ra, r.dec, r.phot_g_mean_mag, pd.unique(lc["survey"]))
         except Exception as e:  # noqa: BLE001 (without neighbours the comparison runs undiluted, and says so)
             err += f"neighbours: {e!r:.120}; "
-    row.update({f"{s}_dilution": v for s, v in c.items()})
-    row.update(ind.columns(ind.same_years(lc, change, c), ind.after(lc, change, c)))
+    if names:
+        row.update({f"{s}_dilution": v for s, v in c.items()})
+        row.update(ind.columns(ind.same_years(lc, change, c), ind.after(lc, change, c)))
     sectors = None
     if with_tess and r.phot_g_mean_mag < TESS_MAX_G:
         try:

@@ -503,6 +503,40 @@ def test_after_gaia_an_episode_still_under_way_stays_faint_or_recovers():
     assert ind.after(epochs(rng, t, faint), EPISODE, floors=FLOORS)["all"]["verdict"] == "no_data"   # it had ended
 
 
+def test_the_month_after_gaias_last_visit_counts_on_neither_side_of_an_open_episode():
+    # Gaia's last visit is day 1800; the star does something else from day 1801. Whatever that is, the depth over
+    # Gaia's dates must come back as Gaia's, and the recovery as what happened later.
+    rng = np.random.default_rng(14)
+    change = {**EPISODE, "t0": 1200.0, "t1": 1790.0, "to_end": True}
+    assert ind.episode_window(change) == (1200.0, 1800.0, False, True)
+    assert ind.episode_window(EPISODE) == (600.0, 1000.0, False, False)
+    t = np.arange(600.0, 3700.0, 1.0)
+    for later, recovered in ((1.0, 1.0), (1 - change["depth"], 0.0), (1 - 2 * change["depth"], -1.0)):
+        flux = np.where(t > 1800, later, np.where(t >= 1200, 1 - change["depth"], 1.0))
+        lc = epochs(rng, t, flux, survey="ztf", band="ztf_r", err=0.002)
+        same = ind.same_years(lc, change, floors={"ztf": 0.001})["ztf"]
+        assert same["k"] == pytest.approx(1.0, abs=4 * same["k_err"]) and same["k_err"] < 0.05
+        aft = ind.after(lc, change, floors={"ztf": 0.001})["ztf"]
+        assert aft["recovered"] == pytest.approx(recovered, abs=4 * aft["recovered_err"]) and aft["recovered_err"] < 0.05
+    b = ind.bins(ind.visits(lc), edges=[1200.0, 1800.0, 1830.0], floors={"ztf": 0.001})
+    x = ind.predicted(b, change)
+    assert np.isnan(x[b["t"].to_numpy() > 1800]).all() and np.isfinite(x[b["t"].to_numpy() < 1800]).all()
+
+
+def test_a_level_difference_is_never_known_better_than_the_surveys_own_drift():
+    rng = np.random.default_rng(15)
+    t = np.arange(600.0, 3700.0, 1.0)
+    shallow = {**EPISODE, "depth": 0.004, "t0": 1200.0, "t1": 1800.0, "to_end": True}     # Gaia: 0.4% deep
+    lc = pd.concat([epochs(rng, t, 1.0, survey="ztf", band="ztf_r", group=f"g{i}", err=0.001) for i in range(4)])
+    same = ind.same_years(lc, shallow, floors={"ztf": 0.0005})["ztf"]
+    aft = ind.after(lc, shallow, floors={"ztf": 0.0005})["ztf"]
+    assert same["k_err"] >= ind.LEVEL_FLOOR / 0.004 and aft["recovered_err"] >= ind.LEVEL_FLOOR / 0.004
+    assert same["verdict"] == "undecided" and aft["verdict"] == "undecided"
+    deep = {**shallow, "depth": 0.08}
+    assert ind.same_years(lc, deep, floors={"ztf": 0.0005})["ztf"]["verdict"] == "not_seen"
+    assert ind.after(lc, deep, floors={"ztf": 0.0005})["ztf"]["verdict"] == "still_faint"
+
+
 def test_gaia_change_reads_a_fading_list_row():
     row = {"strength_by": "trend", "by": "episode+trend", "slope": -0.02, "slope_bp": -0.03, "slope_bp_err": 0.002,
            "slope_rp": -0.01, "slope_rp_err": 0.002, "t_first": -100.0, "t_last": 1800.0}

@@ -36,7 +36,8 @@ between cameras, fields or filters. If the bins scatter about the fit by more th
 variability), the error of k is scaled up by that factor, and widened by Student's t for the few bins it rests on.
 
 A trend's error also carries TREND_FLOOR, the survey's own drift over years: ZTF's trends on constant stars
-scatter by more than their bin errors predict once six years of data bring those down to 0.05% per year.
+scatter by more than their bin errors predict once six years of data bring those down to 0.06% per year. An
+episode's depth and recovery carry LEVEL_FLOOR for the same reason.
 
 Verdicts leave a margin for the band factor and the dilution, neither of which is known to better than tens of
 percent: "opposite" is a change of the other sign; "not_seen" needs the survey to rule out even half of Gaia's
@@ -62,16 +63,22 @@ BAND_FACTOR_RANGE = (0.25, 4.0)
 NEIGHBOUR_ARCSEC = 32.0    # twice the widest beam read here (ASAS-SN's 16 arcsec)
 # What a survey's own photometry drifts by over years, as a fraction of the flux per year, added to the error of
 # every trend. On constant stars ZTF's trends after 2020 scatter by 0.12% per year where the bin errors predict
-# 0.08, and their median is a fade of 0.04% per year (2026-11-10, 88 stars of G 12.5-18.5).
+# 0.06, and their median is a fade of 0.03% per year (2026-11-10, 230 stars of G 13-18.5).
 TREND_FLOOR = 0.001
+# The same for a difference between a star's levels in two stretches of years, as a fraction of the flux, added
+# to the error of every episode's depth and recovery. ZTF's level after 2020 against its level in 2019 scatters
+# by 0.34% on constant stars where the bin errors predict 0.27% (2026-11-11, 227 stars of G 13-18.5): 0.19% more
+# in quadrature. Without it 7 of the 227 read as "fainter" than a made-up dimming of 5%.
+LEVEL_FLOOR = 0.002
 BP_UM, RP_UM, G_UM = BAND_WAVELENGTH_UM["BP"], BAND_WAVELENGTH_UM["RP"], BAND_WAVELENGTH_UM["G"]
 
 # Scatter of 180-day bin means on constant stars beyond their quoted errors, as a fraction of the flux, measured
 # 2026-11-10 with scripts/survey_calibrate.py (docs/arms/slow-changes.md "Other surveys"): SkyMapper 0.0044 on
-# 316 stars, NOIRLab 0.0057 on 167, ZTF ZTF_MEASURED. PROVISIONAL marks surveys not yet read for that
+# 316 stars, NOIRLab 0.0057 on 167, ZTF 0.0030 on 232 of G 13 and fainter (0.0045 at G 11-13, where it
+# saturates and `surveys.G_RANGE` leaves it out). PROVISIONAL marks surveys not yet read for that
 # measurement; their value is a guess set well above every measured one, to be replaced when the script has run
 # on them.
-SEASON_FLOOR = {"ztf": 0.004, "skymapper": 0.0045, "noirlab": 0.006, "asassn": 0.015, "atlas": 0.015}
+SEASON_FLOOR = {"ztf": 0.003, "skymapper": 0.0045, "noirlab": 0.006, "asassn": 0.015, "atlas": 0.015}
 PROVISIONAL = ("asassn", "atlas")
 
 
@@ -237,6 +244,14 @@ def _with_trend_floor(r, slope):
     return r
 
 
+def _with_level_floor(r, depth):
+    """A fit result with LEVEL_FLOOR (a fraction of the flux) added to the error of k, which for an episode is a
+    difference of levels in units of Gaia's depth."""
+    if np.isfinite(r["k_err"]) and np.isfinite(depth) and depth != 0:
+        r = {**r, "k_err": float(np.hypot(r["k_err"], LEVEL_FLOOR / abs(depth)))}
+    return r
+
+
 def combine(parts):
     """Inverse-variance mean of independent (k, k_err) pairs; (nan, nan) when none is finite."""
     p = [(k, e) for k, e in parts if np.isfinite(k) and np.isfinite(e) and e > 0]
@@ -268,9 +283,22 @@ def gaia_change(star):
     return out
 
 
+def episode_window(change):
+    """(t0, t1, open_start, open_end) of an episode: its faint window, and whether it was under way at Gaia's
+    first or last visit. A window still open at the last visit runs to that visit. Gaia cannot say when an open
+    window began or ended, so the survey bins in the padding on that side belong to neither state and are left
+    out, here and in `after`."""
+    t0, t1 = change["t0"], change["t1"]
+    open_end = bool(change.get("to_end")) or t1 >= change["t_last"]
+    if open_end:
+        t1 = max(t1, change["t_last"])
+    return t0, t1, t0 <= change["t_first"], open_end
+
+
 def predicted(b, change, c=None):
     """Gaia's change at each bin for k = 1: a fraction of the group's flux, scaled by the band factor and divided
-    by 1 + c for the bin's survey (c: {survey: dilution}). Bins outside Gaia's dates get NaN."""
+    by 1 + c for the bin's survey (c: {survey: dilution}). Bins outside Gaia's dates get NaN, as do those in the
+    padding next to an episode still open at that end (`episode_window`)."""
     t = b["t"].to_numpy(float)
     inside = (t >= change["t_first"] - PAD_DAYS) & (t <= change["t_last"] + PAD_DAYS)
     f = np.array([band_factor(bd, change.get("d_bp", np.nan), change.get("e_bp", np.nan),
@@ -279,7 +307,12 @@ def predicted(b, change, c=None):
     if change["kind"] == "trend":
         m = change["slope"] * (t - change["t_first"]) / 365.25
     elif change["kind"] == "episode":
-        m = np.where((t >= change["t0"]) & (t <= change["t1"]), -change["depth"], 0.0)
+        t0, t1, open_start, open_end = episode_window(change)
+        m = np.where((t >= t0) & (t <= t1), -change["depth"], 0.0)
+        if open_start:
+            m = np.where(t < change["t_first"], np.nan, m)
+        if open_end:
+            m = np.where(t > change["t_last"], np.nan, m)
     else:
         return np.full(len(t), np.nan)
     return np.where(inside, m * f / dil, np.nan)
@@ -295,15 +328,16 @@ def same_years(lc, change, c=None, floors=SEASON_FLOOR):
         return {"all": {"k": np.nan, "k_err": np.nan, "verdict": "no_data"}}
     edges = [change["t_first"] - PAD_DAYS, change["t_last"] + PAD_DAYS]
     if change["kind"] == "episode":
-        edges += [change["t0"], change["t1"]]
+        t0, t1, open_start, open_end = episode_window(change)
+        edges += [t0, t1] + [change["t_first"]] * open_start + [change["t_last"]] * open_end
     b = bins(visits(lc), edges=edges, floors=floors)
     x = predicted(b, change, c)
     out = {}
     for s in pd.unique(b["survey"]):
         m = (b["survey"] == s).to_numpy()
         r = fit(b[m], x[m])
-        if change["kind"] == "trend":
-            r = _with_trend_floor(r, change["slope"])
+        r = _with_trend_floor(r, change["slope"]) if change["kind"] == "trend" else \
+            _with_level_floor(r, change["depth"])
         r["verdict"] = verdict(r["k"], r["k_err"])
         out[str(s)] = r
     k, e = combine([(r["k"], r["k_err"]) for r in out.values()])
@@ -321,8 +355,9 @@ def after(lc, change, c=None, floors=SEASON_FLOOR):
     For an episode still under way at Gaia's last visit: `recovered`, the level after t_last minus the level
     inside the faint window as a fraction of the depth (0 still as faint, 1 back to normal, negative fainter
     still), with its error, from groups that have bins on both sides; verdict "fainter" (recovered + K_SIGMA
-    errors < 0: it went on fading), "still_faint" (recovered + K_SIGMA errors < HALF), "recovered" (recovered -
-    K_SIGMA errors > HALF) or "undecided".
+    errors < 0: below the mean level of Gaia's faint window, as when the fade was still deepening at the last
+    visit or went on after it), "still_faint" (recovered + K_SIGMA errors < HALF), "recovered" (recovered -
+    K_SIGMA errors > HALF) or "undecided". Bins in the PAD_DAYS after the last visit count on neither side.
     Returns {survey: {...}} plus "all"."""
     names = {"seen": "went_on", "not_seen": "stopped", "opposite": "reversed"}
     if change["kind"] not in ("trend", "episode") or not len(lc):
@@ -350,9 +385,9 @@ def after(lc, change, c=None, floors=SEASON_FLOOR):
         return out
     if not change.get("to_end"):
         return {"all": {"verdict": "no_data"}}
-    b = bins(visits(lc), edges=[change["t0"], t_last + PAD_DAYS], floors=floors)
+    b = bins(visits(lc), edges=[change["t0"], t_last, t_last + PAD_DAYS], floors=floors)
     t = b["t"].to_numpy(float)
-    b = b[(t >= change["t0"])]
+    b = b[(t >= change["t0"]) & ((t <= t_last) | (t > t_last + PAD_DAYS))]
     t = b["t"].to_numpy(float)
     f = np.array([band_factor(bd, change["d_bp"], change["e_bp"], change["d_rp"], change["e_rp"]) for bd in b["band"]])
     dil = 1 + np.array([(c or {}).get(s, 0.0) for s in b["survey"]], float)
@@ -360,7 +395,7 @@ def after(lc, change, c=None, floors=SEASON_FLOOR):
     out = {}
     for s in pd.unique(b["survey"]):
         m = (b["survey"] == s).to_numpy()
-        r = fit(b[m], x[m], min_bins=3)
+        r = _with_level_floor(fit(b[m], x[m], min_bins=3), change["depth"])
         out[str(s)] = {"recovered": r["k"], "recovered_err": r["k_err"], "n_bins": r["n_bins"],
                        "verdict": _recovery(r["k"], r["k_err"])}
     k, e = combine([(r["recovered"], r["recovered_err"]) for r in out.values()])
