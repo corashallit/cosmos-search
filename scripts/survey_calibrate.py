@@ -96,10 +96,10 @@ def read_stars(path):
 def _fetch_one(survey, star):
     if not surveys.covers(survey, star["dec"], star.get("phot_g_mean_mag")):
         return surveys.empty(), "outside"
-    ra, dec = surveys.at_year(star["ra"], star["dec"], star.get("pmra"), star.get("pmdec"),
-                              star.get("ref_epoch") or 2016.0, surveys.MEAN_YEAR[survey])
+    ra, dec, moves = surveys.placed(survey, star["ra"], star["dec"], star.get("pmra"), star.get("pmdec"),
+                                    star.get("ref_epoch") or 2016.0)
     try:
-        return surveys.fetch(survey, int(star["source_id"]), ra, dec), ""
+        return surveys.fetch(survey, int(star["source_id"]), ra, dec, **moves), ""
     except (surveys.MissingCredential, surveys.Unreachable):
         raise
     except Exception as e:  # noqa: BLE001

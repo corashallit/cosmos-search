@@ -26,7 +26,7 @@ Every reader returns COLUMNS:
 |---|---|---|---|---|
 | ztf (IRSA) | 2018-03 on | dec > -30 | 13-20.5 | anywhere |
 | asassn (Sky Patrol v2) | 2012 on (V to 2018, g from 2017) | all | 10.5-16.5 | only where port 9006 is open: not cloud containers |
-| atlas (forced photometry) | 2015-07 on; south of -50 from 2022 | all | 12.5-19 | anywhere, with ATLAS_TOKEN |
+| atlas (forced photometry) | 2018-10 on (read from then); south of -50 from 2022 | all | 12.5-19 | anywhere, with ATLAS_TOKEN |
 | skymapper (DR4) | 2014-03 to 2021-09 | dec < +16 | 9-18.5 | anywhere |
 | noirlab (NSC DR2) | 2012-09 to 2019-11 | mostly dec < +30 | 14.5-21 | anywhere |
 
@@ -102,6 +102,19 @@ def at_year(ra, dec, pmra, pmdec, ref_epoch, year):
     return (float(ra) + pmra * dt / 3.6e6 / np.cos(np.radians(float(dec)))) % 360.0, float(dec) + pmdec * dt / 3.6e6
 
 
+# Readers that move the position to each image's date themselves (from the position at MEAN_YEAR and the proper
+# motion); the others get one position, at MEAN_YEAR.
+PROPER_MOTION = ("atlas",)
+
+
+def placed(survey, ra, dec, pmra, pmdec, ref_epoch):
+    """(ra, dec, options) for one survey's reader: the position moved from ref_epoch to the survey's MEAN_YEAR, and
+    for PROPER_MOTION readers also the proper motion and that year."""
+    ref_epoch = 2016.0 if ref_epoch is None or not np.isfinite(ref_epoch) else ref_epoch
+    at = at_year(ra, dec, pmra, pmdec, ref_epoch, MEAN_YEAR[survey])
+    return (*at, {"pm": (pmra, pmdec), "epoch": MEAN_YEAR[survey]} if survey in PROPER_MOTION else {})
+
+
 def covers(survey, dec, g_mag=None):
     """Whether the survey observes this declination and, when g_mag is given and finite, a star this bright."""
     lo, hi = DEC_RANGE[survey]
@@ -165,10 +178,9 @@ def fetch_all(star, surveys=DEFAULT, log=None, **options):
     for s in surveys:
         if not covers(s, get("dec"), get("phot_g_mean_mag")):
             continue
-        ra, dec = at_year(get("ra"), get("dec"), get("pmra"), get("pmdec"), get("ref_epoch", 2016.0) or 2016.0,
-                          MEAN_YEAR[s])
+        ra, dec, moves = placed(s, get("ra"), get("dec"), get("pmra"), get("pmdec"), get("ref_epoch", 2016.0))
         try:
-            parts.append(fetch(s, int(get("source_id")), ra, dec, **options.get(s, {})))
+            parts.append(fetch(s, int(get("source_id")), ra, dec, **{**moves, **options.get(s, {})}))
         except Exception as e:  # noqa: BLE001 (one survey failing for one star is missing data, not a stop)
             errors[s] = f"{type(e).__name__}: {e}"[:200]
             if log:

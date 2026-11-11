@@ -75,11 +75,12 @@ BP_UM, RP_UM, G_UM = BAND_WAVELENGTH_UM["BP"], BAND_WAVELENGTH_UM["RP"], BAND_WA
 # Scatter of 180-day bin means on constant stars beyond their quoted errors, as a fraction of the flux, measured
 # 2026-11-10 with scripts/survey_calibrate.py (docs/arms/slow-changes.md "Other surveys"): SkyMapper 0.0044 on
 # 316 stars, NOIRLab 0.0057 on 167, ZTF 0.0030 on 232 of G 13 and fainter (0.0045 at G 11-13, where it
-# saturates and `surveys.G_RANGE` leaves it out). PROVISIONAL marks surveys not yet read for that
-# measurement; their value is a guess set well above every measured one, to be replaced when the script has run
-# on them.
-SEASON_FLOOR = {"ztf": 0.003, "skymapper": 0.0045, "noirlab": 0.006, "asassn": 0.015, "atlas": 0.015}
-PROVISIONAL = ("asassn", "atlas")
+# saturates and `surveys.G_RANGE` leaves it out); ATLAS 0.0053 on 32 of G 12.5-18.5, from 2018-10-26 on
+# (2026-11-11; earlier ATLAS fluxes are unstable, `surveys.atlas`). PROVISIONAL marks surveys not yet read for
+# that measurement; their value is a guess set well above every measured one, to be replaced when the script has
+# run on them.
+SEASON_FLOOR = {"ztf": 0.003, "skymapper": 0.0045, "noirlab": 0.006, "asassn": 0.015, "atlas": 0.0053}
+PROVISIONAL = ("asassn",)
 
 
 def band_factor(band, d_bp=np.nan, e_bp=np.nan, d_rp=np.nan, e_rp=np.nan):
