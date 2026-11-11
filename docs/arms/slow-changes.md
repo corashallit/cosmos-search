@@ -1315,6 +1315,11 @@ or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet
 
 ## Log
 
+- **2026-11-11.** Trial of the planted fades on DR3 (docs/vetting.md §16, "Trial on DR3"). 30 planted fades and
+  one real star of the Andromeda field went through step 10 as written, with the reviews launched from a
+  separate thread. 24 of 30 were shortlisted, which passes the check (at least 20 of 30). Fades flagged by the
+  trend alone were shortlisted 2 of 6 times, the others 22 of 24; too few to establish, and reported for every
+  batch from now on. Each review took 15 thousand output tokens.
 - **2026-11-11.** Drift by colour ("Every star scored"). The trend left after the drift correction depended on
   colour (red and blue stars brightening by 0.3 to 0.6 errors on DR3; found by the occurrence-limit work). The
   drift table now has narrow colour ranges and the trend's reference a colour term; the median trend is at zero

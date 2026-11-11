@@ -1,0 +1,19 @@
+{
+  "code_commit": "62651f1bdf24bb45ee985335e00e47d96d06873c",
+  "committed_utc": "2026-11-11T02:24:40+00:00",
+  "n_verdicts": 31,
+  "plan_sha256": "b594543acb336a44366b731402657f7b14e021934fa122904997a1fbc03a1c3b",
+  "reviewer": {
+    "agent_type": "general-purpose",
+    "effort": "xhigh",
+    "harness": {
+      "2.1.322": 31
+    },
+    "launch": {
+      "workflow": 31
+    },
+    "model": "claude-opus-5-5"
+  },
+  "reviews_not_counted": 0,
+  "verdicts_sha256": "42217fc2772b74e974f979662b0e78734bb4b5c3666740221ef1e403f04e2a9d"
+}

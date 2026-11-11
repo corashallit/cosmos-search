@@ -879,6 +879,15 @@ reason and does not count such a review.
 4. PR #88's rule (launch one review, audit it, launch the rest only if it counts) is what to do when the check
    stops a launch or the audit disagrees with it.
 
+*Added later on 2026-11-11: the first real stop.* The trial of §16 was started in this thread after Cora had
+answered a decision card in it. The check's subagent was handed that answer under "[Workflow harness — user
+request]", the script stopped, and no review was launched (run `wf_709194eb-16a`, 42 thousand tokens). Two
+things follow. An answer on a decision card counts as a message the person wrote in the thread, so a thread that
+is to launch reviews puts no card and no question to her before the last review has returned. And the side of
+the check that point 2 calls untested has now worked on a real message. The reviews were then launched from a
+separate thread started through the coordinator, in which Cora had not written. Its check found nothing before
+the task, and the audit counted 31 of 31 reviews, each handed its task alone (§16, "Trial on DR3").
+
 ## 16. Planted fades in release-day review batches (written 2026-11-11, before any release-day batch)
 
 **Why.** Every blind test in this project has had fakes of known answer among the real stars. The release-day
@@ -976,6 +985,52 @@ could not find. Whether the adopted reviewer shortlists these DR3 fakes was not 
 about a third of a million output tokens, would say before release day whether release-day files read like
 §14's.
 
+**Trial on DR3 (2026-11-11, 30 planted fades reviewed; Cora's go-ahead on a decision card).** The same field,
+run and lists as the practice build. `files --fakes 30 --n 1` built 31 files: 30 planted fades (grey 15, dust 9,
+re-emitting dust 6) and the strongest checked star of the field. 264 hosts tried in 7 of the 16 light-curve
+files gave 46 flagged fakes, spares included (17%); no fetch failed and none was dropped. The plan and the key
+were sealed to the project's two keys. The reviews were launched from a separate thread, the first use of that
+procedure (§15, second amendment): the adopted reviewer (claude-opus-5-5, effort xhigh, general-purpose) through
+the workflow script on harness 2.1.322. The audit counted 31 of 31. The verdicts went to
+`prereg/verdicts/planted-trial-dr3-1` (commit cd637dc, pushed, with the plan's hash) before the key was opened.
+
+*Result.* 24 of the 30 planted fades were shortlisted (80%; one-sided 95% bounds 64% and 91%). The upper bound
+is above 78%, so by the check written above the batch is consistent with the calibration. No review failed.
+
+| | Planted | Shortlisted |
+|---|---|---|
+| Grey | 15 | 12 |
+| Dust in front | 9 | 7 |
+| Re-emitting dust | 6 | 5 |
+| Flagged by the episode score, alone or with the trend or a repeat | 24 | 22 |
+| Flagged by the trend alone | 6 | 2 |
+
+By shape: steady fades over the whole span 5 of 5, single long dips 4 of 4, the one repeating dip, staircase
+fades (a few drops that stay down) 10 of 13, accelerating fades 2 of 4, ramp fades 2 of 3. The six that were not
+shortlisted have strength 1.0 to 3.6 and S from 0.16 to 0.30, and were read as a calibration offset (3) or as
+rotation or spots (3). The eclipsing-binary check would have explained none of the 30. The real star (strength 13.9) got S = 0.12, read as
+rotation or spots, and was not shortlisted.
+
+*What it says.* Files built by the release-day code from the run's own scores, reviewed by the adopted reviewer
+on today's launch path, are shortlisted at a rate the check cannot tell from §14's 88%. It is also the first
+count for that reviewer on the workflow launch path, which §15 lists as not measured, for recall only. It does
+not measure the false-shortlist rate, and 30 fades would have shown a halved recall, not a loss of ten points.
+The split by flag is 6 fades against 24, too few to establish that fades flagged by the trend alone are
+shortlisted less often, and those six are among the weakest of the 30 (strength 1.0 to 2.7). A small steady
+fade is flagged that way, so the result table now gives the split for every batch (`by_flag` in
+`D/fakes.json`), as a reported figure and no part of the check.
+The trial is DR3 and one field: DR4's longer light curves and its own thresholds are tested by the release-day
+batch itself.
+
+*Cost.* 463 thousand output tokens for the 31 reviews, a median of 14.8 thousand per review (5.4 to 23.8
+thousand), where §15 measured 10.8 thousand on §14's files; a median of 197 thousand tokens of all kinds per
+review. The 31 reviews took 9 minutes from the first to the last, eight workflows at once. A release-day batch
+is better planned at 15 thousand output tokens per file than at the 11 thousand of "Cost" above. The stopped
+launch's check cost 42 thousand tokens, and the build took 16 minutes.
+
+Data: `/mnt/project-files/planted-trial/` (review files, replies, transcripts, audit, the sealed plan and key,
+`fakes.json`, `fakes_reviewed.csv`, `reviewed.csv`).
+
 ## Log
 
 - 2026-10-21. Design written. Changes from statistics.md §6 as first drafted: calibration moved to a separate run
@@ -1060,3 +1115,10 @@ about a third of a million output tokens, would say before release day whether r
   review batches now hold planted fades of §14's kind with sealed answers (§16): 30 or 5% of the batch, and the
   batch counts as consistent with the calibration when at least 20 of 30 are shortlisted. Review files hold
   nothing from the other surveys, where a fake's host would be seen unchanged.
+- 2026-11-11. Trial of §16 on DR3 (Cora's go-ahead): 30 planted fades and one real star, built by the
+  release-day code and reviewed by the adopted reviewer. 24 of 30 shortlisted (80%; bounds 64% and 91%), which
+  the check counts as consistent with the calibration; fades flagged by the trend alone 2 of 6, reported from
+  now on for every batch. The launch from the building thread was stopped by the script's check, because Cora's
+  answer on a decision card there would have reached the reviewers; the reviews ran from a separate thread and
+  31 of 31 count. 15 thousand output tokens per review, where §14's files took 11 thousand. Verdicts in
+  `prereg/verdicts/planted-trial-dr3-1`.
