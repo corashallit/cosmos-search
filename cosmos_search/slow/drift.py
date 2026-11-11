@@ -6,13 +6,17 @@ G < 17 and +0.3 % per year at G 20-21 (docs/arms/slow-changes.md), comparable to
 is measured and subtracted before any star's trend is fitted.
 
 Model: for each band, the drift in cell (G bin, colour bin, time bin) is the median fractional flux of the
-reference stars in it, each star normalised by its own median. Cells with fewer than MIN_STARS stars fall back
-to the same G bin with all colours pooled, then to zero. Reference stars are quiet (scatter close to their
+reference stars in it, each star normalised by its own median. Colour has two levels: eleven narrow ranges
+(FINE_EDGES) inside three wide ones (COLOUR_EDGES). A star takes its narrow cell when that has MIN_STARS stars,
+else its wide cell, else the same G bin with all colours pooled, else zero. The narrow ranges are there because
+the drift is not flat in colour inside the wide ones: with the wide ranges alone, DR3 stars redder than
+BP-RP 2 kept a trend of +0.06 to +0.22 % a year and stars bluer than 0.5 one of +0.07 to +0.11 % a year
+(docs/arms/slow-changes.md, "Drift by colour"). Reference stars are quiet (scatter close to their
 errors, no deep extremes); a star's own epochs never enter the drift applied to it when `fit` is given only
 the other half of the sample (`half`).
 
     epochs = normalise(lc)                                  # one row per good epoch, per-star fractional flux
-    cells = star_cells(aux)                                 # source_id -> G bin, colour bin
+    cells = star_cells(aux)                                 # source_id -> G bin, wide and narrow colour bin
     table = fit(epochs[ref_a], cells)                       # drift per (band, G bin, colour bin, time bin)
     epochs["frac_corr"] = epochs["frac"] - drift_at(epochs, cells, table)
     trends = trend(epochs, "frac_corr")                     # slope and its error per star and band
@@ -35,8 +39,11 @@ OWN_MAX_DROP = 0.2    # a star and band losing more than this share of epochs to
 TBIN_DAYS = 15.0
 G_EDGES = (0.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 23.0)
 COLOUR_EDGES = (-9.0, 0.8, 1.3, 9.0)
+FINE_EDGES = (-9.0, 0.5, 0.8, 1.0, 1.3, 1.6, 1.8, 2.0, 2.2, 2.6, 3.0, 9.0)  # every COLOUR_EDGES value is one of these
 MIN_STARS = 30
 POOLED = -1  # colour bin code for the all-colour fallback cells
+FINE = 10    # a narrow colour cell's code in the table is FINE + cfine; tables fitted before 2026-11-11 have none
+CELL_COLUMNS = ["gbin", "cbin", "cfine"]
 BANDS = {0: "G", 1: "BP", 2: "RP"}
 
 
@@ -115,10 +122,12 @@ def normalise(lc, with_median=False, marks=True, own=True):
 
 
 def star_cells(aux):
-    """G bin and colour bin per source from a frame with source_id, phot_g_mean_mag and bp_rp."""
+    """G bin, wide colour bin (cbin) and narrow colour bin (cfine) per source from a frame with source_id,
+    phot_g_mean_mag and bp_rp. A star without a colour sits in the middle ranges."""
     g = np.digitize(aux["phot_g_mean_mag"].to_numpy(), G_EDGES[1:-1])
-    c = np.digitize(np.nan_to_num(aux["bp_rp"].to_numpy(), nan=1.0), COLOUR_EDGES[1:-1])
-    return pd.DataFrame({"gbin": g.astype(np.int8), "cbin": c.astype(np.int8)},
+    colour = np.nan_to_num(aux["bp_rp"].to_numpy(), nan=1.0)
+    c, f = np.digitize(colour, COLOUR_EDGES[1:-1]), np.digitize(colour, FINE_EDGES[1:-1])
+    return pd.DataFrame({"gbin": g.astype(np.int8), "cbin": c.astype(np.int8), "cfine": f.astype(np.int8)},
                         index=pd.Index(aux["source_id"].to_numpy(), name="source_id"))
 
 
@@ -140,33 +149,47 @@ def _tbin(t):
 
 
 def fit(epochs, cells, min_stars=MIN_STARS):
-    """Drift table: median frac per (band, gbin, cbin, tbin) over the given epochs, plus POOLED colour cells.
+    """Drift table: median frac per (band, gbin, cbin, tbin) over the given epochs, plus POOLED colour cells and,
+    when `cells` has cfine, the narrow colour cells under cbin = FINE + cfine.
 
     Each star counts once per cell (its median within the cell), so densely sampled stars don't dominate.
     """
     e = epochs.join(cells, on="source_id", how="inner")
     e = e.assign(tbin=_tbin(e["t"]))
-    per_star = e.groupby(["band", "gbin", "cbin", "tbin", "source_id"], observed=True)["frac"].median()
+    fine = "cfine" in e
+    star_keys = ["band", "gbin", "cbin", *(["cfine"] if fine else []), "tbin", "source_id"]
+    per_star = e.groupby(star_keys, observed=True)["frac"].median().reset_index()
+    levels = [["band", "gbin", "cbin", "tbin"], ["band", "gbin", "tbin"]] + ([["band", "gbin", "cfine", "tbin"]] if fine else [])
     out = []
-    for keys in (["band", "gbin", "cbin", "tbin"], ["band", "gbin", "tbin"]):
-        s = per_star.reset_index()
-        g = s.groupby(keys, observed=True)["frac"].agg(drift="median", n_stars="size").reset_index()
-        if "cbin" not in keys:
+    for keys in levels:
+        g = per_star.groupby(keys, observed=True)["frac"].agg(drift="median", n_stars="size").reset_index()
+        if "cfine" in keys:
+            g = g.rename(columns={"cfine": "cbin"})
+            g["cbin"] = g["cbin"] + FINE
+        elif "cbin" not in keys:
             g["cbin"] = POOLED
         out.append(g[g["n_stars"] >= min_stars])
     return pd.concat(out, ignore_index=True)[["band", "gbin", "cbin", "tbin", "drift", "n_stars"]]
 
 
 def drift_at(epochs, cells, table):
-    """Drift for each epoch: its own colour cell when measured, else the pooled cell, else 0."""
+    """Drift for each epoch: its narrow colour cell when measured (and `cells` has cfine), else its wide colour
+    cell, else the pooled cell, else 0."""
     e = epochs[["source_id", "band", "t"]].join(cells, on="source_id", how="left")
     e = e.assign(tbin=_tbin(e["t"]))
     key = ["band", "gbin", "cbin", "tbin"]
-    own = table[table["cbin"] != POOLED].set_index(key)["drift"]
-    pooled = table[table["cbin"] == POOLED].set_index(["band", "gbin", "tbin"])["drift"]
+    code = table["cbin"].to_numpy()
+    own = table[(code != POOLED) & (code < FINE)].set_index(key)["drift"]
+    pooled = table[code == POOLED].set_index(["band", "gbin", "tbin"])["drift"]
     d_own = own.reindex(pd.MultiIndex.from_frame(e[key])).to_numpy()
     d_pool = pooled.reindex(pd.MultiIndex.from_frame(e[["band", "gbin", "tbin"]])).to_numpy()
-    return np.where(np.isfinite(d_own), d_own, np.where(np.isfinite(d_pool), d_pool, 0.0))
+    d = np.where(np.isfinite(d_own), d_own, np.where(np.isfinite(d_pool), d_pool, 0.0))
+    if "cfine" in e and (code >= FINE).any():
+        narrow = table[code >= FINE].set_index(key)["drift"]
+        k = e[["band", "gbin", "tbin"]].assign(cbin=e["cfine"].to_numpy() + FINE)[key]
+        d_fine = narrow.reindex(pd.MultiIndex.from_frame(k)).to_numpy()
+        d = np.where(np.isfinite(d_fine), d_fine, d)
+    return d
 
 
 def trend(epochs, col="frac", core=5.0, min_n=5):

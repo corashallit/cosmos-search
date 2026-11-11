@@ -119,7 +119,8 @@ def _file(path):
         if not len(m):
             continue
         ids = m["source_id"].to_numpy()
-        m = summary.apply_reference(m, s["ref"], g_mag=hosts["g_mag"].reindex(ids).to_numpy())
+        m = summary.apply_reference(m, s["ref"], g_mag=hosts["g_mag"].reindex(ids).to_numpy(),
+                                    bp_rp=hosts["bp_rp"].reindex(ids).to_numpy() if "bp_rp" in hosts else None)
         pix = drift.sky_pixel(ids, rule_v3.SHARED_LEVEL)
         near = s["real"][np.isin(s["real_pix"], np.unique(pix))]
         sh = rule_v3.shared(near, targets=m, target_patch=pix)

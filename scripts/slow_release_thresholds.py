@@ -53,13 +53,13 @@ def _quiet(path):
     ep, stars = _epochs(path)
     q = release.quiet_ids(ep)
     use = q[summary.random_share(q, _STATE["drift_share"])]
-    return ep.loc[ep["source_id"].isin(use), EPOCH_COLUMNS], q, stars[["gbin", "cbin"]]
+    return ep.loc[ep["source_id"].isin(use), EPOCH_COLUMNS], q, stars[drift.CELL_COLUMNS]
 
 
 def _corrected(path):
     """One file's epochs, drift-corrected by the other half's table (and sky-corrected)."""
     ep, stars = _epochs(path)
-    cells, tables = stars[["gbin", "cbin"]], _STATE["tables"]
+    cells, tables = stars[drift.CELL_COLUMNS], _STATE["tables"]
     half = drift.half(ep["source_id"].to_numpy())
     corr = np.zeros(len(ep))
     for h in (0, 1):

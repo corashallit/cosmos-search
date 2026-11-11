@@ -185,6 +185,55 @@ def test_reference_falls_back_to_coarser_pixels_and_keeps_a_fake_out():
     assert (none["n_ref"] == 0).all() and (none["slope_z"] == none["slope_z_raw"]).all()
 
 
+def test_reference_has_a_colour_term_that_adds_to_the_sky_cells():
+    rng = np.random.default_rng(17)
+    # Two pixels with different sky offsets. In each: 300 stars of middling colour and 120 red ones that brighten
+    # 0.3% a year more (1.5 errors); 10 very red ones, too few for a colour row, and 5 stars without a colour.
+    def pixel(k, sky):
+        mid = stars_frame(rng, 300, pixel=k, offset=sky).assign(bp_rp=rng.uniform(0.85, 0.95, 300))
+        red = stars_frame(rng, 120, pixel=k, offset=sky + 0.003).assign(bp_rp=rng.uniform(2.3, 2.5, 120))
+        rare = stars_frame(rng, 10, pixel=k, offset=sky + 0.003).assign(bp_rp=3.4)
+        blank = stars_frame(rng, 5, pixel=k, offset=sky).assign(bp_rp=np.nan)
+        return pd.concat([mid, red, rare, blank], ignore_index=True).assign(group=np.repeat(
+            ["mid", "red", "rare", "blank"], [300, 120, 10, 5]))
+    s = pd.concat([pixel(3, 0.001), pixel(9, -0.002)], ignore_index=True)
+    ref = summary.reference_table(s)
+    sky, colour = ref[ref["level"] > summary.REF_COLOUR], ref[ref["level"] == summary.REF_COLOUR]
+    assert (sky["crange"] == summary.REF_ALL_COLOURS).all() and sorted(colour["crange"]) == [2, 8]
+    assert colour["n"].tolist() == [600, 240] or colour["n"].tolist() == [240, 600]
+    out = summary.apply_reference(s, ref)
+    assert (out["ref_level"] == 6).all() and (out["n_ref"] == 435).all()         # every star keeps its level-6 cell
+    med = out.groupby("group")["slope_z"].median()
+    assert abs(med["mid"]) < 0.05 and abs(med["red"]) < 0.05
+    # without the colour term the sky cell's median sits between the two colours, and neither is at zero
+    plain = summary.apply_reference(s, sky).groupby(s["group"])["slope_z"].median()
+    assert plain["red"] > 0.9 and plain["mid"] < -0.1
+    # too few of its colour for a row, or no colour: the sky cell alone
+    alone = summary.apply_reference(s, sky)
+    for g in ("rare", "blank"):
+        np.testing.assert_allclose(out.loc[s["group"] == g, "slope_z"], alone.loc[s["group"] == g, "slope_z"])
+    # the colour row's error adds to the sky cell's
+    r = out[s["group"] == "red"]
+    assert (r["slope_ref_err"] > alone.loc[s["group"] == "red", "slope_ref_err"]).all()
+    # a frame without colours, and a table made before the colour term, give the sky cells alone
+    np.testing.assert_allclose(summary.apply_reference(s.drop(columns="bp_rp"), ref)["slope_z"], alone["slope_z"])
+    np.testing.assert_allclose(summary.apply_reference(s, sky.drop(columns="crange"))["slope_z"], alone["slope_z"])
+    assert (summary.reference_table(s.drop(columns="bp_rp"))["level"] > summary.REF_COLOUR).all()
+    # a fake is placed by its host's colour as well as its host's magnitude
+    host = s[s["group"] == "red"].iloc[[0]]
+    fake = host.assign(slope=host["slope"].iloc[0] - 0.03, g_mag=20.9, bp_rp=0.9)
+    got = summary.apply_reference(fake, ref, g_mag=host["g_mag"].to_numpy(), bp_rp=host["bp_rp"].to_numpy())
+    assert got["slope_ref"].iloc[0] == r["slope_ref"].iloc[0] and got["slope_z"].iloc[0] < -10
+    # a whole-sky run: sky rows region by region, colour rows from a bounded sample of every file's residuals
+    halves = [s[s["source_id"] < 5 * LEVEL6], s[s["source_id"] >= 5 * LEVEL6]]
+    samples = [summary.residual_sample(h, per_cell=100) for h in halves]
+    assert [len(x) for x in samples] == [215, 215]                               # 100 + 100 + 10 + 5 a file
+    rows = summary.colour_rows(summary.bound_sample(pd.concat(samples, ignore_index=True), 10_000))
+    by_parts = pd.concat([summary.reference_table(h, colours=False) for h in halves] + [rows], ignore_index=True)
+    again = summary.apply_reference(s, by_parts).groupby(s["group"])["slope_z"].median()
+    assert abs(again["mid"]) < 0.1 and abs(again["red"]) < 0.1
+
+
 def test_cell_sample_is_bounded_and_repeatable():
     rng = np.random.default_rng(8)
     s = pd.concat([stars_frame(rng, 500, pixel=1), stars_frame(rng, 30, pixel=70)], ignore_index=True)
@@ -206,7 +255,7 @@ def test_score_all_flags_the_stars_the_detector_on_every_star_flags():
     new = search.merge(summary.apply_reference(summ, ref), stats)
     cells = summ.set_index("source_id")[["gbin", "cbin"]]
     old = search.score(lc, cells, table).merge(cells.reset_index(), on="source_id")
-    old = summary.apply_reference(old.merge(summ[["source_id", "g_mag"]], on="source_id"), ref)
+    old = summary.apply_reference(old.merge(summ[["source_id", "g_mag", "bp_rp"]], on="source_id"), ref)
     shared = rule_v3.shared(old)
     f_old = search.flag(old, shared_flags=shared).set_index("id")
     f_new = search.flag(new[new["sigma_visit"].notna()].reset_index(drop=True)).set_index("id").loc[f_old.index]
@@ -346,6 +395,28 @@ def _script(name):
     sys.modules[name] = mod            # so that worker processes can find the script's functions
     spec.loader.exec_module(mod)
     return mod
+
+
+def test_checks_report_listed_stars_without_a_kept_light_curve(tmp_path):
+    import pyarrow.parquet as pq
+
+    sc = _script("slow_checks")
+    rng = np.random.default_rng(5)
+    kept, fetched = tmp_path / "kept", tmp_path / "datalink"
+    kept.mkdir(), fetched.mkdir()
+    pq.write_table(lightcurves(rng, ("noise",) * 3, sid0=1), kept / "part0.parquet")           # stars 1-3
+    pq.write_table(lightcurves(rng, ("noise",) * 2, sid0=3), fetched / "part0.parquet")        # stars 3-4
+    cand = pd.DataFrame({"source_id": [1, 2, 4, 9], "phot_g_mean_mag": [14.0, 18.5, 19.4, 19.8],
+                         "strength": [3.0, 2.0, 5.0, 1.5], "by": "trend"})
+    g = sc.g_epochs([str(kept)], cand["source_id"])
+    assert set(g["source_id"]) == {1, 2}
+    none = sc.without_lightcurve(cand, g)
+    assert none["source_id"].tolist() == [4, 9] and none.columns.tolist() == ["source_id", "phot_g_mean_mag",
+                                                                               "strength", "by"]
+    both = sc.g_epochs([str(kept), str(fetched)], cand["source_id"])
+    assert set(both["source_id"]) == {1, 2, 4} and len(both) == len(g) + (both["source_id"] == 4).sum()
+    assert sc.without_lightcurve(cand, both)["source_id"].tolist() == [9]
+    assert len(sc.without_lightcurve(cand, both.iloc[0:0])) == 4
 
 
 def test_pass_flag_and_cuts_end_to_end(tmp_path):

@@ -696,6 +696,54 @@ is then under 0.01 errors in every magnitude range (by construction; `flag` writ
 `summary.json` as the release-day check), and at G 12-13 the stars beyond 3.8 errors go from 51 brightening and 13
 fading to 20 and 20 (measured with DR3's marks).
 
+**Drift by colour (2026-11-11).** The occurrence-limit work found that the trend left after the drift correction
+depends on colour, and it holds: on the field, stars redder than BP−RP 2 keep a brightening trend of +0.06 to
++0.22% a year and stars bluer than 0.5 one of about +0.1% a year, in every magnitude range. That is 0.3 to 0.6
+errors on DR3 and would be about 1 error at DR4's precision. The cause is the drift table's three colour ranges
+(below 0.8, 0.8-1.3, above 1.3): inside the red range one median is taken over all stars, most of them near
+BP−RP 1.5. On the lists it showed as red stars brightening: at G 16-19 and BP−RP above 2.2, 270 fading against
+518 brightening. Two changes:
+
+- *Narrow colour ranges in the drift table* (`drift.FINE_EDGES`: edges at 0.5, 0.8, 1.0, 1.3, 1.6, 1.8, 2.0, 2.2,
+  2.6, 3.0). A star takes the drift of its narrow range when 30 quiet stars measure it, else of its wide range
+  as before. This corrects the epochs, so episode scores and the per-band trends gain too. It removes the
+  leftover for red stars fainter than G 17, where most of them are. It cannot reach bright red and blue stars,
+  because almost none of them are quiet: 4 of the 501 stars at G 15-16 and BP−RP 2.2-2.6.
+- *A colour term in the trend's reference* (`summary.colour_rows`). After a star's trend is measured against its
+  sky cell, the median of what is left over all the run's stars of the same magnitude (1 mag) and colour range
+  is subtracted too, with its error added. It uses every star, quiet or not, so it reaches the bright ones. The
+  sky cells stay as they were (98% of stars at level 6): putting colour into the sky cells instead moved a
+  quarter of the stars to coarser pixels and left 0.07 errors of pixel-to-pixel scatter in the median trend,
+  where the sky cells alone leave none (0.16 errors without any reference).
+
+Median trend against the reference, in errors, before / after (stars):
+
+| BP−RP | G < 13 | 13-16 | 16-17 | 17-18 | 18-19 |
+|---|---|---|---|---|---|
+| below 0.5 | +0.42 / −0.03 (785) | +0.63 / −0.01 (612) | +0.35 / 0.00 (282) | +0.18 / +0.02 (452) | −0.05 / −0.02 (989) |
+| 0.5-1.8 | −0.01 / +0.02 (12,176) | 0.00 / 0.00 (89,249) | −0.02 / 0.00 (69,327) | −0.04 / 0.00 (94,303) | −0.07 / 0.00 (112,212) |
+| 1.8-2.0 | +0.22 / +0.03 (148) | +0.15 / 0.00 (958) | +0.09 / 0.00 (2,132) | +0.07 / 0.00 (5,634) | 0.00 / 0.00 (12,345) |
+| 2.0-2.2 | +0.14 / +0.06 (79) | +0.35 / +0.01 (645) | +0.26 / 0.00 (1,468) | +0.19 / 0.00 (4,239) | +0.12 / 0.00 (10,554) |
+| 2.2-2.6 | +0.11 / +0.13 (107) | +0.45 / +0.02 (673) | +0.41 / 0.00 (1,752) | +0.38 / 0.00 (5,443) | +0.28 / +0.01 (15,161) |
+| 2.6-3.0 | +0.25 / +0.25 (48) | +0.44 / +0.14 (186) | +0.49 / −0.01 (583) | +0.49 / −0.01 (2,150) | +0.36 / 0.00 (6,504) |
+| above 3.0 | 0.00 / 0.00 (96) | +0.38 / +0.38 (32) | +0.40 / +0.03 (73) | +0.43 / 0.00 (315) | +0.30 / +0.01 (1,192) |
+
+The cells that stay off zero have fewer than 50 stars of that colour in a 1 mag bin of G in this field; the
+whole sky has them. With the drift table's narrow ranges alone the rows from 2.0 to 3.0 at G 17-19 already
+fall to 0.17 or less and the bright ones do not move. `flag` writes the medians by colour to `summary.json`
+(`trend_offset_by_BP_RP`), beside those by magnitude, as a release-day check: on the field every range is within
+0.013 errors of zero, stars without a colour included (−0.35 errors before the reference).
+
+What it changes, same field and settings as the tables in this section: thresholds at G < 19 are 5.35, 3.69 and
+6.74 (episode, trend, repeat; 5.42, 3.68, 6.77 before). Lists at G < 19: 4,059 fading and 3,637 brightening
+(3,960 and 3,707); above strength 5, 54 and 109 (54 and 106). Red stars at G 16-19: 363 fading against 380
+brightening. Injected steady fades listed, all hosts brighter than G 19: 82.0% at 1% a year and 95.1% at 3% a
+year (81.8% and 95.0%); untouched hosts 1.1% as before. By host colour at 1% a year: red hosts (BP−RP above
+2.2, 189 of them) 32% listed against 24% before, and their 1% a year brightenings 37% on the rising list
+against 42%; blue hosts (below 0.5, 105) 50% of 0.5% a year fades against 42%; hosts between 0.5 and 1.8 86%
+either way. The pass costs the same (0.9 to 1.0 min for the field). The other numbers in this section were
+measured before this change and move by less than these do.
+
 **Epochs without rejection marks.** DR3 marks the epochs its variability processing rejected (10% of G epochs in
 one file of this field) and `drift.normalise` drops them. DR4's bulk epoch photometry has no such column (found by
 the release-day practice run). `drift.own_good` now drops epochs whose error is over twice the star's median error
@@ -798,8 +846,8 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
    and colour come from its light curve.
 4. Lists: `slow_search.py flag --run R --rule RULE --out L`: each star's trend against the median of nearby stars
    of similar brightness, the shared-date test, then the fading list, the `early` list and the rising list, one
-   sky region at a time. `L/summary.json` holds the median trend by magnitude before and after the reference
-   (the first-hour check that trends sit at zero) and the counts above each strength.
+   sky region at a time. `L/summary.json` holds the median trend by magnitude and by colour before and after
+   the reference (the first-hour check that trends sit at zero) and the counts above each strength.
 5. Cuts: `slow_search.py cuts --run L` looks up parallax, proper motion, colour, BP/RP blend counts and the
    variability class of every star above strength 1 either way (the run's one catalogue query, through
    `targets.releases`, so DR4's table names are in one place). It marks stars with no measurable motion as
@@ -812,7 +860,8 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
    which to fetch light curves one star at a time, and `slow_search.py pass --lightcurves DIR` scores whatever
    has arrived. `slow_search.py select`, the earlier archive-side choice of stars, is kept only for comparison:
    it picks none of the steady fades it was meant to find ("Every star scored").
-7. First-hour checks on the lists: the median trend by magnitude (`L/summary.json`, `trend_offset_by_G`), the
+7. First-hour checks on the lists: the median trend by magnitude and by colour (`L/summary.json`,
+   `trend_offset_by_G` and `trend_offset_by_BP_RP`), the
    fading against the brightening counts by kind (`L/cuts_summary.json`), and the watch-list's predictions
    (`slow_fallback.py check`).
 8. Reading: the fading list in its reading order, kind by kind, each down to where its fades stop standing
@@ -821,6 +870,9 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
    --skip-class ECL --n 1000`. DR4's eclipsing-binary class is left out first; `--lightcurves` adds the
    eclipsing-binary filter on G and ZTF (`eb_explained`, its period and duration), shown to the reviewer as
    information (its test failed for repeating long dips, "Eclipsing binaries among the candidates" below).
+   The pass keeps light curves only for stars brighter than G 19, and the fading list also holds fainter ones:
+   the checks name the stars with no kept light curve (`no_lightcurve.csv`, `g_lightcurve` in `checks.csv`) and
+   take a second `--lightcurves` directory for light curves fetched through DataLink.
    Stars marked `g_only` or `bp_rp_only` are not checked but stay on the fading list with their verdict and are
    read after the rest, as the still stars are.
 9. Figures for the stars worth showing: `viz_candidates.py figures --run ... --ids ...` (docs/viz.md).
@@ -1060,6 +1112,12 @@ the kind of object this search is for. Measuring duration from the folded light 
 runs of epochs, would tell them apart; it would need its own test. Data: `/mnt/project-files/slow-changes/eb-test/`.
 
 ## Log
+
+- **2026-11-11.** Drift by colour ("Every star scored"). The trend left after the drift correction depended on
+  colour (red and blue stars brightening by 0.3 to 0.6 errors on DR3; found by the occurrence-limit work). The
+  drift table now has narrow colour ranges and the trend's reference a colour term; the median trend is at zero
+  in every colour range with 50 stars, thresholds move by under 0.1 and recall on injected fades is unchanged
+  overall (red hosts at 1% a year: 24% to 32%). The checks step names listed stars that have no kept light curve.
 
 - **2026-11-11.** The known answers are in the DataLink fallback list (3,791 stars with the watch-list). ESA's
   archive refused the position queries, so `slow known` gained `--mirror aip`.
