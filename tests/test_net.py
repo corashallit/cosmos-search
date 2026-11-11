@@ -1,6 +1,8 @@
 import hashlib
+import multiprocessing
 import threading
 import time
+from concurrent.futures import ProcessPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
@@ -301,3 +303,36 @@ def test_storage_options_carry_user_agent_and_respect_blind(monkeypatch):
     monkeypatch.setenv("COSMOS_BLIND", "1")
     with pytest.raises(BlindModeError):
         storage_options()
+
+
+_FORKED = {}
+
+
+def _echo_many(k):
+    """In a forked worker: 30 requests with the parent's client, each answer checked against what was asked."""
+    client, url = _FORKED["client"], _FORKED["url"]
+    return sum(client.get(f"{url}/echo?v={k}-{i}").content != f"{k}-{i}".encode() * 4000 for i in range(30))
+
+
+def test_forked_workers_do_not_read_each_others_answers(archive, tmp_path):
+    """A worker forked after the parent used the client inherits its open connection. Four workers sending
+    requests down that one socket got each other's answers (a byte range of the right length and the wrong
+    bytes: the first large file of every scoring pass failed its checksum)."""
+    archive.script["/echo"] = [(200, {}, lambda path: path.split("v=")[1].encode() * 4000)]
+    archive.server.RequestHandlerClass.protocol_version = "HTTP/1.1"      # keep-alive, as the archives serve
+    client = make_client(tmp_path)
+    assert client.get(f"{archive.url}/echo?v=p-0").content == b"p-0" * 4000      # the parent's connection is open
+    before = client.adapters["http://"]
+    _FORKED.update(client=client, url=archive.url)
+    pool = ProcessPoolExecutor(4, mp_context=multiprocessing.get_context("fork"))
+    try:
+        # sharing one socket, the workers wait on answers another worker has read: a timeout, not a hang
+        wrong = list(pool.map(_echo_many, range(4), timeout=60))
+    finally:
+        for proc in list(pool._processes.values()):
+            proc.kill()
+        pool.shutdown(wait=False, cancel_futures=True)
+    assert wrong == [0, 0, 0, 0]
+    # the parent keeps its own connections
+    assert client.adapters["http://"] is before
+    assert client.get(f"{archive.url}/echo?v=p-1").content == b"p-1" * 4000
