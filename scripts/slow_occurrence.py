@@ -354,7 +354,8 @@ def _referenced(d, reference):
     """Rows measured against the neighbour reference: `summary.apply_reference` by each row's own g_mag, which
     adds slope_ref, slope_ref_err, slope_z_raw and replaces slope_z. Rows that already carry `slope_ref`, and
     every row when no reference is given, are returned as they are (with slope_z = slope / slope_err when they
-    had none)."""
+    had none). The reference's part by flux excess is left out: stars carry the catalogue's flux ratio here and
+    fakes none, and the limit centres both by excess itself (`occurrence.centre`)."""
     for c in d.columns:
         if d[c].dtype == np.float32:
             d[c] = d[c].astype(np.float64)
@@ -365,7 +366,7 @@ def _referenced(d, reference):
         return d
     if "g_mag" not in d:
         raise SystemExit("--reference needs g_mag in the per-star table and the injections (the pass's own magnitude)")
-    return summary.apply_reference(d, reference)
+    return summary.apply_reference(d, reference, flux_ratio=False)
 
 
 def with_host_excess(inj, hosts):

@@ -301,6 +301,10 @@ def test_reference_has_a_flux_excess_term_counted_from_the_stars_own_median_rati
     np.testing.assert_allclose(got["slope_z"], plain["slope_z"])
     assert "flux_excess" not in got and "flux_excess" not in summary.apply_reference(s, old)
     np.testing.assert_allclose(summary.apply_reference(s, old)["slope_z"], plain["slope_z"])
+    # and so does a frame with flux ratios when the flux-excess part is declined (the occurrence limit)
+    declined = summary.apply_reference(s, ref, flux_ratio=False)
+    np.testing.assert_allclose(declined["slope_z"], plain["slope_z"])
+    assert "flux_excess" not in declined
     # a fake is placed by its host's flux ratio
     host = s[m].iloc[[0]]
     fake = host.assign(slope=host["slope"].iloc[0] - 0.03, flux_ratio=1.23)

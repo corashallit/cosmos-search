@@ -771,12 +771,16 @@ def apply_reference(summ, ref, g_mag=None, bp_rp=None, flux_ratio=None):
     table has median flux ratios.
 
     g_mag, bp_rp, flux_ratio: values to place the stars by instead of their own (a fake's host's, so the fake is
-    measured against exactly its host's cells)."""
+    measured against exactly its host's cells). flux_ratio=False leaves the flux-excess part out whatever `summ`
+    holds (the occurrence limit, which leaves stars with an excess out and centres the rest itself, on stars and
+    on fakes alike)."""
     out = summ.copy()
     g_mag = out["g_mag"].to_numpy() if g_mag is None else g_mag
     if bp_rp is None and "bp_rp" in out:
         bp_rp = out["bp_rp"].to_numpy()
-    if flux_ratio is None and "flux_ratio" in out:
+    if flux_ratio is False:
+        flux_ratio = None
+    elif flux_ratio is None and "flux_ratio" in out:
         flux_ratio = out["flux_ratio"].to_numpy()
     med, err, cnt, lev = lookup(ref, out["source_id"].to_numpy(), g_mag, bp_rp, flux_ratio)
     raw = out["slope_z_raw"].to_numpy(float) if "slope_z_raw" in out else out["slope_z"].to_numpy(float)
