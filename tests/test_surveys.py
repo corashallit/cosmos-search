@@ -210,6 +210,15 @@ def test_atlas_waits_for_its_own_unfinished_task_instead_of_queueing_again(archi
                     sleep=lambda s: None)
     assert len(t) == 4 and archive.hits["/queue/"] == 1 and "/queue/2/" not in archive.hits   # no new job
     assert atlas._waiting == 0
+    # A finished task not yet collected is taken up the same way.
+    _atlas_script(archive)
+    done = {**left, "finishtimestamp": "2026-11-10T00:00:00Z", "result_url": f"{archive.url}/static/results/job1.txt"}
+    archive.script["/queue/"] = [(200, js, json.dumps({"results": [done]}).encode())]
+    archive.script["/queue/1/"] = [(200, js, json.dumps(done).encode())]
+    hits = archive.hits["/queue/"]
+    t = atlas.fetch(9, 10.0, -5.0, client=make_client(tmp_path), cache=False, base_url=archive.url,
+                    sleep=lambda s: None)
+    assert len(t) == 4 and archive.hits["/queue/"] == hits + 1                                 # the list only
 
 
 def test_atlas_sends_the_proper_motion_and_its_epoch(archive, tmp_path, monkeypatch):

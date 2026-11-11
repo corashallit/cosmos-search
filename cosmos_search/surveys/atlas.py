@@ -30,9 +30,9 @@ four of ours had run; with one, two and three waiting, at about 50, 88 and 120. 
 60 places an hour, and a task for 2015-2026 ran 18.5 minutes (3,900 images). So a user gets about one task an
 hour when the queue is busy, and sending many at once only puts them further back. This module keeps at most
 MAX_WAITING tasks of its process waiting to start (two, so that one is near the head while the other runs) and
-sends the next when one has started. A rerun first looks in the account's task list for an unfinished task
-asking for the same thing (a run stopped by a restart leaves its tasks queued) and waits for that one instead of
-queueing the job again.
+sends the next when one has started. A rerun first looks in the account's task list for a task asking for the
+same thing (a run stopped by a restart leaves its tasks queued, running or finished but not collected) and takes
+that one up instead of queueing the job again.
 
 Reduced images, not difference images, by default. Difference photometry measures the change against a reference
 image, and ATLAS replaced its reference images near MJD 58417 (2018-10-26) and 58882 (2020-02-03): a constant
@@ -127,12 +127,13 @@ def _same(task, data):
 
 
 def _existing(client, base_url, data):
-    """The URL of an unfinished task of this account that asked for the same thing (one left by a run that was
-    stopped), so that a rerun waits for it instead of queueing the job again; None if there is none."""
+    """The URL of a task still in this account's list that asked for the same thing (one left queued, running or
+    finished but not collected by a run that was stopped), so that a rerun takes it up instead of queueing the job
+    again; None if there is none."""
     resp = client.get(f"{base_url}/queue/", headers=headers())
     _check(resp, "task list")
     for task in resp.json().get("results", []):
-        if not task.get("finishtimestamp") and _same(task, data):
+        if _same(task, data):
             return task["url"]
     return None
 
