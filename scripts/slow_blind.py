@@ -49,6 +49,12 @@ def _git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True, check=True, cwd=ROOT).stdout.strip()
 
 
+def _init(state):
+    """Give a worker the state. A forked worker (Linux) has it already; one started as a new interpreter (macOS)
+    imports this script again and would see it empty."""
+    _STATE.update(state)
+
+
 def _read(name):
     t = pq.read_table(Path(_STATE["run"]) / "lightcurves" / name, columns=LC_COLUMNS).to_pandas()
     t["band"] = t["band"].astype(str)
@@ -124,7 +130,7 @@ def make(a):
         k += n
 
     _STATE.update(run=a.run, wanted={r[0] for r in plan_rows})
-    with Pool(a.procs) as pool:  # forked workers inherit _STATE
+    with Pool(a.procs, initializer=_init, initargs=(_STATE,)) as pool:
         lcs = pd.concat(pool.map(_read, names, chunksize=4), ignore_index=True)
     by_star = dict(tuple(lcs.groupby("source_id", sort=False)))
 

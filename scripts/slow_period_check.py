@@ -69,6 +69,12 @@ def injected(df, hosts, file_index):
     return fake, pd.DataFrame(truth)
 
 
+def _init(state):
+    """Give a worker the state. A forked worker (Linux) has it already; one started as a new interpreter (macOS)
+    imports this script again and would see it empty."""
+    _STATE.update(state)
+
+
 def one_file(job):
     file_index, name = job
     parts = _STATE["parts"]
@@ -124,7 +130,7 @@ def main(argv=None):
     _, table = rule.load()
     _STATE.update(run=a.run, parts=out / "parts", cells=st.set_index("source_id")[["gbin", "cbin"]], table=table,
                   quiet=set(map(int, quiet)), hosts=set(map(int, quiet[drift.half(quiet) == 1])))
-    with Pool(a.workers) as pool:
+    with Pool(a.workers, initializer=_init, initargs=(_STATE,)) as pool:
         res = pool.map(one_file, list(enumerate(names)), chunksize=1)
     stars = pd.concat([r[0] for r in res], ignore_index=True).merge(
         st[["source_id", "gbin", "s_dim", "s_bright", "slope_z", "abbe", "sigma_visit"]], on="source_id", how="left")
