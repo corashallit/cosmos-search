@@ -85,6 +85,15 @@ git push
 python scripts/slow_review.py table --dir D --checks L/checks        # D/reviewed.csv, the list to read
 ```
 
+The limit on how common steady fades are among FGK dwarfs, which is reported with or without a find
+([arms/occurrence.md](arms/occurrence.md), "On DR4": first on the threshold sample, then on every star):
+
+```
+python scripts/slow_occurrence.py aux --sky 4 --schema gaiadr4 --out A        # the dwarfs' parallaxes, in sky slices
+python scripts/slow_occurrence.py inject --lightcurves R/lightcurves --random-share 0.001 --aux A --rule RULE --out O
+python scripts/slow_occurrence.py limit --stars R/summary --reference L/reference.parquet --aux A --injections O/injections --out O/limit
+```
+
 Each step is described in [arms/slow-changes.md](arms/slow-changes.md), "Release day, end to end".
 
 **Launching the reviews.** The launcher hands every reviewer, before its task, the last message Cora wrote in the
