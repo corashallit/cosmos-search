@@ -51,6 +51,10 @@ matching rule wins (host suffix, then path prefix).
 | `mast.stsci.edu` | 4 | — | Nothing documented |
 | `api.adsabs.harvard.edu` | 2 | 0.2 s | 5,000 queries/day per token; stop at 50 remaining. The proxy injects the token; send no Authorization header |
 | `data.lsdb.io` | 8 | — | Static HATS Parquet |
+| `api.skymapper.nci.org.au` | 2 | — | SkyMapper DR4 TAP; nothing documented. A star is two short synchronous queries (~3 s) |
+| `datalab.noirlab.edu` | 2 | — | NOIRLab Data Lab TAP; nothing documented. 15-25 s a star |
+| `fallingstar-data.com` | 2 | 1 s | ATLAS forced photometry: throttles per account with 429 and `Retry-After`, which the client waits out. Token in `ATLAS_TOKEN` or a network secret (header `Authorization`, value `Token <token>`) |
+| `ifa.hawaii.edu` (shared) | 2 | 0.5 s | ASAS-SN Sky Patrol, plain http on port 9006 only, so not reachable from cloud containers. At most 2 retries, 20 s base; 2 failed calls in a row pause the host for 30 min. On 2026-11-10 the university's network dropped a client address minutes after two empty connections to the port: never open a connection there without sending a request (`surveys/asassn.py`) |
 | anything else | 2 | — | Polite default |
 
 ## Gaia bulk files

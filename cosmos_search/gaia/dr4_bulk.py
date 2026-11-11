@@ -343,6 +343,12 @@ def _write_lightcurves(pieces, dest, meta):
     return stars, rows
 
 
+def peak_rss_gb(who=resource.RUSAGE_SELF):
+    """Largest resident memory so far of this process (or, with RUSAGE_CHILDREN, of its largest finished child) in
+    GB. Linux reports kB, macOS bytes."""
+    return round(resource.getrusage(who).ru_maxrss / (1e9 if sys.platform == "darwin" else 1e6), 2)
+
+
 def process_file(info, out, select_path=None, random_share=0.0, keep_all=False, durable=None, local=None,
                  streams=STREAMS, stars=30_000):
     """Download one bulk file (or read `local`), keep the chosen stars, write their light curves (epoch.SCHEMA).
@@ -381,8 +387,8 @@ def process_file(info, out, select_path=None, random_share=0.0, keep_all=False, 
     rec = {"name": info["name"], "key": info.get("key"), "bytes": info.get("size"), "md5": info.get("md5"),
            "transits_kept": transits[0], "stars_kept": n_stars, "rows": n_rows, "download_s": round(t_dl, 1),
            "process_s": round(time.time() - t0 - t_dl, 1), "seconds": round(time.time() - t0, 1),
-           # The worker's largest memory so far (Linux reports kB), for choosing --workers on a new machine.
-           "worker_peak_rss_gb": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6, 2)}
+           # The worker's largest memory so far, for choosing --workers on a new machine.
+           "worker_peak_rss_gb": peak_rss_gb()}
     if durable:
         dr3_pass._publish({"lightcurves": dest}, Path(durable), info["name"], rec)
     else:

@@ -240,6 +240,7 @@ answer differently:
 | BP depth / RP depth (`colour`) | 1 | ~1.7 | ~1.7 | > 1 for cooling |
 | NEOWISE W1/W2 change over the episode, or W1/W2 slope against Gaia's (`wise_change`, `wise_slope`) | same as G | ~0.05-0.07 of G | brighter (+5% in W2 per 1% of G at 300 K; far more if hotter) | well below G (Rayleigh-Jeans side) |
 | ZTF after 2020-01-20 (`after`) | — | — | — | — |
+| Other surveys over Gaia's dates and since, TESS variability ("Other surveys" below) | same change | same change, redder | same change, redder | same change; spotted stars vary within a month |
 
 ZTF says whether a change went on, stopped or recovered after DR4's span. NEOWISE comes from IRSA's
 `neowiser_p1bs_psd` single exposures (clean frames, one component, no contamination flags), averaged per ~6-month
@@ -876,12 +877,22 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
    Stars marked `g_only` or `bp_rp_only` are not checked but stay on the fading list with their verdict and are
    read after the rest, as the still stars are.
 9. Figures for the stars worth showing: `viz_candidates.py figures --run ... --ids ...` (docs/viz.md).
-10. Blind review of the stars the checks leave (docs/vetting.md §14-§15). Launch, audit and archive exist:
-    `cosmos_search.vetting.reviewer.launch_args(dir, ids)` gives the arguments for `scripts/stage_a_reviews.js`
-    (the model and effort of `prereg/reviewers/slow-cal-1.json`), `stage_a_audit.py --reviewer
-    prereg/reviewers/slow-cal-1.json` refuses reviews served by anything else, and `vetting commit --audit
-    --archive` records the verdicts. **Not built yet:** the step that turns `L/checks` into review files. Only
-    `slow_cal.py build` makes them, for the calibration's own stars and fakes.
+10. Blind review of the stars the checks covered (docs/vetting.md §14-§15), `scripts/slow_review.py`:
+    `files --checks L/checks --fading L/fading.parquet --lightcurves R/lightcurves --rule RULE --out D` writes one
+    review file per star, built as the calibration's files were (`slow.vet.review_file`); `launch --dir D` prints
+    the arguments for `scripts/stage_a_reviews.js` (the model and effort of `prereg/reviewers/slow-cal-1.json`;
+    run with the Workflow tool, never the Agent tool); `stage_a_audit.py --reviewer
+    prereg/reviewers/slow-cal-1.json` refuses reviews served by anything else; `vetting commit --audit --archive`
+    records the verdicts; and `table --dir D --checks L/checks` writes `D/reviewed.csv`, the list to read, with
+    the eclipsing-binary check beside each verdict. The files hold the calibration's four tests: `eb_explained`
+    goes into them only with `--with-eclipse`, because no calibration batch has measured the reviewer on files
+    that carry it. A star whose NEOWISE or ZTF fetch failed in the checks is left out and listed, so that its
+    checks are run again first.
+11. The limit on how common steady fades are among FGK dwarfs, find or no find (docs/arms/occurrence.md, "On
+    DR4"): on day one `slow_occurrence.py` on the light curves of step 2, with the pass and flag steps run on
+    that directory; then on every star, from `R/summary`, `L/reference.parquet`, the light curves the pass keeps
+    of its random share of stars, and the dwarfs' parallaxes fetched in sky slices (`slow_occurrence.py aux
+    --sky 4`).
 
 ### Trial on all of DR3 (2026-10-30)
 
@@ -1111,6 +1122,161 @@ it. A strictly periodic long dip and a long-period eclipsing binary differ only 
 the kind of object this search is for. Measuring duration from the folded light curve, rather than from unbroken
 runs of epochs, would tell them apart; it would need its own test. Data: `/mnt/project-files/slow-changes/eb-test/`.
 
+## Other surveys (2026-11-10)
+
+A fade in Gaia can be Gaia's own doing (an instrument or calibration effect, or a neighbour that only Gaia's
+window separates), and DR4 stops on 2020-01-20. Other telescopes answer three questions that Gaia cannot answer
+about itself. `cosmos_search/surveys/` reads them, `slow/independent.py` compares, and `scripts/slow_checks.py`
+adds the result to every candidate's row.
+
+| Question | Column | Reading |
+|---|---|---|
+| Did another telescope see the same change over Gaia's own dates? | `same_k` ± `same_k_err`, `same_years` | k is the survey's change as a multiple of what Gaia's predicts for its band: 1 the same change, 0 none. `seen` (k above 0 by 3 errors), `not_seen` (even half of Gaia's change ruled out), `opposite`, `undecided`, `no_data` |
+| What happened after Gaia's last visit? | `after`, `after_ratio` or `after_recovered` | A trend: its rate since, as a multiple of Gaia's (`went_on`, `stopped`, `reversed`). An episode still under way at Gaia's last visit: the share of its depth recovered since (`fainter`, `still_faint`, `recovered`) |
+| Is the star active enough for spots to do it? | `tess_amp`, `tess_quiet`, `activity_ratio` | Gaia's change as a multiple of the star's variability within a month in TESS |
+
+Each also comes per survey (`skymapper_k`, `ztf_after`, ...), with `<survey>_dilution`: the light of Gaia
+neighbours inside that survey's beam over the star's own, by which the expected change is reduced.
+
+**How the comparison is made.** Epochs are averaged into visits, then into 180-day bins inside each group that
+has its own zero point (a filter and image type, a camera, a ZTF field and CCD quadrant). The fit gives every
+group its own level and one k for the survey, so nothing depends on zero points between groups, and a camera
+change cannot read as a step. Gaia's change is scaled to each band from its BP and RP values (a change twice as
+deep in BP as in RP is expected deeper in u and shallower in z). A bin's error is its formal error plus a floor
+measured on constant stars, in quadrature; if the bins scatter about the fit by more than that, the error of k
+grows by the same factor, and it is widened by Student's t for the few bins it rests on.
+
+**Measured on constant stars.** 640 Gaia DR3 stars that DPAC does not call variable, with RUWE < 1.4 and a G
+scatter below the median of their magnitude, |b| > 10°, in four G ranges from 11 to 18.5
+(`configs/surveys/constants-*.csv`; `scripts/survey_calibrate.py`). The floor is the scatter of 180-day bin means
+beyond their quoted errors. The test compares each constant star with a made-up Gaia trend of −2% per year over
+DR4's dates, and again with that trend injected into the survey's epochs.
+
+| Survey | Years | Sky | Stars it can test | Floor | Trend error over DR4's dates (median, % per year) | Injected trend seen | Constant star read as seen / opposite |
+|---|---|---|---|---|---|---|---|
+| SkyMapper DR4 | 2014-03 to 2021-09 | δ < +16° | 279 of 316 | 0.44% | 0.22 (G 11-13), 0.21 (13-15), 0.33 (15-17), 0.97 (17-18.5) | 86%, 93%, 79%, 33% | 0 / 1 of 279 |
+| NOIRLab NSC DR2 | 2012-09 to 2019-11 | mostly δ < +30°, G > 14.5 | 62 of 167 | 0.57% | 0.35 (G 15-17), 1.9 (17-18.5) | 64%, 42% | 0 / 0 of 62 |
+| ZTF (IRSA) | 2018-03 on | δ > −30°, G > 13 | 224 of 232 | 0.30% | 0.33 (G 13-15), 0.29 (15-17), 0.63 (17-18.5) | 82%, 80%, 59% | 2 / 3 of 224 |
+| ATLAS | 2015-07 on | all (south of −50° from 2022) | not measured | provisional 1.5% | | | |
+| ASAS-SN | 2012 on | all, G 10.5-16.5 | not measured | provisional 1.5% | | | |
+
+The ratio of k to its error has a scatter of 0.9 on SkyMapper's constants, so its errors are about right.
+NOIRLab's are too large by about half (scatter 0.5): with a median of five bins per star the widening for few
+bins dominates, which errs on the safe side. So SkyMapper confirms a trend of 0.7% per year at G < 15 and 1% per
+year at G 15-17 over DR4's dates, for nearly every star south of +16°. NOIRLab has enough exposures for one faint
+star in three. Of 341 constant stars tested in the two surveys, none read as `seen` and one as `opposite`.
+
+ZTF overlaps only DR4's last 1.9 years, so over Gaia's dates it asks whether a trend was still running then, to
+1% per year at G 13-17. Its errors are right (scatter 1.0), yet five constant stars of G 15-17 read as `seen` or
+`opposite`. In each the change is 1-2% over the two years and shows in two or three filters and in overlapping
+fields, so the stars themselves changed: "constant" here means quiet in Gaia DR3, which ends ten months before
+ZTF starts. About two quiet stars in a hundred drift by that much, and a `seen` for a fade of 1% per year carries
+that false-match rate. Brighter than G 13 ZTF saturates (floor 0.45%, and 4 of 58 constant stars read
+`opposite`), so it is not read for those stars.
+
+Every trend error includes 0.1% per year for the survey's own drift (`TREND_FLOOR`). ZTF showed why: with six
+years of data after 2020 its bin errors predict a trend error of 0.06% per year, while the trends of 230 constant
+stars scatter by 0.12% per year around a median fade of 0.03% per year. Without the floor 11 of the 230 read as
+`reversed`; with it 2 do, and 1 reads as `went_on` (it faded by 0.6% per year for six years). The verdicts also
+ask first what a survey rules out: a change in Gaia's direction that is measured well but is under half of
+Gaia's is `not_seen`, however far it stands above zero.
+
+After DR4's last visit SkyMapper has at most 1.6 years, so its trend error there is 1.2 to 7% per year and it can
+only say `went_on` for fast fades. ZTF carries the years since for the northern sky: its trend error after 2020
+is 0.11 to 0.13% per year at every G from 13 to 18.5 (the drift floor dominates), so it tells whether a fade of
+0.4% per year or more went on. With the made-up trend continued into ZTF's epochs, 97% of 230 stars read
+`went_on`; left constant, 91% read `stopped`. South of −30° the years since rest on ATLAS, and for stars brighter
+than G 13 on ASAS-SN.
+
+SkyMapper needed one change from the first version: with one group per filter, constant stars of G 17-18.5 read
+as fading (median k / error +0.5, 4 of 62 `seen`), because the short early exposures catch a faint star only when
+noise lifts it. With one group per filter and image type the bias is gone (+0.1, 0 of 61).
+
+**A dimming still under way at Gaia's last visit** was tested the same way (`survey_calibrate.py null --kind
+episode`): a made-up dimming of 5% over the two years before the last visit, and afterwards the star stays as
+faint, recovers, or dims by as much again.
+
+| Survey, Gaia's last visit | Over Gaia's dates: depth error (median), made-up dimming seen, constant stars `seen` / `opposite` | Afterwards: error, read `recovered` when it recovers, `fainter` when it doubles, constant stars `fainter` / `recovered` |
+|---|---|---|
+| SkyMapper, DR4 | 0.9% of the flux, 70%, 2 / 2 of 243 | 1.0%, 40%, 64%, 0 / 0 of 249 |
+| SkyMapper, DR3 (2017-05) | 1.8%, 53%, 1 / 0 of 151 | 1.0%, 38%, 69%, 1 / 0 of 229 |
+| ZTF, DR4 (dimming from 2019-01) | 0.47%, 96%, 0 / 0 of 222 | 0.33%, 90%, 99%, 2 / 0 of 227 |
+| NOIRLab, DR4 | 1.1%, 65%, 0 / 0 of 23 | no epochs after 2019-11 |
+
+This test found two faults, both fixed. Survey bins from the 30 days after Gaia's last visit were counted as
+"back to normal" over Gaia's dates and as "still faint" afterwards, which pulled ZTF's depth down to 0.9 of the
+true one and a full recovery down to 0.9; those bins now count on neither side. And ZTF's level after 2020
+against its level in 2019 scatters by 0.34% on constant stars where its bin errors predict 0.27%, so 7 of 227
+constant stars read `fainter`; every depth and recovery now carries 0.2% of the flux for that (`LEVEL_FLOOR`,
+the counterpart of the trend floor), which leaves 2.
+
+**On stars with a known Gaia change.** The DR3 watch-list (`configs/surveys/known-dr3.csv`: 2,849 stars with a
+fade in DR3, four in five of them DPAC-classed spotted stars) over DR3's dates, 2014-07 to 2017-05:
+SkyMapper has epochs for 1,746 of the 1,769 south of +16°, but its first years are thin, and only 471 have enough
+bins on both sides of Gaia's change to be compared. Of those 115 read `seen`, 355 `undecided`, none `not_seen` and
+one `opposite` (a star with no DPAC class and a Gaia fade of 1.4%, where SkyMapper shows a brightening of 12 ± 3%;
+not followed up). For the 113 whose SkyMapper error is under a third of Gaia's change, 82 are `seen` and 31
+`undecided`, with a median k of 0.89 (10th to 90th percentile 0.5 to 1.4). A k just under 1 is expected, since a
+list picked for large Gaia changes overstates them a little. Where SkyMapper can judge, Gaia's fades are real and
+of the size Gaia gave.
+
+After DR3's last visit, to 2021-09: of 195 stars whose dimming was still under way and which SkyMapper could
+judge, 14 had recovered, 104 were about as faint and 77 fainter still, by a median of the depth again. The
+comparison is with the mean level inside Gaia's faint window, so a fade still deepening at Gaia's last visit reads
+`fainter` even if it stopped there. Of 49 stars with a trend, 9 went on at more than half Gaia's rate, 22 did not
+and 18 reversed. For a spotted star, then, staying faint for years after Gaia is the usual case: `still_faint` or
+`fainter` does not set a candidate apart, and `recovered` is the rarer outcome (7%). ZTF cannot be tested on
+these stars. It starts ten months after DR3 ends, so it has no level from inside Gaia's window to compare with
+(a sample of 193 gave `no_data` for every episode); for DR4 it covers the last 1.9 years.
+
+**TESS variability as a measure of activity.** `surveys/tess_activity.py` measures the 5th to 95th percentile
+range of each sector's light curve in 3-hour bins, noise removed, from TGLC's undetrended fluxes (sectors 1-55,
+Tmag < 16), after dropping the first day of each orbit and dividing each orbit by a fitted line. Without the line
+constant stars show a median of 1% at G 11-13 and 3% at G 14.5-16, nearly all of it drift over an orbit. With it:
+
+| G | Constant stars with a sector | Median | 90% below (`quiet_floor`) |
+|---|---|---|---|
+| 11-13 | 96 | 0.34% | 1.6% |
+| 13-14.5 | 58 | 0.54% | 2.9% |
+| 14.5-16.5 | 107 | 1.5% | 9.5% |
+
+63% of the constant stars asked for had a TGLC light curve. The line costs any rotation slower than an orbit
+(about 13 days).
+
+This check turned out weaker than hoped. Of 975 DPAC-classed RS CVn stars on the watch-list with a TGLC sector,
+81% show no more variability within a month than constant stars do (68% at G 13-14.5), although Gaia saw them
+change by a median of 7%. Their spots change the mean level over years far more than they modulate it over days,
+or they rotate slower than an orbit. So a quiet TESS light curve does not rule activity out. What the check can
+say: an amplitude above the floor is direct evidence of spots (1 RS CVn star in 5 shows it, 1 in 3 at G 13-14.5,
+against 1 constant star in 10 by construction), and Gaia's change over the TESS amplitude (`activity_ratio`, with the floor standing in for
+a quiet star) has a known range for spotted stars: median 0.9, 90% below 2.9, 99% below 7.0. A candidate far
+above that range is unlike nearly all known spotted stars; with floors this high that takes a change of more than
+about 15% at G < 13 and 30% at G 13-14.5. Gaia's own rotation-modulation and Ca II activity tables are likely a
+better measure of activity and are not read yet.
+
+**Not yet tested against the live service.**
+
+- ATLAS needs an account's token (`ATLAS_TOKEN`). The reader runs a job on reduced images (difference images
+  step when ATLAS replaced its reference images in 2018-10 and 2020-02, inside Gaia's last years), and its
+  protocol is tested against a local server. The first session started after the token was added runs
+  `survey_calibrate.py fetch --surveys atlas`, `floors` and `null` on the constant stars and replaces the
+  provisional floor.
+- ASAS-SN answers only on port 9006, which cloud containers cannot open. On 2026-11-10 the first try from kore
+  ended within two minutes with the whole hawaii.edu network dropping kore's address, most likely because the
+  reachability check opened two empty connections that looked like a port scan. The check is now one ordinary
+  request, retries are limited to two, and ASAS-SN is read only when named (`--surveys ...,asassn`). Its floor is
+  provisional and its reader has not seen live data.
+
+**In a blind test.** Fakes are injected into Gaia's epochs only, so every fake would read `not_seen` here and
+give itself away. Until the fakes are also injected into these epochs (`dayone.external.apply` takes this table:
+same columns and band names), the survey columns must stay out of what a reviewer of fakes sees.
+
+**Running it.** `scripts/slow_checks.py` reads ZTF, ATLAS, SkyMapper and NOIRLab by default and names once any
+survey it cannot reach; `--surveys none` turns the comparison off and `--no-tess` the TESS step. SkyMapper takes
+about 3 s a star, NOIRLab 15-25 s, TESS a few seconds. Gaia neighbours for the dilution come from ESA's archive,
+or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet` and the TESS rows per sector to
+`tess.parquet`.
+
 ## Log
 
 - **2026-11-11.** Drift by colour ("Every star scored"). The trend left after the drift correction depended on
@@ -1119,9 +1285,36 @@ runs of epochs, would tell them apart; it would need its own test. Data: `/mnt/p
   in every colour range with 50 stars, thresholds move by under 0.1 and recall on injected fades is unchanged
   overall (red hosts at 1% a year: 24% to 32%). The checks step names listed stars that have no kept light curve.
 
+- **2026-11-11.** Other surveys as checks on a fade (Other surveys, above; PR #87). Readers for SkyMapper,
+  NOIRLab, ATLAS, ASAS-SN and TESS, and a comparison in every candidate's row: whether another telescope saw
+  Gaia's change over Gaia's own dates, what happened after Gaia's last visit, and how variable TESS shows the star
+  to be within a month. Measured on 640 constant stars. SkyMapper confirms a trend of 0.7% per year at G < 15 for
+  nearly every star south of +16°. ZTF (north of −30°, G > 13) tells whether a fade of 0.4% per year went on
+  after 2020 and sees 96% of 5% dimmings in DR4's last year. One or two constant stars in 100 read `seen` or
+  `opposite`; in ZTF these are stars that did change by 1-2%. On DR3's known faders SkyMapper confirmed 82 of the
+  113 it could judge and contradicted none, and of those still faint at DR3's last visit 7% had recovered by
+  2021. TESS is a weak test of activity: four in five known spotted faders look as quiet as constant stars.
+  ATLAS and ASAS-SN are built and tested offline only; ATLAS waits for a session that has the token, ASAS-SN
+  for the hawaii.edu block of 2026-11-10 to lift.
+
 - **2026-11-11.** The known answers are in the DataLink fallback list (3,791 stars with the watch-list). ESA's
   archive refused the position queries, so `slow known` gained `--mirror aip`.
 
+- **2026-11-11.** The occurrence limit reads the pass's per-star table and the flag step's reference, and the
+  DR3 field was run again that way (docs/arms/occurrence.md): fewer than 1 in 101 FGK dwarfs fade at 0.2% a
+  year, 1 in 7,879 at 1%, 1 in 58,623 at 5%. Found on the way: the trend left after the drift correction depends
+  on colour. Stars redder than BP−RP 2 brighten by 0.06 to 0.22% a year and the bluest by about 0.1%, at every
+  magnitude, while stars between 0.5 and 1.8 sit within 0.04% of zero (table in docs/arms/occurrence.md, "The
+  leftover trend depends on colour"). The drift table has one colour range above BP−RP 1.3 and the neighbour
+  reference none, so neither removes it. At DR3's errors that is +0.3 to +0.5 errors for the reddest stars;
+  at DR4's it would be about +1. The occurrence limit takes the dwarfs' own median out. The lists do not yet.
+- **2026-11-10.** Upper limit on how common steady fades are among FGK dwarfs (docs/arms/occurrence.md), built
+  and run on the 195,572 FGK dwarfs of DR3's Andromeda field: fewer than 1 in 110 fade at 0.2% a year, 1 in
+  7,545 at 1%, 1 in 51,304 at 5% (95%). Recall comes from steady fades injected into every one of those stars.
+  Every fading star past the cut counts as a possible real fade; subtracting chance fades estimated from
+  brightening stars was dropped as the limit, because on DR3 the two are not equally common far out (30
+  brightening against 10 fading beyond 8 errors) and a subtracted limit then falls below the truth. Settings for
+  DR4 frozen in `prereg/occurrence/steady-fades-v1.json`.
 - **2026-11-10.** Every star scored ("Every star scored" above). The archive-side selection picked none of the
   injected steady fades up to 3% a year; the run now summarises every star of the bulk files in one compiled pass
   (0.2 ms per star per core) and flags the same stars as the detector on every star. Trends are measured against

@@ -26,12 +26,18 @@ MODEL, OTHER = "model-new-1", "model-old-1"
 
 
 def transcript(path, pid, d, model=MODEL, asked=None, effort="xhigh", agent="general-purpose", workflow=True,
-               forwarded=False, api_error=False, extra_call=None, second_model=None):
-    """A subagent transcript in the harness's shape: the launch text, then a Read turn and a Write turn."""
+               forwarded=False, api_error=False, extra_call=None, second_model=None, user_request=None):
+    """A subagent transcript in the harness's shape: the launch text, then a Read turn and a Write turn.
+    user_request: the launching turn's user message, which a newer harness hands to the subagent first."""
     launch = f"Read the file {d}/prompts/{pid}.md and write to {d}/replies/{pid}.txt"
     if workflow:
         launch = "[Workflow harness — computed task] ...\n  " + launch
-    lines = [{"type": "user", "timestamp": "2026-11-10T22:00:00Z", "message": {"role": "user", "content": launch}}]
+    lines = []
+    if user_request:
+        lines.append({"type": "user", "timestamp": "2026-11-10T22:00:00Z", "message": {
+            "role": "user", "content": "[Workflow harness — user request] The harness relays, verbatim ...:\n  "
+                                       + user_request}})
+    lines.append({"type": "user", "timestamp": "2026-11-10T22:00:00Z", "message": {"role": "user", "content": launch}})
     if forwarded:
         lines.append({"type": "attachment", "timestamp": "2026-10-21T01:00:00Z",
                       "attachment": {"type": "queued_command", "prompt": "a message from the thread"}})
@@ -267,3 +273,20 @@ def test_failed_review_counts_against_the_rule():
                 "measured": {"colour": {}, "neowise": {}, "ztf": {}}} for p, k in (("a", "fake"), ("b", "natural"))}
     df = slow_cal.table([failed("a", "t", "no reply"), failed("b", "t", "no reply")], keys).set_index("packet_id")
     assert not df.loc["a", "shortlisted"] and df.loc["b", "shortlisted"]
+
+
+def test_audit_finds_a_review_that_was_handed_the_launching_turns_user_message(batch):
+    """Harness 2.1.322: the subagent's first message is the user message that started the launching turn. The
+    review is found (by the launch text that follows) and does not count as blind."""
+    for pid in (A, B):
+        transcript(batch / "t/workflows/wf_1" / f"agent-{pid}.jsonl", pid, batch)
+    transcript(batch / "t/workflows/wf_1" / f"agent-{C}.jsonl", C, batch,
+               user_request=f"go ahead; and look at {batch}/prompts/{A}.md first")     # names another file
+    s = run(batch, "--model", MODEL)
+    assert s["clean"] == 2 and s["wrong_reviewer"] == [C] and not s["no_transcript"]
+    res = json.loads((batch / "audit.json").read_text())["transcripts"]
+    assert len(res[A]) == 1 and res[C][0]["clean"] and res[C][0]["reviewer"]["relayed_user_request"] == 1
+    assert "user message of the turn that launched" in res[C][0]["reviewer_problems"][0]
+    assert res[C][0]["reviewer"]["launch"] == "workflow"
+    s = run(batch, "--model", MODEL, "--allow-thread-messages")
+    assert s["clean"] == 3 and s["reviewer"]["thread_messages_in_context"] == 1

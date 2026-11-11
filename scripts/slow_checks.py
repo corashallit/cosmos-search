@@ -2,6 +2,7 @@
 
     python scripts/slow_checks.py --fading R/fading.parquet --out R/checks [--n 100] [--schema gaiadr4] [--max-g 17]
         [--skip-class ECL] [--skip-still] [--skip-band] [--workers 6] [--lightcurves R/lightcurves [--lightcurves D]]
+        [--surveys ztf,atlas,skymapper,noirlab[,asassn] | none] [--no-tess]
 
 --fading is the list `scripts/slow_search.py flag` writes (ordered by strength). For each of the first --n stars
 (optionally only those brighter than --max-g): gaia_source astrometry and quality columns and DPAC's variability
@@ -17,6 +18,17 @@ and a line in no_lightcurve.csv. Fetch those stars through DataLink and give tha
 goes on. Stars are checked
 --workers at a time: one star's NEOWISE and ZTF fetches take one to two minutes, so 10^3 candidates one after
 another would take over a day.
+
+Other surveys (--surveys, on by default; docs/arms/slow-changes.md "Other surveys"): each star is read from every
+listed survey that this machine can reach (`cosmos_search.surveys`; ATLAS needs a token and ASAS-SN, which is read
+only when named, port 9006; a survey that cannot be read is named once at the start and left out), and compared
+with Gaia's change (`slow.independent`): `same_k`, `same_k_err` and `same_years` say whether the surveys saw
+Gaia's change over Gaia's own dates (1 the same change, 0 none; seen, not_seen, opposite, undecided, no_data),
+`after` and its columns what they saw since Gaia's last visit, each also per survey (`<survey>_k`, ...), with
+`<survey>_dilution` the share of neighbours' light in that survey's beam. For stars brighter than TESS_MAX_G,
+`tess_amp` is the variability within a month from TESS (`surveys.tess_activity`), `tess_quiet` whether that is no
+more than constant stars show, and `activity_ratio` Gaia's change as a multiple of it (a lower limit for a quiet
+star). Writes surveys.parquet (all epochs read) and tess.parquet (one row per star and sector).
 """
 
 import argparse
@@ -27,12 +39,20 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from cosmos_search import surveys
 from cosmos_search.dayone import external
 from cosmos_search.energy import budget
 from cosmos_search.gaia.archive import tap
 from cosmos_search.net.tap import Tap
 from cosmos_search.slow import checks
+from cosmos_search.slow import independent as ind
 from cosmos_search.slow.search import LC_G_MAX
+from cosmos_search.surveys import tess_activity
+
+TESS_MAX_G = 16.0      # TGLC has no light curve for stars fainter than about Tmag 16
+MIRROR_TAP = "https://gaia.aip.de/tap"
+_esa_failed = False
+_mirror = None
 
 GAIA_COLS = ("ra", "dec", "pmra", "pmdec", "parallax", "parallax_error", "ref_epoch", "phot_g_mean_mag", "bp_rp", "ruwe",
              "ipd_frac_multi_peak", "phot_bp_rp_excess_factor", "best_class_name", "best_class_score")
@@ -44,12 +64,48 @@ def candidates(fading, n, max_g=None):
     return f.sort_values("strength", ascending=False).head(n).rename(columns={"id": "source_id"})
 
 
+def gaia_query(adql):
+    """A synchronous Gaia archive query as a DataFrame with lower-case columns: ESA's archive, logged in, and the
+    AIP mirror when ESA fails. Under load ESA rejects synchronous queries with 503 after a minute of retries (seen
+    2026-11-10, logged in), so once it has failed the mirror is asked first for the rest of the run."""
+    global _esa_failed, _mirror
+    order = ("mirror", "esa") if _esa_failed else ("esa", "mirror")
+    last = None
+    for which in order:
+        try:
+            if which == "esa":
+                d = tap().query(adql, sync=True).to_pandas()
+            else:
+                if _mirror is None:
+                    _mirror = Tap(MIRROR_TAP, job_slots=2)
+                d = _mirror.query(adql, sync=True).to_pandas()
+            d.columns = [x.lower() for x in d.columns]
+            return d
+        except Exception as e:  # noqa: BLE001 (either service may be down or lack the table; try the other)
+            last = e
+            if which == "esa" and not _esa_failed:
+                _esa_failed = True
+                print(f"ESA Gaia archive failed ({e!r:.100}); asking {MIRROR_TAP} first from here on", flush=True)
+    raise last
+
+
 def gaia_rows(ids, schema):
     """Astrometry, mean photometry and DPAC's best variability class for the given source ids, under DR3's column
-    names whatever the release calls them and whichever tables hold them (targets/releases.py)."""
+    names whatever the release calls them and whichever tables hold them (targets/releases.py). From ESA's
+    archive, or from the AIP mirror once ESA has failed (`gaia_query`)."""
+    global _esa_failed, _mirror
     from cosmos_search.targets import releases
 
-    return releases.fetch_star_rows(tap(), ids, RELEASE_OF.get(schema, schema), GAIA_COLS)
+    release = RELEASE_OF.get(schema, schema)
+    if not _esa_failed:
+        try:
+            return releases.fetch_star_rows(tap(), ids, release, GAIA_COLS)
+        except Exception as e:  # noqa: BLE001 (ESA down or overloaded; the mirror holds the same tables)
+            _esa_failed = True
+            print(f"ESA Gaia archive failed ({e!r:.100}); asking {MIRROR_TAP} first from here on", flush=True)
+    if _mirror is None:
+        _mirror = Tap(MIRROR_TAP, job_slots=2)
+    return releases.fetch_star_rows(_mirror, ids, release, GAIA_COLS)
 
 
 def at_2019(r):
@@ -97,9 +153,44 @@ def without_lightcurve(cand, gep):
     return cand.loc[~cand["source_id"].isin(have), cols].sort_values("strength", ascending=False)
 
 
-def check_one(r, irsa, g=None):
-    """The checks for one candidate: (row, NEOWISE epochs, ZTF epochs or None) with fetch times. g: its G epochs,
-    for the eclipsing-binary check (`checks.eclipse`, on G and ZTF together)."""
+def other_surveys(r, z, names, schema, with_tess):
+    """The comparison with other surveys for one candidate (module notes): (columns, epochs read, TESS rows per
+    sector or None, error text). z: the star's ZTF epochs when already read (with their `group` column)."""
+    row, err = {}, ""
+    lc, failed = surveys.fetch_all(r, [s for s in names if s != "ztf"])
+    for s, e in failed.items():
+        err += f"{s}: {e:.120}; "
+    if "ztf" in names and z is not None and len(z) and surveys.covers("ztf", r.dec, r.phot_g_mean_mag):
+        lc = pd.concat([lc, z.assign(survey="ztf", mag=np.nan)[surveys.COLUMNS]], ignore_index=True)
+    change = ind.gaia_change(r)
+    c = {}
+    if len(lc):
+        try:
+            nb = gaia_query(ind.neighbours_adql(r.ra, r.dec, schema))
+            c = ind.dilutions(nb, r.source_id, r.ra, r.dec, r.phot_g_mean_mag, pd.unique(lc["survey"]))
+        except Exception as e:  # noqa: BLE001 (without neighbours the comparison runs undiluted, and says so)
+            err += f"neighbours: {e!r:.120}; "
+    if names:
+        row.update({f"{s}_dilution": v for s, v in c.items()})
+        row.update(ind.columns(ind.same_years(lc, change, c), ind.after(lc, change, c)))
+    sectors = None
+    if with_tess and r.phot_g_mean_mag < TESS_MAX_G:
+        try:
+            summary, sectors = tess_activity.activity(r.source_id, r.ra, r.dec)
+            row.update(summary)
+            if summary.get("tess_sectors"):
+                floor = tess_activity.quiet_floor(r.phot_g_mean_mag)
+                row["tess_quiet"] = bool(summary["tess_amp"] <= floor)
+                row["activity_ratio"] = ind.activity(change, summary["tess_amp"], floor)
+        except Exception as e:  # noqa: BLE001
+            err += f"TESS: {e!r:.120}; "
+    return row, lc, sectors, err
+
+
+def check_one(r, irsa, g=None, names=(), schema="gaiadr4", with_tess=False):
+    """The checks for one candidate: (row, NEOWISE epochs, ZTF epochs or None, other surveys' epochs or None, TESS
+    rows per sector or None) with fetch times. g: its G epochs, for the eclipsing-binary check (`checks.eclipse`,
+    on G and ZTF together). names: the other surveys to compare with (`other_surveys`)."""
     episode = "episode" in r.by
     row = {"source_id": r.source_id, "by": r.by, "strength": r.strength, "g": r.phot_g_mean_mag,
            "bp_rp": r.bp_rp, "class": r.best_class_name, "ruwe": r.ruwe, "ipd_multi": r.ipd_frac_multi_peak,
@@ -135,7 +226,7 @@ def check_one(r, irsa, g=None):
     if r.dec > -30:
         t0 = time.time()
         try:
-            z = external.ztf(r.source_id, r.ra, r.dec)
+            z = external.ztf(r.source_id, r.ra, r.dec, groups=True)
         except Exception as e:  # noqa: BLE001
             row["errors"] += f"ZTF: {e!r:.120}; "
             z = external._empty()
@@ -149,7 +240,14 @@ def check_one(r, irsa, g=None):
             row.update(checks.eclipse(g, z if z is not None else external._empty(), src))
         except Exception as e:  # noqa: BLE001
             row["errors"] += f"eclipse: {e!r:.120}; "
-    return row, w.assign(source_id=r.source_id), z
+    lc = sectors = None
+    if names or with_tess:
+        t0 = time.time()
+        cols, lc, sectors, err = other_surveys(r, z, names, schema, with_tess)
+        row.update(cols)
+        row["errors"] += err
+        row["surveys_s"] = time.time() - t0
+    return row, w.assign(source_id=r.source_id), z, lc, sectors
 
 
 def main(argv=None):
@@ -170,9 +268,16 @@ def main(argv=None):
                     help="the run's kept light curves (`slow_search.py pass` R/lightcurves): adds the eclipsing-"
                          "binary check on G and ZTF. Repeatable: a second directory (light curves fetched through "
                          "DataLink) covers listed stars the pass kept no light curve for (fainter than G 19)")
+    ap.add_argument("--surveys", default=",".join(surveys.DEFAULT),
+                    help="other surveys to compare Gaia's change with, comma-separated, or none; asassn is read "
+                         "only when named here")
+    ap.add_argument("--no-tess", action="store_true", help="leave out the TESS variability of bright stars")
     a = ap.parse_args(argv)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
+    names, why = surveys.usable([] if a.surveys == "none" else a.surveys.split(","))
+    for s, reason in why.items():
+        print(f"{s} left out: {reason}", flush=True)
     fading = pd.read_parquet(a.fading)
     if a.skip_still:
         fading = fading[~fading["still"]]
@@ -202,31 +307,43 @@ def main(argv=None):
                   f"binary test for these. They are listed in {out / 'no_lightcurve.csv'}; fetch their light curves "
                   "through DataLink and add that directory as a second --lightcurves, or use --max-g.", flush=True)
 
-    rows, wise_all, ztf_all = [], [], []
+    rows, wise_all, ztf_all, lc_all, tess_all = [], [], [], [], []
     t0 = time.time()
     with ThreadPoolExecutor(a.workers) as ex:
-        futs = {ex.submit(check_one, r, irsa, g_of.get(r.source_id)): r for r in cand.itertuples(index=False)}
+        futs = {ex.submit(check_one, r, irsa, g_of.get(r.source_id), names, a.schema, not a.no_tess): r
+                for r in cand.itertuples(index=False)}
         for fut in as_completed(futs):
             r = futs[fut]
-            row, w, z = fut.result()
+            row, w, z, lc, sectors = fut.result()
             if gep is not None:
                 row["g_lightcurve"] = r.source_id in g_of
             rows.append(row)
             wise_all.append(w)
             if z is not None:
                 ztf_all.append(z)
+            if lc is not None and len(lc):
+                lc_all.append(lc)
+            if sectors is not None and len(sectors):
+                tess_all.append(sectors)
             print(r.source_id, r.by, f"G {r.phot_g_mean_mag:.1f}", r.best_class_name, row["errors"] or "", flush=True)
     res = pd.DataFrame(rows).sort_values("strength", ascending=False)
     res.to_csv(out / "checks.csv", index=False)
     pd.concat(wise_all, ignore_index=True).to_parquet(out / "neowise.parquet", index=False)
     if ztf_all:
         pd.concat(ztf_all, ignore_index=True).to_parquet(out / "ztf.parquet", index=False)
+    if lc_all:
+        pd.concat(lc_all, ignore_index=True).to_parquet(out / "surveys.parquet", index=False)
+    if tess_all:
+        pd.concat(tess_all, ignore_index=True).to_parquet(out / "tess.parquet", index=False)
     el = time.time() - t0
     print(f"{len(res)} stars in {el:.0f} s ({el / max(len(res), 1):.1f} s per star with {a.workers} at once; "
           f"per fetch: NEOWISE median {res['neowise_s'].median():.0f} s, ZTF median "
           f"{res['ztf_s'].median() if 'ztf_s' in res else float('nan'):.0f} s); "
           f"fetch errors on {int((res['errors'] != '').sum())}")
     print(res.groupby(["by", "class"], dropna=False).size())
+    for col in ("same_years", "after"):
+        if col in res:
+            print(f"{col}: {res[col].value_counts().to_dict()}")
 
 
 if __name__ == "__main__":
