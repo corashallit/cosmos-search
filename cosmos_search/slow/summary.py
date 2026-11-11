@@ -1,7 +1,7 @@
 """A summary of every star in a light-curve table, in one compiled pass, and trends measured against neighbours.
 
     summ = star_summary(lc, table)            # one row per star of a light-curve table (epoch.SCHEMA)
-    ref = reference_table(summ)               # median trend of nearby stars of similar brightness
+    ref = reference_table(summ)               # median trend of nearby stars of similar brightness and colour
     summ = apply_reference(summ, ref)         # slope_z now against that median
 
 Why. The release-day run used to score only the stars an archive-side cut picked (0.1% per G bin by `select.slow_z`).
@@ -32,6 +32,27 @@ errors are about 2.7 times smaller, so the same offset would be 2.3 errors. `ref
 trend of all stars (a median is not moved by the few that really change) in each sky pixel and 0.5 mag range of G,
 at the finest HEALPix level where the cell holds at least REF_MIN_STARS stars, and `apply_reference` measures each
 star's trend against it, with the median's error added to the star's own.
+
+Colour. The trend left after the drift correction also depends on colour (found by the occurrence-limit work on
+2026-11-11: +0.06 to +0.22% a year for stars redder than BP-RP 2 and about +0.1% a year for stars bluer than 0.5,
+which is 0.3 to 0.5 errors on DR3). The drift table's narrow colour ranges remove it where quiet stars are common
+(`drift.FINE_EDGES`); they cannot where quiet stars are rare (4 of 501 stars at G 15-16 and BP-RP 2.2-2.6). So the
+reference has a second part: the median of what is left of each star's trend after its sky cell, over all the
+run's stars of the same magnitude (1 mag) and colour range. The two parts add. A colour range put into the sky
+cells instead would move a quarter of the stars to coarser pixels, and the sky part is worth keeping fine: on the
+Andromeda field the medians of level-6 pixels differ by 0.16 errors without it.
+
+Flux excess. BP and RP fluxes are sums over a window 3.5 arcsec long and G comes from a fit in a window of about
+1 arcsec, so light that is not the star's own (a neighbour, background) adds more to BP + RP than to G. `flux_ratio`
+is (BP + RP) / G of the star's median fluxes, and its flux excess is that ratio less the median ratio of stars of
+its magnitude and colour (`flux_excess`; the corrected excess factor C* of Riello et al. 2021, from the light curve
+itself). Found by the occurrence-limit work on 2026-11-11 and measured here on every kind of star of DR3's Andromeda
+field: the G trend falls with the excess, -0.11% a year at an excess of 0.05 to 0.1, -0.21 at 0.1 to 0.2, -0.35 at
+0.2 to 0.5, and rises below zero (+0.07 at -0.05 to -0.02), far from Andromeda's disc as near it. So the reference
+has a third part, the median of what the sky and colour parts leave per 1 mag of G and range of excess. It centres
+these stars and no more than that: among stars with an excess above 0.05 the trends keep a longer fading side (G
+and BP fall, RP holds), their G scatter is several times that of single stars, and they fill both lists at several
+times the rate of other stars, so `kinds` reads them as a kind of their own.
 """
 
 
@@ -62,8 +83,8 @@ _COLS = ("n_g", "n_bp", "n_rp", "n_visits", "t_first", "t_last", "sigma_visit", 
 _I = {c: i for i, c in enumerate(_COLS)}
 INT_COLUMNS = ("n_g", "n_bp", "n_rp", "n_visits")
 # Columns of a summary, in order. `slope_z` is slope / slope_err until `apply_reference` replaces it.
-COLUMNS = ("source_id", "g_mag", "bp_rp", "gbin", "cbin", "n_g", "n_bp", "n_rp", "n_visits", "t_first", "t_last",
-           "sigma_visit", "abbe", "slope", "slope_err", "slope_z", "s_fade", "fade_kind", "dim_t0", "dim_t1",
+COLUMNS = ("source_id", "g_mag", "bp_rp", "flux_ratio", "gbin", "cbin", "n_g", "n_bp", "n_rp", "n_visits", "t_first",
+           "t_last", "sigma_visit", "abbe", "slope", "slope_err", "slope_z", "s_fade", "fade_kind", "dim_t0", "dim_t1",
            "dim_depth", "s_rise", "rise_kind", "rise_t0", "rise_t1", "slope_g", "slope_g_err", "slope_bp",
            "slope_bp_err", "slope_rp", "slope_rp_err", "abbe_bp", "abbe_rp", "sigma_rob_g", "err_med_g", "quiet",
            "uwv_g", "abbe_g", "rep_bound", "rep_bound_bright")
@@ -315,16 +336,18 @@ assert _COLS[10] == "s_fade" and _COLS[19] == "slope_g" and _COLS[25] == "abbe_b
 
 
 def magnitudes(med_flux):
-    """G and BP-RP from median fluxes: a frame indexed by source_id with columns 0, 1, 2 (G, BP, RP)."""
+    """G, BP-RP and the flux ratio (BP + RP) / G from median fluxes: a frame indexed by source_id with columns
+    0, 1, 2 (G, BP, RP). A star without one of the bands has no ratio."""
+    flux = {b: med_flux[b].to_numpy(float) if b in med_flux else np.full(len(med_flux), np.nan) for b in drift.BANDS}
     with np.errstate(divide="ignore", invalid="ignore"):
-        mag = {b: ZERO_POINTS[n] - 2.5 * np.log10(med_flux[b].to_numpy(float)) if b in med_flux
-               else np.full(len(med_flux), np.nan) for b, n in drift.BANDS.items()}
-    return pd.DataFrame({"g_mag": mag[0], "bp_rp": mag[1] - mag[2]}, index=med_flux.index)
+        mag = {b: ZERO_POINTS[n] - 2.5 * np.log10(flux[b]) for b, n in drift.BANDS.items()}
+        ratio = (flux[1] + flux[2]) / flux[0]
+    return pd.DataFrame({"g_mag": mag[0], "bp_rp": mag[1] - mag[2], "flux_ratio": ratio}, index=med_flux.index)
 
 
 def corrected_epochs(lc, table=None, cells=None, marks=True, own=True):
     """Good epochs of a light-curve table with `frac_corr` (drift-corrected with `table`; uncorrected without one),
-    ordered by star, band and time, and one row per star with g_mag, bp_rp, gbin and cbin.
+    ordered by star, band and time, and one row per star with g_mag, bp_rp and its cells (drift.CELL_COLUMNS).
 
     cells: G and colour bins from a catalogue (`drift.star_cells`), used for the stars it has; the rest, and every
     star when it is None, are placed by the magnitudes of their own median fluxes. marks, own: as
@@ -336,9 +359,9 @@ def corrected_epochs(lc, table=None, cells=None, marks=True, own=True):
     if cells is not None:
         given = cells.reindex(own.index)
         has = given["gbin"].notna().to_numpy()
-        for c in ("gbin", "cbin"):
+        for c in own.columns.intersection(given.columns):
             own[c] = np.where(has, given[c].to_numpy(), own[c].to_numpy()).astype(np.int8)
-    stars[["gbin", "cbin"]] = own.to_numpy()
+    stars[list(own.columns)] = own.to_numpy()
     order = np.lexsort((ep["t"].to_numpy(), ep["band"].to_numpy(), ep["source_id"].to_numpy()))
     if not np.all(order[1:] > order[:-1]):
         ep = ep.iloc[order].reset_index(drop=True)
@@ -391,7 +414,7 @@ def _hash(source_id):
 # slope_z (recomputed by `from_store`), and the uncorrected-epoch columns, which the full scores carry for the stars
 # that have them. Episode windows are stored only for scores of STORE_MIN_SCORE or more; the shared-date test reads
 # them from 4 up (rule_v3.SHARED_S_MIN).
-STORED = ("source_id", "g_mag", "bp_rp", "n_g", "n_bp", "n_rp", "n_visits", "t_first", "t_last", "sigma_visit",
+STORED = ("source_id", "g_mag", "bp_rp", "flux_ratio", "n_g", "n_bp", "n_rp", "n_visits", "t_first", "t_last", "sigma_visit",
           "abbe", "slope", "slope_err", "s_fade", "fade_kind", "dim_t0", "dim_t1", "dim_depth", "s_rise", "rise_kind",
           "rise_t0", "rise_t1", "slope_g", "slope_g_err", "slope_bp", "slope_bp_err", "slope_rp", "slope_rp_err",
           "abbe_bp", "abbe_rp", "quiet", "rep_bound")
@@ -456,12 +479,24 @@ def random_share(source_id, share):
     return h < np.uint64(int(max(share, 0.0) * 2.0 ** 64))
 
 
-# -- trends against neighbours of similar brightness -------------------------------------------------------------
+# -- trends against neighbours of similar brightness, colour and flux excess --------------------------------------
 
 REF_G_STEP = 0.5                         # width of the G ranges
 REF_G_RANGE = (5.0, 21.5)                # brighter and fainter stars join the end ranges
 REF_LEVELS = (6, 5, 4, 3, 2, 1, 0, -1)   # HEALPix levels tried, finest first; -1 is every star given
 REF_MIN_STARS = 50
+REF_COLOUR = -2                          # level of the colour rows: pix 0, grange a drift.G_EDGES bin, crange
+REF_LOCUS = -3                           # level of the median flux ratio: pix a colour step, grange a G_EDGES bin
+REF_EXCESS = -4                          # level of the flux-excess rows: pix a range of excess, grange a G_EDGES bin
+REF_ALL_COLOURS = -9                     # crange of every row but the colour rows
+REF_NO_COLOUR = -1                       # crange of stars without a BP-RP
+REF_COLUMNS = ["level", "pix", "grange", "crange", "n", "med", "err"]
+LOCUS_STEP = 0.05                        # colour step of the median flux ratio, interpolated between step centres
+LOCUS_RANGE = (-0.5, 4.0)                # bluer and redder stars take the end steps' ratio
+# Ranges of flux excess of the reference's third part: fine near zero, where most stars are.
+EXCESS_EDGES = (-0.1, -0.05, -0.02, -0.006, 0.006, 0.02, 0.05, 0.1, 0.2, 0.5)
+REF_NO_EXCESS = -1                       # excess range of stars without a flux ratio or a colour
+RESIDUAL_COLUMNS = ["source_id", "g_mag", "bp_rp", "flux_ratio", "resid"]
 
 
 def g_range(g_mag):
@@ -470,15 +505,65 @@ def g_range(g_mag):
     return np.floor((g - REF_G_RANGE[0]) / REF_G_STEP).astype(np.int16)
 
 
+def colour_range(bp_rp):
+    """Index of each star's colour range (`drift.FINE_EDGES`); REF_NO_COLOUR without a BP-RP."""
+    c = np.asarray(bp_rp, float)
+    return np.where(np.isfinite(c), np.digitize(np.nan_to_num(c, nan=0.0), drift.FINE_EDGES[1:-1]),
+                    REF_NO_COLOUR).astype(np.int16)
+
+
+def colour_step(bp_rp):
+    """Index of each star's LOCUS_STEP step of colour (stars beyond LOCUS_RANGE in the end steps)."""
+    c = np.clip(np.nan_to_num(np.asarray(bp_rp, float), nan=LOCUS_RANGE[0]), *LOCUS_RANGE)
+    last = round((LOCUS_RANGE[1] - LOCUS_RANGE[0]) / LOCUS_STEP) - 1
+    return np.minimum(np.floor((c - LOCUS_RANGE[0]) / LOCUS_STEP), last).astype(np.int64)
+
+
+def excess_range(excess):
+    """Index of each star's range of flux excess (EXCESS_EDGES); REF_NO_EXCESS without one."""
+    e = np.asarray(excess, float)
+    return np.where(np.isfinite(e), np.digitize(np.nan_to_num(e, nan=0.0), EXCESS_EDGES), REF_NO_EXCESS).astype(np.int16)
+
+
+def _g_bin(g_mag):
+    return np.digitize(np.nan_to_num(np.asarray(g_mag, float), nan=99.0), drift.G_EDGES[1:-1]).astype(np.int16)
+
+
 def _pixel(source_id, level):
     sid = np.asarray(source_id, np.int64)
     return drift.sky_pixel(sid, level) if level >= 0 else np.zeros(len(sid), np.int64)
 
 
-def reference_table(summ, col="slope", levels=REF_LEVELS, min_stars=REF_MIN_STARS):
-    """Median of `col` over the stars of each sky pixel and G range, for every level in `levels`, where at least
-    min_stars stars have a value: level, pix, grange, n, med, err. err is the median's standard error from the
-    cell's robust scatter, 1.2533 x 1.4826 MAD / sqrt(n).
+def _medians(keys, v, min_stars):
+    """n, med and err (1.2533 x 1.4826 MAD / sqrt(n)) of v per cell of the key columns, for cells of min_stars."""
+    d = pd.DataFrame({**keys, "v": v})
+    names = list(keys)
+    g = d.groupby(names, sort=False)["v"]
+    t = pd.DataFrame({"n": g.size(), "med": g.median(),
+                      "mad": (d["v"] - g.transform("median")).abs().groupby([d[k] for k in names], sort=False).median()})
+    t = t[t["n"] >= min_stars].reset_index()
+    t["err"] = 1.2533 * 1.4826 * t["mad"] / np.sqrt(t["n"])
+    return t.drop(columns="mad")
+
+
+def _column(frame, name):
+    return frame[name].to_numpy(float) if name in frame else np.full(len(frame), np.nan)
+
+
+def reference_table(summ, col="slope", levels=REF_LEVELS, min_stars=REF_MIN_STARS, colours=True):
+    """The reference for `col`, in three parts that add (REF_COLUMNS):
+
+    - sky rows: the median over the stars of each sky pixel and G range, for every level in `levels`, where at
+      least min_stars stars have a value. err is the median's standard error from the cell's robust scatter,
+      1.2533 x 1.4826 MAD / sqrt(n);
+    - colour rows (level REF_COLOUR), when colours is True and `summ` has bp_rp: the median of what the sky rows
+      leave (`residuals`), per 1 mag bin of G and colour range (`colour_rows`);
+    - flux-excess rows (level REF_EXCESS), when `summ` also has flux_ratio: the median of what the sky and colour
+      rows leave, per 1 mag bin of G and range of flux excess (`excess_rows`), with the median flux ratio by
+      magnitude and colour that the excess is counted from (level REF_LOCUS, `locus_rows`).
+
+    A whole-sky run builds the parts separately: sky rows region by region with colours=False, the others once
+    from samples of every file (`locus_sample`, `residual_sample`).
 
     Build it from real stars only. A star with a fake change injected is then measured with `apply_reference`
     against the table its host helped make, and never enters it."""
@@ -488,47 +573,216 @@ def reference_table(summ, col="slope", levels=REF_LEVELS, min_stars=REF_MIN_STAR
     gr = g_range(summ["g_mag"].to_numpy(float)[ok])
     parts = []
     for level in levels:
-        d = pd.DataFrame({"pix": _pixel(sid, level), "grange": gr, "v": v})
-        g = d.groupby(["pix", "grange"], sort=False)["v"]
-        med = g.transform("median")
-        t = pd.DataFrame({"n": g.size(), "med": g.median(),
-                          "mad": (d["v"] - med).abs().groupby([d["pix"], d["grange"]], sort=False).median()})
-        t = t[t["n"] >= min_stars].reset_index()
-        t["err"] = 1.2533 * 1.4826 * t["mad"] / np.sqrt(t["n"])
-        t.insert(0, "level", level)
-        parts.append(t[["level", "pix", "grange", "n", "med", "err"]])
-    return pd.concat(parts, ignore_index=True)
+        t = _medians({"pix": _pixel(sid, level), "grange": gr}, v, min_stars)
+        parts.append(t.assign(level=level, crange=REF_ALL_COLOURS))
+    sky = pd.concat(parts, ignore_index=True)[REF_COLUMNS]
+    if not (colours and "bp_rp" in summ):
+        return sky
+    resid = residuals(summ, sky, col)
+    ref = pd.concat([sky, colour_rows(resid, min_stars)], ignore_index=True)
+    if "flux_ratio" not in summ:
+        return ref
+    ref = pd.concat([ref, locus_rows(summ, min_stars)], ignore_index=True)
+    resid["excess"] = flux_excess(ref, resid["g_mag"], resid["bp_rp"], resid["flux_ratio"])
+    return pd.concat([ref, excess_rows(resid, ref, min_stars)], ignore_index=True)
 
 
-def lookup(ref, source_id, g_mag):
-    """Each star's reference from `reference_table`: the finest level with a cell for it. Returns ref (median),
-    ref_err, n_ref and ref_level (NaN, NaN, 0 and -9 where no level has one)."""
+def residuals(summ, sky, col="slope"):
+    """What the sky rows leave of each star's `col`: RESIDUAL_COLUMNS, for the stars with a sky cell (flux_ratio
+    NaN where `summ` has none)."""
+    v = summ[col].to_numpy(float)
+    med, _, cnt, _ = lookup(sky, summ["source_id"].to_numpy(), summ["g_mag"].to_numpy())
+    ok = np.isfinite(v) & (cnt > 0)
+    return pd.DataFrame({"source_id": summ["source_id"].to_numpy(np.int64)[ok],
+                         "g_mag": summ["g_mag"].to_numpy(float)[ok], "bp_rp": summ["bp_rp"].to_numpy(float)[ok],
+                         "flux_ratio": _column(summ, "flux_ratio")[ok], "resid": (v - med)[ok]})
+
+
+def colour_rows(resid, min_stars=REF_MIN_STARS):
+    """The reference's colour rows from `residuals` (or `residual_sample`, its rows drawn by colour): the median
+    residual per 1 mag bin of G (`drift.G_EDGES`) and colour range, where at least min_stars stars have one."""
+    if "by_colour" in resid:
+        resid = resid[resid["by_colour"].to_numpy(bool)]
+    t = _medians({"grange": _g_bin(resid["g_mag"]), "crange": colour_range(resid["bp_rp"])},
+                 resid["resid"].to_numpy(float), min_stars)
+    return t.assign(level=REF_COLOUR, pix=0)[REF_COLUMNS]
+
+
+def locus_rows(stars, min_stars=REF_MIN_STARS):
+    """The median flux ratio (BP + RP) / G per 1 mag bin of G and LOCUS_STEP of colour, where at least min_stars
+    stars of a frame with g_mag, bp_rp and flux_ratio have one: what a star's flux excess is counted from. By
+    magnitude as well as colour because the ratio of faint stars sits higher (on DR3 by 0.03 to 0.2 beyond G 19,
+    most for red stars)."""
+    g, c, r = (stars[k].to_numpy(float) for k in ("g_mag", "bp_rp", "flux_ratio"))
+    ok = np.isfinite(g) & np.isfinite(c) & np.isfinite(r)
+    t = _medians({"grange": _g_bin(g[ok]), "pix": colour_step(c[ok])}, r[ok], min_stars)
+    return t.assign(level=REF_LOCUS, crange=REF_ALL_COLOURS)[REF_COLUMNS]
+
+
+def locus_sample(summ, per_cell=1000):
+    """Up to per_cell stars with a flux ratio per 1 mag bin of G and colour step, in a repeatable pseudo-random
+    order: source_id, g_mag, bp_rp, flux_ratio. A whole-sky run takes one from every file and builds
+    `locus_rows` from them all; a sample of samples is bounded the same way."""
+    cols = ["source_id", "g_mag", "bp_rp", "flux_ratio"]
+    if "flux_ratio" not in summ:
+        return pd.DataFrame(columns=cols)
+    d = summ[cols]
+    d = d[np.isfinite(d["g_mag"].to_numpy(float)) & np.isfinite(d["bp_rp"].to_numpy(float))
+          & np.isfinite(d["flux_ratio"].to_numpy(float))]
+    d = d.iloc[np.argsort(_hash(d["source_id"].to_numpy()), kind="stable")]
+    first = d.groupby([_g_bin(d["g_mag"]), colour_step(d["bp_rp"])]).cumcount() < per_cell
+    return d[first.to_numpy()].reset_index(drop=True)
+
+
+def flux_excess(ref, g_mag, bp_rp, flux_ratio, scatter=False):
+    """Each star's flux excess: its flux ratio less the median ratio of stars of its magnitude and colour, from
+    the table's REF_LOCUS rows (interpolated in colour between the step centres of the star's 1 mag bin of G,
+    held beyond the bin's first and last step). NaN for a star without a ratio or a colour, in a G bin without
+    rows, and from a table without them (one made before 2026-11-11).
+
+    scatter=True returns (excess, scatter): the robust scatter (1.4826 MAD) of the ratio among those stars as
+    well, which is what an excess of zero looks like at the star's magnitude: 0.003 at G < 15 on DR3 (0.002 of it
+    the ratio's change across a step of colour), 0.015 at G 17-18, 0.03 at G 18-19 and 0.07 at G 19-20, where it
+    is the noise of the BP and RP fluxes."""
+    g, c, r = (np.asarray(x, float) for x in (g_mag, bp_rp, flux_ratio))
+    out, sig = np.full(len(g), np.nan), np.full(len(g), np.nan)
+    loc = ref[ref["level"] == REF_LOCUS]
+    if len(loc):
+        gb, ok = _g_bin(g), np.isfinite(c) & np.isfinite(r)
+        for b, rows in loc.groupby("grange"):
+            m = ok & (gb == b)
+            if m.any():
+                rows = rows.sort_values("pix")
+                centres = LOCUS_RANGE[0] + (rows["pix"].to_numpy(float) + 0.5) * LOCUS_STEP
+                out[m] = r[m] - np.interp(c[m], centres, rows["med"].to_numpy(float))
+                sig[m] = np.interp(c[m], centres, rows["err"].to_numpy(float) * np.sqrt(rows["n"].to_numpy(float)) / 1.2533)
+    return (out, sig) if scatter else out
+
+
+def _colour_term(ref, g_mag, bp_rp):
+    """(median, error, has one) of each star's colour row."""
+    n = len(np.asarray(g_mag))
+    med, err, has = np.zeros(n), np.zeros(n), np.zeros(n, bool)
+    rows = ref[ref["level"] == REF_COLOUR]
+    if bp_rp is not None and len(rows):
+        r = rows.set_index(["grange", "crange"])
+        hit = r.index.get_indexer(pd.MultiIndex.from_arrays([_g_bin(g_mag), colour_range(bp_rp)]))
+        has = hit >= 0
+        med[has], err[has] = r["med"].to_numpy()[hit[has]], r["err"].to_numpy()[hit[has]]
+    return med, err, has
+
+
+def _excess_term(ref, g_mag, excess):
+    """(median, error, has one) of each star's flux-excess row."""
+    n = len(np.asarray(g_mag))
+    med, err, has = np.zeros(n), np.zeros(n), np.zeros(n, bool)
+    rows = ref[ref["level"] == REF_EXCESS]
+    if excess is not None and len(rows):
+        r = rows.set_index(["grange", "pix"])
+        hit = r.index.get_indexer(pd.MultiIndex.from_arrays([_g_bin(g_mag), excess_range(excess).astype(np.int64)]))
+        has = hit >= 0
+        med[has], err[has] = r["med"].to_numpy()[hit[has]], r["err"].to_numpy()[hit[has]]
+    return med, err, has
+
+
+def excess_rows(resid, ref, min_stars=REF_MIN_STARS):
+    """The reference's flux-excess rows from residuals that carry `excess` (`residual_sample`'s rows drawn by
+    excess): the median of the residual less the star's colour row of `ref`, per 1 mag bin of G and range of
+    excess, where at least min_stars stars have one."""
+    if "by_excess" in resid:
+        resid = resid[resid["by_excess"].to_numpy(bool)]
+    resid = resid[np.isfinite(resid["excess"].to_numpy(float))]
+    left = resid["resid"].to_numpy(float) - _colour_term(ref, resid["g_mag"].to_numpy(), resid["bp_rp"].to_numpy())[0]
+    t = _medians({"grange": _g_bin(resid["g_mag"]), "pix": excess_range(resid["excess"]).astype(np.int64)}, left,
+                 min_stars)
+    return t.assign(level=REF_EXCESS, crange=REF_ALL_COLOURS)[REF_COLUMNS]
+
+
+def residual_sample(summ, per_cell=2000, col="slope", levels=REF_LEVELS, coarse=None):
+    """A bounded sample (`bound_sample`) of a frame's residuals (`residuals`) against the sky rows of its own
+    stars at `levels` and the rows of `coarse`, with each star's flux excess from `coarse`'s median flux ratios.
+    A whole-sky run takes one from every file, with its coarse sky rows and median flux ratios, and builds the
+    colour and flux-excess rows from them all (`colour_rows`, `excess_rows`): no one region holds enough stars of
+    the rarer colours and excesses, and no one file enough bright stars for sky cells of its own."""
+    if not len(summ):
+        return pd.DataFrame(columns=[*RESIDUAL_COLUMNS, "excess", "by_colour", "by_excess"])
+    sky = reference_table(summ, col, levels=levels, colours=False)
+    if coarse is not None:
+        sky = pd.concat([sky, coarse], ignore_index=True)
+    resid = residuals(summ, sky, col)
+    resid["excess"] = flux_excess(sky, resid["g_mag"], resid["bp_rp"], resid["flux_ratio"])
+    return bound_sample(resid, per_cell)
+
+
+def bound_sample(resid, per_cell):
+    """The rows of a residual frame that are among the first per_cell, in hash order, of their (G bin, colour
+    range) cell (marked by_colour) or of their (G bin, range of flux excess) cell (by_excess; only stars with
+    an excess). Bounding a frame of bounded samples gives the sample of all their stars, so a run can bound as
+    it reads."""
+    r = resid.iloc[np.argsort(_hash(resid["source_id"].to_numpy()), kind="stable")].reset_index(drop=True)
+    excess = _column(r, "excess")
+    by_c = np.array(r["by_colour"], bool) if "by_colour" in r else np.ones(len(r), bool)
+    by_e = (np.array(r["by_excess"], bool) if "by_excess" in r else np.ones(len(r), bool)) & np.isfinite(excess)
+    gb = _g_bin(r["g_mag"])
+    for mark, key in ((by_c, colour_range(r["bp_rp"])), (by_e, excess_range(excess))):
+        idx = np.flatnonzero(mark)
+        first = pd.Series(0, index=idx).groupby([gb[idx], key[idx]]).cumcount().to_numpy() < per_cell
+        mark[idx[~first]] = False
+    r["excess"], r["by_colour"], r["by_excess"] = excess, by_c, by_e
+    return r[by_c | by_e].reset_index(drop=True)
+
+
+def lookup(ref, source_id, g_mag, bp_rp=None, flux_ratio=None):
+    """Each star's reference from `reference_table`: the sky row of the finest level with a cell for it, plus,
+    for a star with one, the colour row of its G bin and colour range when the table has it and bp_rp is given,
+    plus the flux-excess row of its G bin and range of excess when the table has it and flux_ratio is given too
+    (errors added in quadrature). Returns ref (median), ref_err, n_ref and ref_level of the sky row (NaN, NaN, 0
+    and -9 where no level has one). A table made before 2026-11-11 has sky rows only."""
     sid = np.asarray(source_id, np.int64)
     gr = g_range(g_mag)
     n = len(sid)
     med, err = np.full(n, np.nan), np.full(n, np.nan)
     cnt, lev = np.zeros(n, np.int64), np.full(n, -9, np.int16)
-    for level in sorted(ref["level"].unique(), reverse=True):
+    sky = ref[ref["level"] > REF_COLOUR]
+    for level in sorted(sky["level"].unique(), reverse=True):
         todo = np.flatnonzero(cnt == 0)
         if not len(todo):
             break
-        r = ref[ref["level"] == level].set_index(["pix", "grange"])
+        r = sky[sky["level"] == level].set_index(["pix", "grange"])
         hit = r.index.get_indexer(pd.MultiIndex.from_arrays([_pixel(sid[todo], level), gr[todo]]))
         ok = hit >= 0
         med[todo[ok]], err[todo[ok]] = r["med"].to_numpy()[hit[ok]], r["err"].to_numpy()[hit[ok]]
         cnt[todo[ok]], lev[todo[ok]] = r["n"].to_numpy()[hit[ok]], level
+    terms = [_colour_term(ref, g_mag, bp_rp)]
+    if bp_rp is not None and flux_ratio is not None:
+        terms.append(_excess_term(ref, g_mag, flux_excess(ref, g_mag, bp_rp, flux_ratio)))
+    for m, e, has in terms:
+        ok = has & (cnt > 0)
+        med[ok] += m[ok]
+        err[ok] = np.hypot(err[ok], e[ok])
     return med, err, cnt, lev
 
 
-def apply_reference(summ, ref, g_mag=None):
+def apply_reference(summ, ref, g_mag=None, bp_rp=None, flux_ratio=None):
     """`summ` with trends measured against `ref`: slope_ref, slope_ref_err, n_ref, ref_level, the unreferenced
     significance as slope_z_raw, and slope_z = (slope - slope_ref) / sqrt(slope_err^2 + slope_ref_err^2). Stars
-    without a reference keep slope_z_raw as slope_z.
+    without a reference keep slope_z_raw as slope_z. Each star is placed by its G and, when `summ` has them, its
+    colour (bp_rp) and its flux ratio; flux_excess and flux_excess_scatter (`flux_excess`) are added when the
+    table has median flux ratios.
 
-    g_mag: magnitudes to place the stars by instead of their own (a fake's host's, so the fake is measured
-    against exactly its host's cell)."""
+    g_mag, bp_rp, flux_ratio: values to place the stars by instead of their own (a fake's host's, so the fake is
+    measured against exactly its host's cells). flux_ratio=False leaves the flux-excess part out whatever `summ`
+    holds (the occurrence limit, which leaves stars with an excess out and centres the rest itself, on stars and
+    on fakes alike)."""
     out = summ.copy()
-    med, err, cnt, lev = lookup(ref, out["source_id"].to_numpy(), out["g_mag"].to_numpy() if g_mag is None else g_mag)
+    g_mag = out["g_mag"].to_numpy() if g_mag is None else g_mag
+    if bp_rp is None and "bp_rp" in out:
+        bp_rp = out["bp_rp"].to_numpy()
+    if flux_ratio is False:
+        flux_ratio = None
+    elif flux_ratio is None and "flux_ratio" in out:
+        flux_ratio = out["flux_ratio"].to_numpy()
+    med, err, cnt, lev = lookup(ref, out["source_id"].to_numpy(), g_mag, bp_rp, flux_ratio)
     raw = out["slope_z_raw"].to_numpy(float) if "slope_z_raw" in out else out["slope_z"].to_numpy(float)
     slope = out["slope"].to_numpy(float)
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -538,6 +792,8 @@ def apply_reference(summ, ref, g_mag=None):
     out["slope_ref"], out["slope_ref_err"], out["n_ref"], out["ref_level"] = med, err, cnt, lev
     out["slope_z_raw"] = raw
     out["slope_z"] = np.where(cnt > 0, z, raw)
+    if bp_rp is not None and flux_ratio is not None and (ref["level"] == REF_LOCUS).any():
+        out["flux_excess"], out["flux_excess_scatter"] = flux_excess(ref, g_mag, bp_rp, flux_ratio, scatter=True)
     return out
 
 

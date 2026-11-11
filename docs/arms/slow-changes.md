@@ -697,6 +697,154 @@ is then under 0.01 errors in every magnitude range (by construction; `flag` writ
 `summary.json` as the release-day check), and at G 12-13 the stars beyond 3.8 errors go from 51 brightening and 13
 fading to 20 and 20 (measured with DR3's marks).
 
+**Drift by colour (2026-11-11).** The occurrence-limit work found that the trend left after the drift correction
+depends on colour, and it holds: on the field, stars redder than BP−RP 2 keep a brightening trend of +0.06 to
++0.22% a year and stars bluer than 0.5 one of about +0.1% a year, in every magnitude range. That is 0.3 to 0.6
+errors on DR3 and would be about 1 error at DR4's precision. The cause is the drift table's three colour ranges
+(below 0.8, 0.8-1.3, above 1.3): inside the red range one median is taken over all stars, most of them near
+BP−RP 1.5. On the lists it showed as red stars brightening: at G 16-19 and BP−RP above 2.2, 270 fading against
+518 brightening. Two changes:
+
+- *Narrow colour ranges in the drift table* (`drift.FINE_EDGES`: edges at 0.5, 0.8, 1.0, 1.3, 1.6, 1.8, 2.0, 2.2,
+  2.6, 3.0). A star takes the drift of its narrow range when 30 quiet stars measure it, else of its wide range
+  as before. This corrects the epochs, so episode scores and the per-band trends gain too. It removes the
+  leftover for red stars fainter than G 17, where most of them are. It cannot reach bright red and blue stars,
+  because almost none of them are quiet: 4 of the 501 stars at G 15-16 and BP−RP 2.2-2.6.
+- *A colour term in the trend's reference* (`summary.colour_rows`). After a star's trend is measured against its
+  sky cell, the median of what is left over all the run's stars of the same magnitude (1 mag) and colour range
+  is subtracted too, with its error added. It uses every star, quiet or not, so it reaches the bright ones. The
+  sky cells stay as they were (98% of stars at level 6): putting colour into the sky cells instead moved a
+  quarter of the stars to coarser pixels and left 0.07 errors of pixel-to-pixel scatter in the median trend,
+  where the sky cells alone leave none (0.16 errors without any reference).
+
+Median trend against the reference, in errors, before / after (stars):
+
+| BP−RP | G < 13 | 13-16 | 16-17 | 17-18 | 18-19 |
+|---|---|---|---|---|---|
+| below 0.5 | +0.42 / −0.03 (785) | +0.63 / −0.01 (612) | +0.35 / 0.00 (282) | +0.18 / +0.02 (452) | −0.05 / −0.02 (989) |
+| 0.5-1.8 | −0.01 / +0.02 (12,176) | 0.00 / 0.00 (89,249) | −0.02 / 0.00 (69,327) | −0.04 / 0.00 (94,303) | −0.07 / 0.00 (112,212) |
+| 1.8-2.0 | +0.22 / +0.03 (148) | +0.15 / 0.00 (958) | +0.09 / 0.00 (2,132) | +0.07 / 0.00 (5,634) | 0.00 / 0.00 (12,345) |
+| 2.0-2.2 | +0.14 / +0.06 (79) | +0.35 / +0.01 (645) | +0.26 / 0.00 (1,468) | +0.19 / 0.00 (4,239) | +0.12 / 0.00 (10,554) |
+| 2.2-2.6 | +0.11 / +0.13 (107) | +0.45 / +0.02 (673) | +0.41 / 0.00 (1,752) | +0.38 / 0.00 (5,443) | +0.28 / +0.01 (15,161) |
+| 2.6-3.0 | +0.25 / +0.25 (48) | +0.44 / +0.14 (186) | +0.49 / −0.01 (583) | +0.49 / −0.01 (2,150) | +0.36 / 0.00 (6,504) |
+| above 3.0 | 0.00 / 0.00 (96) | +0.38 / +0.38 (32) | +0.40 / +0.03 (73) | +0.43 / 0.00 (315) | +0.30 / +0.01 (1,192) |
+
+The cells that stay off zero have fewer than 50 stars of that colour in a 1 mag bin of G in this field; the
+whole sky has them. With the drift table's narrow ranges alone the rows from 2.0 to 3.0 at G 17-19 already
+fall to 0.17 or less and the bright ones do not move. `flag` writes the medians by colour to `summary.json`
+(`trend_offset_by_BP_RP`), beside those by magnitude, as a release-day check: on the field every range is within
+0.013 errors of zero, stars without a colour included (−0.35 errors before the reference).
+
+What it changes, same field and settings as the tables in this section: thresholds at G < 19 are 5.35, 3.69 and
+6.74 (episode, trend, repeat; 5.42, 3.68, 6.77 before). Lists at G < 19: 4,059 fading and 3,637 brightening
+(3,960 and 3,707); above strength 5, 54 and 109 (54 and 106). Red stars at G 16-19: 363 fading against 380
+brightening. By kind of star above strength 1: M dwarfs 521 fading against 469 brightening (394 against 629),
+FGK dwarfs 1,730 against 1,610 (1,713 against 1,571); above strength 2 the kinds stand as before (M dwarfs 27
+against 65, FGK dwarfs 131 against 202). Injected steady fades listed, all hosts brighter than G 19: 82.0% at 1% a year and 95.1% at 3% a
+year (81.8% and 95.0%); untouched hosts 1.1% as before. By host colour at 1% a year: red hosts (BP−RP above
+2.2, 189 of them) 32% listed against 24% before, and their 1% a year brightenings 37% on the rising list
+against 42%; blue hosts (below 0.5, 105) 50% of 0.5% a year fades against 42%; hosts between 0.5 and 1.8 86%
+either way. The pass costs the same (0.9 to 1.0 min for the field). The other numbers in this section were
+measured before this change and move by less than these do.
+
+**Stars with a flux excess (2026-11-11).** The occurrence-limit work then found that what was left of the trend
+follows a second quantity, and it holds on every kind of star of the field. BP and RP fluxes are sums over a
+window 3.5 arcsec long; G comes from a fit in a window of about 1 arcsec. Light that is not the star's own (a
+neighbour within about 2 arcsec, background) adds more to BP + RP than to G. A star's *flux ratio* is (BP + RP) / G
+of its median fluxes, and its *flux excess* is that ratio less the median ratio of stars of its magnitude and
+colour: the corrected excess factor C* of Riello et al. 2021, here from the light curve itself, so DR4's bulk
+files give it with no catalogue (the pass's ratio and the catalogue's agree to 0.002). Of the stars brighter
+than G 19, 8.1% have an excess above 0.05 and 1.8% one below −0.05. The scatter of the ratio among stars of one
+magnitude and colour, which is what no excess looks like, is 0.003 at G < 15, 0.015 at G 17-18 and 0.03 at
+G 18-19 (the noise of the BP and RP fluxes).
+
+Three things are different about stars with an excess, measured on the 455,624 stars of the field with G < 19:
+
+- *Their G trend falls with the excess*: −0.05% a year at an excess of 0.02 to 0.05, −0.11 at 0.05 to 0.1, −0.21
+  at 0.1 to 0.2, −0.35 at 0.2 to 0.5 and −0.65 above 0.5; below zero it rises (+0.07 at −0.05 to −0.02, +0.15 at
+  −0.1 to −0.05). It is the same 4 to 6 degrees from Andromeda's centre as within 1 degree, so it is not the
+  galaxy's light. In the stars that pass the fading threshold this way G and BP fall together (−0.85 and −0.74%
+  a year in the median at G 16-18) while RP holds, the G scatter is close to a single star's, and the catalogue
+  counts most of their BP and RP transits as blended. A fade of the star itself would show in RP too. The cause
+  was not established; light of a neighbour scattered into the G and BP windows that declined as the mirrors'
+  contamination cleared in 2014-2016 would give this pattern, and if that is it, DR4's longer span will show it
+  as an early change more than a steady trend.
+- *They change in jumps both ways.* Half of the stars with an excess above 0.05 have a G scatter over six times
+  that of single stars of their magnitude: a neighbour inside G's window at some scan directions and outside it
+  at others. At G 13-17, 5 to 9% of the stars with an excess above 0.1 are on a list either way, against about 1%
+  of other stars.
+- *Fades are hard to find in them.* Injected 1% a year fades are listed for 26% of hosts with an excess above
+  0.05 and for 94% of hosts within 0.006 of none; at 3% a year, 56% against 99%. Untouched, such hosts are on
+  the fading list 4% of the time against 1%.
+
+Three changes:
+
+- *The pass stores each star's flux ratio* (`flux_ratio` in the per-star table).
+- *The trend's reference has a third part* (`summary.excess_rows`), beside the sky cells and the colour term:
+  the median of what those two leave, per 1 mag of G and range of flux excess (eleven ranges, narrow near
+  zero), over all the run's stars. The excess is counted from the run's own median ratio by magnitude and
+  colour (`summary.locus_rows`, steps of 0.05 in BP−RP), so no number from DR3 is carried to DR4.
+  `reference.parquet` holds both as rows at levels −3 and −4; per-star tables and references written before
+  have neither and behave as before.
+- *Stars with an excess are read as a kind of their own* (`kinds.star_kind`: excess above 0.05 and above twice
+  the scatter of the ratio at the star's magnitude and colour; 7.6% of the field's stars at G < 19). They stay
+  on the lists, with `flux_excess` and `flux_excess_scatter` as columns, and are read after every other kind of
+  moving star. Stars with an excess below zero keep their kind: the reference centres them and they are on
+  the lists no more often than other stars.
+
+Median trend against the reference and stars past the trend threshold, G < 19, before / after the reference's
+third part:
+
+| Flux excess | Stars | Median trend, errors | Median trend, % a year | Fading / brightening past the threshold | Between 2 and 5 errors |
+|---|---|---|---|---|---|
+| below −0.1 | 962 | +0.65 / +0.02 | +0.25 / 0.00 | 6 / 10, then 9 / 6 | 21 / 105, then 51 / 41 |
+| −0.1 to −0.05 | 7,190 | +0.45 / 0.00 | +0.15 / 0.00 | 13 / 42, then 23 / 22 | 127 / 564, then 280 / 245 |
+| −0.05 to −0.02 | 34,919 | +0.27 / 0.00 | +0.07 / 0.00 | 50 / 89, then 78 / 60 | 785 / 1,935, then 1,306 / 1,132 |
+| −0.02 to −0.006 | 69,978 | +0.14 / 0.00 | +0.02 / 0.00 | 148 / 220, then 182 / 189 | 2,198 / 3,233, then 2,795 / 2,556 |
+| −0.006 to 0.006 | 207,501 | +0.01 / 0.00 | 0.00 / 0.00 | 713 / 753, then 722 / 745 | 7,830 / 7,913, then 7,998 / 7,747 |
+| 0.006 to 0.02 | 60,481 | −0.09 / 0.00 | −0.02 / 0.00 | 283 / 189, then 253 / 206 | 2,742 / 1,694, then 2,308 / 2,010 |
+| 0.02 to 0.05 | 35,045 | −0.17 / 0.00 | −0.05 / 0.00 | 206 / 93, then 155 / 107 | 1,895 / 699, then 1,355 / 1,023 |
+| 0.05 to 0.1 | 13,655 | −0.22 / 0.00 | −0.11 / 0.00 | 110 / 52, then 75 / 59 | 950 / 201, then 497 / 369 |
+| 0.1 to 0.2 | 8,420 | −0.24 / 0.00 | −0.21 / 0.00 | 69 / 34, then 34 / 38 | 804 / 108, then 305 / 211 |
+| 0.2 to 0.5 | 7,592 | −0.24 / 0.00 | −0.35 / 0.00 | 77 / 17, then 23 / 30 | 852 / 64, then 283 / 180 |
+| above 0.5 | 7,277 | −0.27 / 0.00 | −0.65 / 0.00 | 91 / 11, then 22 / 45 | 898 / 71, then 403 / 259 |
+
+The medians go to zero in every range. The counts past the threshold come level; between 2 and 5 errors the
+ranges above zero still hold more fades than brightenings, because the size of the false fade differs from star
+to star at one excess (it spreads over about 0.24% a year where its median is −0.2) and a median cannot follow
+that. At DR4's trend errors, about 2.7 times smaller, that spread is larger than the errors, which is why these
+stars are also read apart. `flag` writes this table's medians and the listed counts per range to `summary.json`
+(`trend_offset_by_flux_excess`), the first-hour check of whether DR4 shows the same and how strongly.
+
+The lists by kind of star, fading / brightening above each strength, before and after (all magnitudes):
+
+| Kind | > 1 before | > 1 after | > 2 before | > 2 after | > 3 before | > 3 after | > 5 before | > 5 after |
+|---|---|---|---|---|---|---|---|---|
+| FGK dwarf | 1,730 / 1,610 | 1,496 / 1,210 | 131 / 202 | 94 / 67 | 36 / 83 | 26 / 14 | 11 / 25 | 7 / 1 |
+| M dwarf | 521 / 469 | 316 / 316 | 27 / 65 | 1 / 9 | 7 / 26 | 0 / 0 | 1 / 8 | 0 / 0 |
+| Giant or subgiant | 265 / 223 | 240 / 184 | 40 / 36 | 35 / 20 | 18 / 13 | 15 / 6 | 7 / 2 | 5 / 1 |
+| Parallax too uncertain | 2,148 / 2,080 | 1,393 / 1,177 | 185 / 340 | 54 / 54 | 50 / 139 | 11 / 17 | 11 / 41 | 6 / 7 |
+| No astrometry | 441 / 515 | 214 / 264 | 64 / 91 | 25 / 25 | 23 / 43 | 10 / 13 | 6 / 12 | 4 / 2 |
+| White dwarf or subluminous | 38 / 42 | 3 / 0 | 6 / 17 | 0 / 0 | 4 / 5 | 0 / 0 | 0 / 2 | 0 / 0 |
+| No measurable motion | 2,810 / 2,624 | 2,796 / 2,639 | 753 / 723 | 754 / 726 | 237 / 230 | 239 / 230 | 35 / 28 | 35 / 28 |
+| Flux excess | | 1,328 / 1,855 | | 251 / 587 | | 77 / 267 | | 15 / 79 |
+
+The brightenings that outnumbered the fades far out on every stellar kind were these stars: with them read apart,
+FGK dwarfs above twice a threshold fade more often than they brighten (94 against 67; 131 against 202 before),
+29 FGK dwarfs and 88 giants have `q_kind` below 0.5 (none and 7 before), and nearly every star that had been
+placed as a white dwarf or subluminous was one of them, its parallax or colour off. A fake FGK dwarf fading 3% a
+year now has two real FGK dwarfs ahead of it and no brightening as strong (median `q_kind` 0.35, 1.0 before); at
+1% a year 18 ahead and 8 brightenings (22 and 71 before).
+
+The rest, same field and settings: thresholds at G < 19 are 5.35, 3.68 and 6.74 (the trend's was 3.69). Lists at
+G < 19: 3,901 fading and 3,654 brightening (4,059 and 3,637); above strength 5, 54 and 109 as before. Injected
+steady fades listed, all hosts brighter than G 19: 82.1% at 1% a year, 95.0% at 3% a year, untouched hosts 1.2%
+(82.0%, 95.1%, 1.1%). By kind of host at 1% a year: FGK dwarfs 94% (2,375 hosts; 92% before with the stars with
+an excess among them), giants and subgiants 94%, M dwarfs 61%, stars with an excess 26% (327 hosts). The pass
+costs the same. Not done: a correction of the epochs themselves by flux excess, as the drift table does by
+colour. It would also reach the episode scores, and is the next step if DR4's first-hour check shows the false
+fade as a change at one date.
+
 **Epochs without rejection marks.** DR3 marks the epochs its variability processing rejected (10% of G epochs in
 one file of this field) and `drift.normalise` drops them. DR4's bulk epoch photometry has no such column (found by
 the release-day practice run). `drift.own_good` now drops epochs whose error is over twice the star's median error
@@ -762,7 +910,8 @@ Dwarfs brighten at least as often as they fade at every strength, so no dwarf ha
 order falls back on brightness; only giants (7 stars) and hot dwarfs do. Far out the brightenings outnumber the
 fades (bright artefacts, above), so `q_kind` overstates chance there. What the order buys is position: a fake FGK
 dwarf fading 3% a year has a median strength of 7.8 and two real FGK dwarfs of the field's 1,713 listed ahead of
-it; at 1% a year, strength 3.3 and 22 ahead.
+it; at 1% a year, strength 3.3 and 22 ahead. (Those brightenings turned out to be stars with a flux excess, which
+are now a kind of their own, read after the others: "Stars with a flux excess" above has the table as it stands.)
 
 **Cost.** The pass took 0.9 min for the field on 4 cores: 0.2 ms per star per core at DR3's sampling, against
 14.7 ms for the detector and period search on every star. For DR4's ~2 × 10⁹ stars at about twice the epochs
@@ -798,44 +947,67 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
    fading side. No star is chosen before its light curve is read, and no catalogue query is needed: each star's G
    and colour come from its light curve.
 4. Lists: `slow_search.py flag --run R --rule RULE --out L`: each star's trend against the median of nearby stars
-   of similar brightness, the shared-date test, then the fading list, the `early` list and the rising list, one
-   sky region at a time. `L/summary.json` holds the median trend by magnitude before and after the reference
-   (the first-hour check that trends sit at zero) and the counts above each strength.
+   of similar brightness, colour and flux excess, the shared-date test, then the fading list, the `early` list
+   and the rising list, one sky region at a time. `L/summary.json` holds the median trend by magnitude, by colour
+   and by flux excess before and after the reference (the first-hour check that trends sit at zero) and the
+   counts above each strength.
 5. Cuts: `slow_search.py cuts --run L` looks up parallax, proper motion, colour, BP/RP blend counts and the
    variability class of every star above strength 1 either way (the run's one catalogue query, through
    `targets.releases`, so DR4's table names are in one place). It marks stars with no measurable motion as
-   `still` (quasars, galaxies, stars in other galaxies), gives each star its kind (`kinds.star_kind`) and each
-   fade its standing against the brightenings of the same kind (`q_kind`), adds whether each fade's G change
-   agrees with BP and RP (`band_verdict`, "G against BP and RP" below), and writes the fading list in reading
-   order: ordinary dwarfs with good parallaxes first, stars without a variability class before those with one.
+   `still` (quasars, galaxies, stars in other galaxies), gives each star its kind (`kinds.star_kind`; stars
+   with a BP/RP flux excess are a kind of their own) and each fade its standing against the brightenings of the
+   same kind (`q_kind`), adds whether each fade's G change agrees with BP and RP (`band_verdict`, "G against BP
+   and RP" below), and writes the fading list in reading order: ordinary dwarfs with good parallaxes first, stars
+   without a variability class before those with one, stars with a flux excess after every other moving star.
    `L/cuts_summary.json` has the fading and brightening counts above each strength by kind of star.
 6. If the bulk files are late or absent: `slow_fallback.py` ("DataLink fallback list" below) gives the order in
    which to fetch light curves one star at a time, and `slow_search.py pass --lightcurves DIR` scores whatever
    has arrived. `slow_search.py select`, the earlier archive-side choice of stars, is kept only for comparison:
    it picks none of the steady fades it was meant to find ("Every star scored").
-7. First-hour checks on the lists: the median trend by magnitude (`L/summary.json`, `trend_offset_by_G`), the
+7. First-hour checks on the lists: the median trend by magnitude, by colour and by flux excess
+   (`L/summary.json`: `trend_offset_by_G`, `trend_offset_by_BP_RP`, `trend_offset_by_flux_excess`; the last also
+   has the fading and brightening stars listed per range of excess, and its `median_trend_z` before the reference
+   says whether DR4 has DR3's false fade in stars with an excess: −0.1 to −0.25 errors above 0.02 on DR3), the
    fading against the brightening counts by kind (`L/cuts_summary.json`), and the watch-list's predictions
    (`slow_fallback.py check`).
 8. Reading: the fading list in its reading order, kind by kind, each down to where its fades stop standing
    clear of the same kind's brightenings. The checks:
    `slow_checks.py --fading L/fading.parquet --lightcurves R/lightcurves --out L/checks --skip-still --skip-band
-   --skip-class ECL --n 1000`. DR4's eclipsing-binary class is left out first; `--lightcurves` adds the
-   eclipsing-binary filter on G and ZTF (`eb_explained`, its period and duration), shown to the reviewer as
-   information (its test failed for repeating long dips, "Eclipsing binaries among the candidates" below).
+   --skip-class ECL --n 1000 --atlas-n 24`. DR4's eclipsing-binary class is left out first; `--lightcurves` adds
+   the eclipsing-binary filter on G and ZTF (`eb_explained`, its period and duration), kept beside each star's
+   review as information (its test failed for repeating long dips, "Eclipsing binaries among the candidates"
+   below). ATLAS answers about one star an hour, so it is asked last and only about the strongest stars
+   (`--atlas-n`, "Other surveys" below, "Running it"): the files are written without it first and no later step
+   waits for it.
+   The pass keeps light curves only for stars brighter than G 19, and the fading list also holds fainter ones:
+   the checks name the stars with no kept light curve (`no_lightcurve.csv`, `g_lightcurve` in `checks.csv`) and
+   take a second `--lightcurves` directory for light curves fetched through DataLink.
    Stars marked `g_only` or `bp_rp_only` are not checked but stay on the fading list with their verdict and are
    read after the rest, as the still stars are.
 9. Figures for the stars worth showing: `viz_candidates.py figures --run ... --ids ...` (docs/viz.md).
-10. Blind review of the stars the checks covered (docs/vetting.md §14-§15), `scripts/slow_review.py`:
-    `files --checks L/checks --fading L/fading.parquet --lightcurves R/lightcurves --rule RULE --out D` writes one
-    review file per star, built as the calibration's files were (`slow.vet.review_file`); `launch --dir D` prints
-    the arguments for `scripts/stage_a_reviews.js` (the model and effort of `prereg/reviewers/slow-cal-1.json`;
-    run with the Workflow tool, never the Agent tool); `stage_a_audit.py --reviewer
-    prereg/reviewers/slow-cal-1.json` refuses reviews served by anything else; `vetting commit --audit --archive`
+10. Blind review of the stars the checks covered (docs/vetting.md §14-§16), `scripts/slow_review.py`:
+    `files --checks L/checks --fading L/fading.parquet --lightcurves R/lightcurves --rule RULE --hosts
+    S/lightcurves --out D` writes one review file per star, built as the calibration's files were
+    (`slow.vet.review_file`), and among them planted fades of known answer: 30, or 5% of the stars where that is
+    more, put into quiet stars of the thresholds' sample, kept when the run would have flagged them, and built
+    into files by the same function (docs/vetting.md §16). Which files are fakes is written only encrypted.
+    `launch --dir D` prints the arguments for `scripts/stage_a_reviews.js` (the model and effort of
+    `prereg/reviewers/slow-cal-1.json`; run with the Workflow tool, never the Agent tool, from a thread Cora has
+    not typed in); `stage_a_audit.py --reviewer prereg/reviewers/slow-cal-1.json` counts only reviews served by
+    that reviewer and handed nothing but their task; `vetting commit --audit --archive --plan D/plan.json.age`
     records the verdicts; and `table --dir D --checks L/checks` writes `D/reviewed.csv`, the list to read, with
-    the eclipsing-binary check beside each verdict. The files hold the calibration's four tests: `eb_explained`
-    goes into them only with `--with-eclipse`, because no calibration batch has measured the reviewer on files
-    that carry it. A star whose NEOWISE or ZTF fetch failed in the checks is left out and listed, so that its
-    checks are run again first.
+    the eclipsing-binary check beside each verdict, and `D/fakes.json`: how many planted fades the reviewer
+    shortlisted and whether that is consistent with the calibration (at least 20 of 30). If it is not, no star
+    is set aside on the batch's verdicts. The files hold the calibration's four tests and nothing from the other
+    surveys of "Other surveys" below, where a fake's host would be seen unchanged. `eb_explained` goes into the
+    files only with `--with-eclipse` ("Eclipsing binaries among the candidates", decision of 2026-11-11). A star
+    whose NEOWISE or ZTF fetch failed in the checks is left out and listed, so that its checks are run again
+    first.
+11. The limit on how common steady fades are among FGK dwarfs, find or no find (docs/arms/occurrence.md, "On
+    DR4"): on day one `slow_occurrence.py` on the light curves of step 2, with the pass and flag steps run on
+    that directory; then on every star, from `R/summary`, `L/reference.parquet`, the light curves the pass keeps
+    of its random share of stars, and the dwarfs' parallaxes and flux ratios fetched in sky slices
+    (`slow_occurrence.py aux --sky 4`).
 
 ### Trial on all of DR3 (2026-10-30)
 
@@ -1065,6 +1237,32 @@ it. A strictly periodic long dip and a long-period eclipsing binary differ only 
 the kind of object this search is for. Measuring duration from the folded light curve, rather than from unbroken
 runs of epochs, would tell them apart; it would need its own test. Data: `/mnt/project-files/slow-changes/eb-test/`.
 
+**Decision (2026-11-11): the check stays out of the review files and stands beside each verdict.** The consequence
+written above for a failed E1 has two parts. The first, that no star leaves the review on `eb_explained`, holds.
+The second, that the verdict is shown to the reviewer, was never built into a calibration: the 432 files of the
+reviewer's calibration (docs/vetting.md §14, run the same day) carry four tests and no eclipsing-binary check,
+and no batch since has carried it. When release day's review files were written (`scripts/slow_review.py`, PR
+#88) the check was left out unless `--with-eclipse` is given. That default is kept, and this is a departure from
+the text above, for these reasons:
+
+- A reviewer is measured on one kind of file (docs/vetting.md §7). Recall of 44 of 50 and a false shortlist of
+  5.0% at the flagged mix belong to files without the check. Adding a test that says "explained: 1" makes a
+  reviewer whose rates nobody has measured, on the day the rates are quoted.
+- The check is wrong in the direction that matters. It explains 9 of 48 repeating long dips, the objects this
+  search is for. How far the reviewer follows it is unknown, so the loss of recall on that shape could be
+  anything from nothing to a fifth.
+- The gain is unmeasured too. DPAC's eclipsing binaries are left out before the checks (`--skip-class ECL`), and
+  of the 23 other fades with ZTF epochs the check explained 3.
+- Nothing is lost by waiting. `eb_explained`, its period and whether the period is unphysical are in
+  `checks.csv`, in the batch's key, and beside every verdict in `D/reviewed.csv`, where the person reading the
+  list sees both. From 2026-11-11 each batch also reports how many of its planted fades the check would have
+  explained (`D/fakes.json`, docs/vetting.md §16).
+
+Showing it to the reviewer needs a calibration batch whose files carry it, scored as §14 was: about 250 reviews
+(the 50 fakes of R1, the repeating long dips among them, and 200 natural stars), about 2.7 million output tokens
+on the adopted reviewer. It has not been run. `--with-eclipse` remains for that batch; `files.json` then records
+that the files are not of the calibrated kind, and `table` says that §14's rates do not describe their reviews.
+
 ## Other surveys (2026-11-10)
 
 A fade in Gaia can be Gaia's own doing (an instrument or calibration effect, or a neighbour that only Gaia's
@@ -1214,14 +1412,62 @@ better measure of activity and are not read yet.
 give itself away. Until the fakes are also injected into these epochs (`dayone.external.apply` takes this table:
 same columns and band names), the survey columns must stay out of what a reviewer of fakes sees.
 
-**Running it.** `scripts/slow_checks.py` reads ZTF, ATLAS, SkyMapper and NOIRLab by default and names once any
-survey it cannot reach; `--surveys none` turns the comparison off and `--no-tess` the TESS step. SkyMapper takes
-about 3 s a star, NOIRLab 15-25 s, TESS a few seconds. Gaia neighbours for the dilution come from ESA's archive,
-or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet` and the TESS rows per sector to
+**Running it.** `scripts/slow_checks.py` reads ZTF, SkyMapper and NOIRLab by default and names once any survey
+it cannot reach; `--surveys none` turns the comparison off and `--no-tess` the TESS step. SkyMapper takes about
+3 s a star, NOIRLab 15-25 s, TESS a few seconds. Gaia neighbours for the dilution come from ESA's archive, or
+from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet` and the TESS rows per sector to
 `tess.parquet`.
+
+ATLAS is asked only with `--atlas-n N`. One star's forced photometry takes about 18.5 minutes of ATLAS's server
+time in a queue shared by all its users, about one star an hour for one account (measured 2026-11-11), so the
+checks of 10^3 stars cannot wait for it. The script writes every file without ATLAS first, then sends ATLAS the
+N strongest stars it covers, strongest first and two at a time, and after each answer works out that star's
+comparison again with ATLAS among the surveys and rewrites `checks.csv` and `surveys.parquet` (each replaced in
+one step, so a step reading them never sees half a file). A failed request is in the star's `atlas_error`. A
+stop (Ctrl-C or a TERM signal) takes the unanswered requests off ATLAS's queue. `--atlas-only` carries on from
+the checks already written and fetches nothing else: it sends the N strongest of their stars that ATLAS covers
+and has not answered yet, and with `--ids D/reviewed.csv --ids-where shortlisted` only the stars a review
+shortlisted.
 
 ## Log
 
+- **2026-11-11.** ATLAS in the checks ("Other surveys", "Running it"). On live data ATLAS answers about one
+  star an hour for one account, and `slow_checks.py` asked it about every star along with the other surveys, so
+  the checks of 1,000 stars would have taken about as many hours. ATLAS is now asked last and only with
+  `--atlas-n N`, about the N strongest stars it covers, strongest first; the files are written before it and
+  rewritten after each answer, and `--atlas-only` carries on from them (after a stop, or for a review's
+  shortlist with `--ids`). Without `--atlas-n` the script does not contact ATLAS.
+- **2026-11-11.** Trial of the planted fades on DR3 (docs/vetting.md §16, "Trial on DR3"). 30 planted fades and
+  one real star of the Andromeda field went through step 10 as written, with the reviews launched from a
+  separate thread. 24 of 30 were shortlisted, which passes the check (at least 20 of 30). Fades flagged by the
+  trend alone were shortlisted 2 of 6 times, the others 22 of 24; too few to establish, and reported for every
+  batch from now on. Each review took 15 thousand output tokens.
+- **2026-11-11.** Found by the occurrence limit on the pass with the colour term (docs/arms/occurrence.md, "Stars
+  mixed with a neighbour"): the G trend of a star falls with its excess of (BP + RP) over G mean flux, the sign
+  of a second source within about 2 arcsec. On DR3's FGK dwarfs it is −0.04% a year at an excess of 0.02 to
+  0.05 and −0.7% above 0.5, while RP holds; above 0.05, 988 dwarfs fade between 2 and 5 errors and 63 brighten.
+  The limit leaves those stars out and measures the rest against stars of their own excess (settings v2: 1 in
+  107 at 0.2% a year, 7,883 at 1%, 57,843 at 5%). The lists do not yet, and at DR4's trend errors such stars
+  would stand high on the fading list.
+- **2026-11-11.** Stars with a flux excess ("Every star scored"). Stars with more BP and RP light than their G
+  light predicts (a neighbour within about 2 arcsec; 8% of stars) showed a false G fade of 0.1 to 0.7% a year,
+  filled both lists at several times the rate of other stars, and hid injected fades (26% of 1% a year fades
+  found, against 94% in stars without an excess); found by the occurrence-limit work. The pass now stores each
+  star's flux ratio, the trend's reference has a part by flux excess, and these stars are read as a kind of their
+  own after the others. With them apart, FGK dwarfs above twice a threshold fade more often than they brighten
+  (94 against 67; 131 against 202 before). Thresholds and overall recall are unchanged.
+- **2026-11-11.** Drift by colour ("Every star scored"). The trend left after the drift correction depended on
+  colour (red and blue stars brightening by 0.3 to 0.6 errors on DR3; found by the occurrence-limit work). The
+  drift table now has narrow colour ranges and the trend's reference a colour term; the median trend is at zero
+  in every colour range with 50 stars, thresholds move by under 0.1 and recall on injected fades is unchanged
+  overall (red hosts at 1% a year: 24% to 32%). The checks step names listed stars that have no kept light curve.
+- **2026-11-11.** Blind review on release day (Release day, end to end, step 10; docs/vetting.md §16). Every
+  review batch now holds planted fades of known answer, built into review files by the function that builds a
+  star's and written with sealed answers; the batch's result says whether its reviewer still finds what the
+  calibration's reviewer found. The eclipsing-binary check stays out of the review files and beside each
+  verdict, a recorded departure from E1's written consequence (Eclipsing binaries among the candidates), because
+  no calibration has measured the reviewer on files that carry it. Review files hold nothing from the other
+  surveys.
 - **2026-11-11.** Other surveys as checks on a fade (Other surveys, above; PR #87). Readers for SkyMapper,
   NOIRLab, ATLAS, ASAS-SN and TESS, and a comparison in every candidate's row: whether another telescope saw
   Gaia's change over Gaia's own dates, what happened after Gaia's last visit, and how variable TESS shows the star
@@ -1237,6 +1483,21 @@ or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet
 - **2026-11-11.** The known answers are in the DataLink fallback list (3,791 stars with the watch-list). ESA's
   archive refused the position queries, so `slow known` gained `--mirror aip`.
 
+- **2026-11-11.** The occurrence limit reads the pass's per-star table and the flag step's reference, and the
+  DR3 field was run again that way (docs/arms/occurrence.md): fewer than 1 in 101 FGK dwarfs fade at 0.2% a
+  year, 1 in 7,879 at 1%, 1 in 58,623 at 5%. Found on the way: the trend left after the drift correction depends
+  on colour. Stars redder than BP−RP 2 brighten by 0.06 to 0.22% a year and the bluest by about 0.1%, at every
+  magnitude, while stars between 0.5 and 1.8 sit within 0.04% of zero (table in docs/arms/occurrence.md, "The
+  leftover trend depends on colour"). The drift table has one colour range above BP−RP 1.3 and the neighbour
+  reference none, so neither removes it. At DR3's errors that is +0.3 to +0.5 errors for the reddest stars;
+  at DR4's it would be about +1. The occurrence limit takes the dwarfs' own median out. The lists do not yet.
+- **2026-11-10.** Upper limit on how common steady fades are among FGK dwarfs (docs/arms/occurrence.md), built
+  and run on the 195,572 FGK dwarfs of DR3's Andromeda field: fewer than 1 in 110 fade at 0.2% a year, 1 in
+  7,545 at 1%, 1 in 51,304 at 5% (95%). Recall comes from steady fades injected into every one of those stars.
+  Every fading star past the cut counts as a possible real fade; subtracting chance fades estimated from
+  brightening stars was dropped as the limit, because on DR3 the two are not equally common far out (30
+  brightening against 10 fading beyond 8 errors) and a subtracted limit then falls below the truth. Settings for
+  DR4 frozen in `prereg/occurrence/steady-fades-v1.json` (v2 since 2026-11-11).
 - **2026-11-10.** Every star scored ("Every star scored" above). The archive-side selection picked none of the
   injected steady fades up to 3% a year; the run now summarises every star of the bulk files in one compiled pass
   (0.2 ms per star per core) and flags the same stars as the detector on every star. Trends are measured against

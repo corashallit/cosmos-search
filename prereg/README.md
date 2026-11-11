@@ -22,6 +22,14 @@ To check a batch: `git fetch origin '+refs/pull/*/head:refs/remotes/pr/*'`, find
 `verdicts.jsonl` sha256 with `commit.json`, and confirm on the PR's timeline that it was pushed before the commit
 that reports the result.
 
+## Release-day review batches (from 2026-11-11)
+
+The rule for these batches is `docs/vetting.md` §16, pushed before any of them is built: how many planted fades
+a batch holds, of what kinds, and how many must be shortlisted for the batch to count as consistent with the
+calibration. `scripts/slow_review.py files` draws the plan and builds the files in one step and writes the plan
+and the key only encrypted (`D/plan.json.age`, `D/key.json.age`); steps 2 to 4 above apply unchanged, with
+`vetting commit --plan D/plan.json.age`, and `scripts/slow_review.py table` is the reveal.
+
 ## Day-one rehearsal batches 1–4: archived after the fact
 
 These four batches ran before the procedure above existed. Their verdict files lived only in the agent's
@@ -49,6 +57,7 @@ precede the verdicts in each PR's history. Batch 1's rule was set in the pilots 
 | confirm-main, confirm-hidden | v5: d167af0 (PR #53) | `verdicts/confirm-main` e3ea437, `verdicts/confirm-hidden` 7d23f83, pushed 2026-10-22 ~03:07 UTC | v5 adopted (`docs/dayone.md`, "Confirmatory result") |
 | slow-cal-1 | `docs/vetting.md` §14: 9b88faf (PR #77) | `verdicts/slow-cal-1` 83b887f | recall passes, false shortlist fails (§14, "Result") |
 | slow-cal-2, slow-cal-2-repeat | `docs/vetting.md` §15: f505da4, amended 0ec1481 before the reveal (PR #85) | `verdicts/slow-cal-2` dc92bef (116 of 432 files), `verdicts/slow-cal-2-repeat` e3a9fcb (14) | stopped part way; criteria reported, not applied; reviewer stays that of slow-cal-1 (§15, "Result") |
+| planted-trial-dr3-1 | `docs/vetting.md` §16 (PR #94, fb68acd), before the batch was built | `verdicts/planted-trial-dr3-1` cd637dc (31 files: 30 planted fades, one star) | 24 of 30 planted fades shortlisted: consistent with the calibration (§16, "Trial on DR3") |
 
 
 ## Which reviewer made the verdicts (from 2026-11-10)

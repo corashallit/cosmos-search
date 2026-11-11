@@ -17,7 +17,7 @@ threshold and a random share) and a done-marker, so a second run resumes and mac
 --shard. Without --rule it is the sample for the thresholds: with --files-share and --keep-lightcurves all it
 keeps every light curve of a random share of the files, which are whole patches of sky.
 `flag`: over the whole run, one sky region at a time: each star's trend against the median of nearby stars of
-similar brightness (`summary.reference_table`), the shared-date test, then the fading list, the `early` list and
+similar brightness, colour and flux excess (`summary.reference_table`), the shared-date test, then the fading list, the `early` list and
 their rising mirrors (`search.flag`), summary.json, and reference.parquet (the median trend per sky pixel and
 magnitude range, which should sit near zero).
 `cuts`: parallax, proper motion and colour of the listed stars from the archive, setting aside those consistent
@@ -47,13 +47,13 @@ from cosmos_search.slow import drift, kinds, release, rule_v3, search, summary
 
 _STATE = {}
 # What `flag` reads of each star's summary and, where a star has them, of its full scores.
-SUMMARY_COLUMNS = ("source_id", "g_mag", "bp_rp", "n_visits", "t_first", "t_last", "sigma_visit", "abbe",
+SUMMARY_COLUMNS = ("source_id", "g_mag", "bp_rp", "flux_ratio", "n_visits", "t_first", "t_last", "sigma_visit", "abbe",
                    "slope", "slope_err", "s_fade", "fade_kind", "dim_t0", "dim_t1", "dim_depth", "s_rise",
                    "rise_kind", "rise_t0", "slope_g", "slope_g_err", "slope_bp", "slope_bp_err", "slope_rp",
                    "slope_rp_err", "abbe_bp", "abbe_rp", "quiet", "ref", "full")
-LIST_COLUMNS = ["id", "phot_g_mean_mag", "bp_rp", "gbin", "by", "strength", "rise_strength", "n_visits", "sigma_visit", "abbe",
-                "s_fade", "fade_kind", "slope_z", "slope", "slope_err", "slope_z_raw", "slope_ref", "slope_ref_err",
-                "n_ref", "s_rep", "rep_period", "s_rise", "rise_kind", "slow_z",
+LIST_COLUMNS = ["id", "phot_g_mean_mag", "bp_rp", "flux_excess", "flux_excess_scatter", "gbin", "by", "strength", "rise_strength", "n_visits",
+                "sigma_visit", "abbe", "s_fade", "fade_kind", "slope_z", "slope", "slope_err", "slope_z_raw", "slope_ref",
+                "slope_ref_err", "n_ref", "s_rep", "rep_period", "s_rise", "rise_kind", "slow_z",
                 "dim_depth", "dim_t0", "dim_t1", "dim_visits", "depth_bp", "depth_bp_err", "depth_rp",
                 "depth_rp_err", "rep_depth", "rep_band_z", "t_first", "t_last", "quiet", "strength_by",
                 *search.BAND_COLUMNS]
@@ -386,7 +386,7 @@ def _files(directory):
     return [str(q) for q in sorted(Path(directory).glob("*.parquet")) if pq.read_metadata(q).num_rows]
 
 
-FLAG_COLUMNS = ["id", "gbin", "phot_g_mean_mag", "flagged", "early", "rising", "rising_rep", "shared_fade",
+FLAG_COLUMNS = ["id", "gbin", "phot_g_mean_mag", "flux_excess", "flux_excess_scatter", "flagged", "early", "rising", "rising_rep", "shared_fade",
                 "shared_rise", "fade_set_aside", "rise_set_aside", "by", "fade_kind", "strength", "rise_strength"]
 FLAGS_MIN = 0.8        # flags.parquet keeps stars at this strength or more, either way
 Z_EDGES = np.linspace(-12, 12, 961)  # histogram of trend significance per G bin, for its median over the run
@@ -407,15 +407,51 @@ def _hist_median(h):
     return float(np.interp(c[-1] / 2, c, Z_EDGES[1:])) if c[-1] else float("nan")
 
 
-def coarse_reference(sfiles, level, per_cell=200):
-    """The reference for cells too sparse at `level` and finer: medians in coarser pixels, from a bounded sample
-    of every (pixel at `level`, G range) cell of the run's reference rows."""
-    parts = []
+SAMPLE_ROWS = 2_000_000   # rows of samples held before they are bounded again
+
+
+def _bounded(parts, bound):
+    """Samples of the files read so far, bounded again once they pass SAMPLE_ROWS rows, so memory does not grow
+    with the number of files."""
+    if sum(len(x) for x in parts) > SAMPLE_ROWS:
+        parts[:] = [bound(pd.concat(parts, ignore_index=True))]
+    return parts
+
+
+def coarse_reference(sfiles, level, per_cell=200, per_colour=2000, colour_max=200_000, per_step=1000):
+    """The parts of the reference no one region can give, from bounded samples of every file:
+
+    - the sky rows for cells too sparse at `level` and finer: medians in coarser pixels, from a sample of every
+      (pixel at `level`, G range) cell of the run's reference rows;
+    - the median flux ratio by magnitude and colour (`summary.locus_rows`), which each star's flux excess is
+      counted from;
+    - the colour rows and the flux-excess rows (`summary.colour_rows`, `summary.excess_rows`), from a sample of
+      every file's residuals against its own stars' sky cells at `level` and finer and the coarse sky rows
+      (`summary.residual_sample`).
+
+    Per-star tables written before 2026-11-11 have no flux ratio, and the reference then has no flux-excess part."""
+    cols = ["source_id", "g_mag", "bp_rp", "flux_ratio", "slope", "ref"]
+
+    def read(f):
+        t = pd.read_parquet(f, columns=[c for c in cols if c in pq.read_schema(f).names])
+        return t[t["ref"]]
+
+    cells, steps = [], []
     for f in sfiles:
-        t = pd.read_parquet(f, columns=["source_id", "g_mag", "slope", "ref"])
-        parts.append(summary.cell_sample(t[t["ref"]], level, per_cell))
-    sample = summary.cell_sample(pd.concat(parts, ignore_index=True), level, per_cell)
-    return summary.reference_table(sample, levels=tuple(x for x in summary.REF_LEVELS if x < level))
+        t = read(f)
+        cells = _bounded([*cells, summary.cell_sample(t, level, per_cell)], lambda d: summary.cell_sample(d, level, per_cell))
+        steps = _bounded([*steps, summary.locus_sample(t, per_step)], lambda d: summary.locus_sample(d, per_step))
+    sample = summary.cell_sample(pd.concat(cells, ignore_index=True), level, per_cell)
+    sky = summary.reference_table(sample, levels=tuple(x for x in summary.REF_LEVELS if x < level), colours=False)
+    locus = summary.locus_rows(summary.locus_sample(pd.concat(steps, ignore_index=True), per_step))
+    coarse = pd.concat([sky, locus], ignore_index=True)
+    fine, resid = tuple(x for x in summary.REF_LEVELS if x >= level), []
+    for f in sfiles:
+        resid = _bounded([*resid, summary.residual_sample(read(f), per_colour, levels=fine, coarse=coarse)],
+                         lambda d: summary.bound_sample(d, colour_max))
+    resid = summary.bound_sample(pd.concat(resid, ignore_index=True), colour_max)
+    colour = summary.colour_rows(resid)
+    return pd.concat([coarse, colour, summary.excess_rows(resid, colour)], ignore_index=True)
 
 
 def scored_counts(run):
@@ -452,6 +488,11 @@ def flag(a):
     small, refs, lists = [], [coarse], {"fading": [], "early": [], "rising": []}
     summ_total, n = {}, 0
     hist = {k: np.zeros((len(drift.G_EDGES) - 1, len(Z_EDGES) - 1), np.int64) for k in ("raw", "referenced")}
+    # the same per colour range (row 0: stars without a colour)
+    hist_c = {k: np.zeros((len(drift.FINE_EDGES), len(Z_EDGES) - 1), np.int64) for k in ("raw", "referenced")}
+    # and per range of flux excess (row 0: stars without one), with the listed stars of each range
+    hist_e = {k: np.zeros((len(summary.EXCESS_EDGES) + 2, len(Z_EDGES) - 1), np.int64) for k in ("raw", "referenced")}
+    listed_e = {k: np.zeros(len(summary.EXCESS_EDGES) + 2, np.int64) for k in ("fading", "rising")}
     for k in range(12 * 4 ** a.chunk_level):
         sm = _read(sfiles, sranges, k * width, (k + 1) * width, SUMMARY_COLUMNS)
         if not len(sm):
@@ -461,15 +502,27 @@ def flag(a):
             continue
         n += len(sm)
         st = _read(tfiles, tranges, k * width, (k + 1) * width, ("source_id",) + search.STATS_ONLY)
-        fine = summary.reference_table(sm[sm["ref"]], levels=fine_levels)
+        fine = summary.reference_table(sm[sm["ref"]], levels=fine_levels, colours=False)
         refs.append(fine)
         m = summary.apply_reference(search.merge(sm, st if len(st) else None), pd.concat([fine, coarse]))
+        if "flux_excess" not in m:  # a pass from before 2026-11-11 stored no flux ratio
+            m["flux_excess"] = m["flux_excess_scatter"] = np.nan
         for name, col in (("raw", "slope_z_raw"), ("referenced", "slope_z")):
             z, gb = m.loc[m["ref"], col].to_numpy(), m.loc[m["ref"], "gbin"].to_numpy()
             for b in np.unique(gb):
                 hist[name][b] += np.histogram(np.clip(z[(gb == b) & np.isfinite(z)], -11.99, 11.99), Z_EDGES)[0]
+            cb = summary.colour_range(m.loc[m["ref"], "bp_rp"].to_numpy()) + 1
+            for b in np.unique(cb):
+                hist_c[name][b] += np.histogram(np.clip(z[(cb == b) & np.isfinite(z)], -11.99, 11.99), Z_EDGES)[0]
+            eb = summary.excess_range(m.loc[m["ref"], "flux_excess"].to_numpy()) + 1
+            for b in np.unique(eb):
+                hist_e[name][b] += np.histogram(np.clip(z[(eb == b) & np.isfinite(z)], -11.99, 11.99), Z_EDGES)[0]
         f = search.flag(m, a.rule)
         f["phot_g_mean_mag"], f["bp_rp"] = m["g_mag"].to_numpy(), m["bp_rp"].to_numpy()
+        f["flux_excess"], f["flux_excess_scatter"] = m["flux_excess"].to_numpy(), m["flux_excess_scatter"].to_numpy()
+        eb = summary.excess_range(f["flux_excess"].to_numpy()) + 1
+        for name, mark in (("fading", "flagged"), ("rising", "rising")):
+            listed_e[name] += np.bincount(eb[f[mark].to_numpy(bool)], minlength=len(listed_e[name]))
         if aux is not None:  # catalogue magnitudes where the catalogue has the star
             cat = aux.reindex(f["id"].to_numpy())
             for c in ("phot_g_mean_mag", "bp_rp"):
@@ -500,8 +553,24 @@ def flag(a):
                                                   "median_trend_z_against_neighbours":
                                                       round(_hist_median(hist["referenced"][b]), 3)}
                for b in range(len(edges) - 1) if hist["raw"][b].sum()}
+    ce = drift.FINE_EDGES
+    names = ["no colour", f"below {ce[1]:g}", *(f"{ce[i]:g}-{ce[i + 1]:g}" for i in range(1, len(ce) - 2)),
+             f"above {ce[-2]:g}"]
+    by_colour = {names[b]: {"stars": int(hist_c["raw"][b].sum()),
+                            "median_trend_z": round(_hist_median(hist_c["raw"][b]), 3),
+                            "median_trend_z_against_neighbours": round(_hist_median(hist_c["referenced"][b]), 3)}
+                 for b in range(len(names)) if hist_c["raw"][b].sum()}
+    ee = summary.EXCESS_EDGES
+    names = ["no flux ratio", f"below {ee[0]:g}", *(f"{ee[i]:g} to {ee[i + 1]:g}" for i in range(len(ee) - 1)),
+             f"above {ee[-1]:g}"]
+    by_excess = {names[b]: {"stars": int(hist_e["raw"][b].sum()),
+                            "median_trend_z": round(_hist_median(hist_e["raw"][b]), 3),
+                            "median_trend_z_against_neighbours": round(_hist_median(hist_e["referenced"][b]), 3),
+                            "fading": int(listed_e["fading"][b]), "rising": int(listed_e["rising"][b])}
+                 for b in range(len(names)) if hist_e["raw"][b].sum()}
     summ = {"rule": str(a.rule), "stars": int(stars), "with_scores": int(sum(scored.values())),
-            "by_magnitude": summ_total, "trend_offset_by_G": offsets}
+            "by_magnitude": summ_total, "trend_offset_by_G": offsets, "trend_offset_by_BP_RP": by_colour,
+            "trend_offset_by_flux_excess": by_excess}
     (out / "summary.json").write_text(json.dumps(summ, indent=1))
     print(json.dumps(summ, indent=1))
 
@@ -534,8 +603,9 @@ def cuts_cmd(a):
 
     - `still`: parallax and proper motion consistent with zero (`search.motion`): quasars, galaxies and stars in
       other galaxies, read as a list of their own;
-    - `kind`: the kind of star from parallax, absolute magnitude and colour (`kinds.star_kind`), and `vari_class`,
-      the release's variability class where it has one;
+    - `kind`: the kind of star from parallax, absolute magnitude and colour, with the stars that have a BP/RP
+      flux excess (the lists' `flux_excess` above 0.05 and above twice `flux_excess_scatter`) as a kind of their
+      own (`kinds.star_kind`), and `vari_class`, the release's variability class where it has one;
     - `q_kind`, `n_fade_kind`, `n_rise_kind`, `read_order` (`kinds.rank`): each fade against the brightenings of
       the same kind of star, and the order to read the list in: ordinary dwarfs first, stars without a
       variability class before those with one, then q_kind, then brightest first. The fading list is written in
@@ -561,7 +631,8 @@ def cuts_cmd(a):
     m = search.motion(g).reset_index(drop=True)
     m.insert(0, "id", listed["id"].to_numpy())
     m["blend"] = blend
-    m["kind"] = kinds.star_kind(g, m["still"].to_numpy()).to_numpy()
+    excess, scatter = (listed[c].to_numpy(float) if c in listed else None for c in ("flux_excess", "flux_excess_scatter"))
+    m["kind"] = kinds.star_kind(g, m["still"].to_numpy(), excess, scatter).to_numpy()
     cls = g["best_class_name"].to_numpy()
     m["vari_class"] = [x if isinstance(x, str) and x.strip() else None for x in cls]
     stars = listed[["id", "strength", "rise_strength"]].assign(kind=m["kind"].to_numpy(),

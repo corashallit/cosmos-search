@@ -20,6 +20,8 @@ Accident" from Backyard Worlds).
 
 Why slow changes lead: Gaia's ~90 visits over 5.5 years catch a 1-day dip on ~2% of stars, usually once, but catch
 90-100% of changes longer than ~100 days and measure a star's trend to a few hundredths of a percent per year.
+With or without a find, the slow-change search gives an upper limit on the share of Sun-like dwarfs fading
+steadily at each rate ([docs/arms/occurrence.md](docs/arms/occurrence.md)).
 
 ## Start here
 

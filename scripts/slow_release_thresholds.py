@@ -42,6 +42,12 @@ _STATE = {}
 EPOCH_COLUMNS = ["source_id", "band", "t", "frac", "err_frac"]
 
 
+def _init(state):
+    """Give a worker the state. A forked worker (Linux) has it already; one started as a new interpreter (macOS)
+    imports this script again and would see it empty."""
+    _STATE.update(state)
+
+
 def _epochs(path):
     """Good epochs of one file (uncorrected) and its stars' magnitudes and cells."""
     return summary.corrected_epochs(pq.read_table(path), None, _STATE.get("cells"), marks=_STATE.get("marks", True),
@@ -53,13 +59,13 @@ def _quiet(path):
     ep, stars = _epochs(path)
     q = release.quiet_ids(ep)
     use = q[summary.random_share(q, _STATE["drift_share"])]
-    return ep.loc[ep["source_id"].isin(use), EPOCH_COLUMNS], q, stars[["gbin", "cbin"]]
+    return ep.loc[ep["source_id"].isin(use), EPOCH_COLUMNS], q, stars[drift.CELL_COLUMNS]
 
 
 def _corrected(path):
     """One file's epochs, drift-corrected by the other half's table (and sky-corrected)."""
     ep, stars = _epochs(path)
-    cells, tables = stars[["gbin", "cbin"]], _STATE["tables"]
+    cells, tables = stars[drift.CELL_COLUMNS], _STATE["tables"]
     half = drift.half(ep["source_id"].to_numpy())
     corr = np.zeros(len(ep))
     for h in (0, 1):
@@ -145,7 +151,7 @@ def main(argv=None):
         aux = pd.read_parquet(a.aux, columns=["source_id", "phot_g_mean_mag", "bp_rp"]).drop_duplicates("source_id")
         _STATE["cells"] = drift.star_cells(aux)
     _STATE.update(drift_share=a.drift_share, sky=a.sky, marks=not a.no_marks, own=not a.no_own_test)
-    with Pool(a.workers) as pool:
+    with Pool(a.workers, initializer=_init, initargs=(_STATE,)) as pool:
         loaded = pool.map(_quiet, files, chunksize=1)
     qep = pd.concat([x[0] for x in loaded], ignore_index=True)
     quiet = np.concatenate([x[1] for x in loaded])
@@ -159,7 +165,7 @@ def main(argv=None):
           f"{qep['source_id'].nunique()} of them", flush=True)
     del qep
 
-    with Pool(a.workers) as pool:  # started after the tables exist, so the workers inherit them
+    with Pool(a.workers, initializer=_init, initargs=(_STATE,)) as pool:  # started after the tables exist
         stats = pd.concat(pool.map(_score, files, chunksize=1), ignore_index=True)
         stats = stats[np.isfinite(stats["sigma_visit"].to_numpy())].reset_index(drop=True)
         ref = summary.reference_table(stats)

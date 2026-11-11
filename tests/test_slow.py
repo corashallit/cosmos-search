@@ -69,6 +69,37 @@ def test_half_is_stable_and_balanced():
     assert 0.47 < h.mean() < 0.53
 
 
+def test_drift_that_changes_with_colour_inside_a_wide_range_is_removed_by_the_narrow_ranges():
+    rng = np.random.default_rng(3)
+    n = 280
+    # Three groups inside the wide red range (BP-RP above 1.3): 180 stars drifting +0.2 % a year, 80 redder ones
+    # drifting +0.8 % a year, and 20 reddest ones, too few for a cell of their own, drifting +0.8 % a year too.
+    parts, colour = [], np.r_[np.full(180, 1.5), np.full(80, 2.8), np.full(20, 3.5)]
+    for sid0, n_stars, rate in ((0, 180, 0.002), (180, 80, 0.008), (260, 20, 0.008)):
+        df = lightcurves(n_stars, rng, drift_per_year=rate).to_pandas()
+        parts.append(df.assign(source_id=df["source_id"] + sid0))
+    ep = drift.normalise(pa.Table.from_pandas(pd.concat(parts, ignore_index=True), schema=epoch.SCHEMA,
+                                              preserve_index=False))
+    a = aux(n).assign(bp_rp=colour)
+    cells = drift.star_cells(a)
+    assert cells["cbin"].nunique() == 1 and cells["cfine"].nunique() == 3
+    table = drift.fit(ep, cells, min_stars=30)
+    assert set(table["cbin"]) == {drift.POOLED, 2, drift.FINE + 4, drift.FINE + 9}   # no cell for the 20 reddest
+    group = np.repeat(["red", "redder", "reddest"], [180, 80, 20])
+
+    def left(cells_, table_):
+        cor = drift.trend(ep.assign(frac_corr=ep["frac"] - drift.drift_at(ep, cells_, table_)), "frac_corr")
+        return cor.set_index("source_id")["slope"].groupby(group[cor["source_id"].to_numpy() - 1]).median()
+
+    wide = left(cells[["gbin", "cbin"]], table)                     # as before 2026-11-11: the wide ranges only
+    assert wide["redder"] > 0.004 and -1.5e-3 < wide["red"] < -3e-4  # one median for both: neither is right
+    fine = left(cells, table)
+    assert abs(fine["red"]) < 3e-4 and abs(fine["redder"]) < 6e-4   # each narrow range has its own drift
+    assert fine["reddest"] == pytest.approx(wide["reddest"])        # too few stars: the wide range's drift
+    old = table[table["cbin"] < drift.FINE]                         # a table fitted before the narrow ranges
+    assert left(cells, old)["redder"] == pytest.approx(wide["redder"])
+
+
 def test_vsx_kind():
     assert known.vsx_kind("RCB") == "rcb"
     assert known.vsx_kind("UXOR:+TTS/ROT:") == "uxor"

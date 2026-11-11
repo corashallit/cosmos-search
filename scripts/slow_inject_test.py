@@ -15,8 +15,8 @@ order. Each host carries every kind of fake, one at a time, in G, BP and RP:
 - "none": the host untouched, which gives the share of hosts on a list with nothing injected.
 
 Each fake is scored by `search.score_all` (summary, then detector and period search where the run would run them),
-its trend is measured against the real stars' reference with the host's magnitude (`summary.apply_reference`: the
-fake never enters the reference), the shared-date test compares it with the real stars of its sky pixel, and
+its trend is measured against the real stars' reference with the host's magnitude, colour and flux ratio
+(`summary.apply_reference`: the fake never enters the reference), the shared-date test compares it with the real stars of its sky pixel, and
 `search.flag` applies the rule. Recorded for each: on the fading list or not and by which score, strength, the
 rising and early lists, and for the earlier route `picked_archive`: whether the archive-side cut would have
 chosen the star at all (`select.slow_z` of its G epochs above the 0.1% point of all stars in its magnitude bin),
@@ -88,6 +88,12 @@ def factors(kind, sid, band, t, seed):
     return np.maximum(f, 1e-3), size
 
 
+def _init(state):
+    """Give a worker the state. A forked worker (Linux) has it already; one started as a new interpreter (macOS)
+    imports this script again and would see it empty."""
+    _STATE.update(state)
+
+
 def _file(path):
     """One light-curve file: the archive-style statistics of every real star in it, and every fake of its hosts."""
     s = _STATE
@@ -119,7 +125,10 @@ def _file(path):
         if not len(m):
             continue
         ids = m["source_id"].to_numpy()
-        m = summary.apply_reference(m, s["ref"], g_mag=hosts["g_mag"].reindex(ids).to_numpy())
+        m = summary.apply_reference(m, s["ref"], g_mag=hosts["g_mag"].reindex(ids).to_numpy(),
+                                    bp_rp=hosts["bp_rp"].reindex(ids).to_numpy() if "bp_rp" in hosts else None,
+                                    flux_ratio=hosts["flux_ratio"].reindex(ids).to_numpy() if "flux_ratio" in hosts
+                                    else None)
         pix = drift.sky_pixel(ids, rule_v3.SHARED_LEVEL)
         near = s["real"][np.isin(s["real_pix"], np.unique(pix))]
         sh = rule_v3.shared(near, targets=m, target_patch=pix)
@@ -186,21 +195,26 @@ def main(argv=None):
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    cols = ["source_id", "g_mag", "bp_rp", "n_visits", "sigma_visit", "slope", "slope_err", "s_fade", "s_rise",
-            "dim_t0", "rise_t0", "quiet"]
-    real = pd.concat([pd.read_parquet(f, columns=cols) for f in sorted(Path(a.run, "summary").glob("*.parquet"))],
+    cols = ["source_id", "g_mag", "bp_rp", "flux_ratio", "n_visits", "sigma_visit", "slope", "slope_err", "s_fade",
+            "s_rise", "dim_t0", "rise_t0", "quiet"]
+    sfiles = sorted(Path(a.run, "summary").glob("*.parquet"))
+    real = pd.concat([pd.read_parquet(f, columns=[c for c in cols if c in pq.read_schema(f).names]) for f in sfiles],
                      ignore_index=True)
     real = summary.from_store(real[np.isfinite(real["sigma_visit"].to_numpy())].reset_index(drop=True))
+    ref = pd.read_parquet(Path(a.lists) / "reference.parquet")
+    # each real star's flux excess, as the lists have it (NaN from a pass or a reference without flux ratios)
+    real["flux_excess"], real["flux_excess_scatter"] = summary.flux_excess(
+        ref, real["g_mag"], real["bp_rp"], real["flux_ratio"], scatter=True) if "flux_ratio" in real else (np.nan, np.nan)
     flags = pd.read_parquet(Path(a.lists) / "flags.parquet")
     hosts = choose_hosts(real, a.per_bin)
     hosts["listed"] = hosts.index.isin(flags.loc[flags["flagged"] | flags["rising"] | flags["early"], "id"])
     thr, thr_p, tab = rule_v3.load(a.rule)
     _STATE.update(hosts=hosts, table=tab, thr=thr, thr_p=thr_p, rule=a.rule, seed=a.seed, marks=not a.no_marks,
-                  own=not a.no_own_test, ref=pd.read_parquet(Path(a.lists) / "reference.parquet"),
+                  own=not a.no_own_test, ref=ref,
                   real=real[["source_id", "s_fade", "s_rise", "dim_t0", "rise_t0"]],
                   real_pix=drift.sky_pixel(real["source_id"].to_numpy(), rule_v3.SHARED_LEVEL))
     files = [f for f in sorted(Path(a.lightcurves).glob("*.parquet")) if pq.read_metadata(f).num_rows]
-    with Pool(a.workers) as pool:
+    with Pool(a.workers, initializer=_init, initargs=(_STATE,)) as pool:
         parts = pool.map(_file, files, chunksize=1)
     arch = pd.concat([p[0] for p in parts], ignore_index=True)
     fakes = pd.concat([p[1] for p in parts if len(p[1])], ignore_index=True)
@@ -211,12 +225,14 @@ def main(argv=None):
     h = hosts.reindex(fakes["id"].to_numpy())
     fakes["host_g"], fakes["host_quiet"], fakes["host_listed"] = (h["g_mag"].to_numpy(), h["quiet"].to_numpy(),
                                                                   h["listed"].to_numpy())
+    fakes["host_excess"] = h["flux_excess"].to_numpy()
     fakes["mag"] = pd.cut(fakes["host_g"], [0, 13, 16, 19, 99], right=False, labels=["G<13", "G 13-16", "G 16-19", "G>=19"])
     fakes["kind"] = ""
     if a.gaia:
         g = pd.read_parquet(a.gaia).drop_duplicates("source_id").set_index("source_id")
         still = search.motion(g)["still"].to_numpy()
-        kind = kinds.star_kind(g, still)
+        own = real.set_index("source_id")[["flux_excess", "flux_excess_scatter"]].reindex(g.index)
+        kind = kinds.star_kind(g, still, own["flux_excess"].to_numpy(), own["flux_excess_scatter"].to_numpy())
         fakes["kind"] = kind.reindex(fakes["id"].to_numpy()).fillna("no astrometry").to_numpy()
         listed = flags[["id", "strength", "rise_strength"]].assign(
             kind=kind.reindex(flags["id"].to_numpy()).fillna("no astrometry").to_numpy())
