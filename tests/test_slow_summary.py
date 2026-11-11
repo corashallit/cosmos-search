@@ -28,9 +28,9 @@ def shapes(rng, t, kind):
 
 
 def lightcurves(rng, kinds_=("noise",) * 6, n_visits=45, span=1000.0, sigma=0.002, flux=3e4, sid0=1, bands=True,
-                drop=0.1):
+                drop=0.1, extra=None):
     """Light curves (epoch.SCHEMA) of stars with the given shapes: two G epochs a visit, BP and RP on most transits,
-    one star in ten with few visits."""
+    one star in ten with few visits. extra: {star index: factor on its BP and RP fluxes} (a neighbour's light)."""
     rows = []
     for i, kind in enumerate(kinds_):
         n = 4 if kind == "short" else n_visits
@@ -42,6 +42,8 @@ def lightcurves(rng, kinds_=("noise",) * 6, n_visits=45, span=1000.0, sigma=0.00
             if band != "G" and not bands:
                 continue
             keep = np.ones(len(t), bool) if band == "G" else rng.random(len(t)) > drop
+            if band != "G":
+                scale *= (extra or {}).get(i, 1.0)
             f = flux * scale * (1 + y[keep] + rng.normal(0, sigma, keep.sum()))
             rows.append(pd.DataFrame({"source_id": sid0 + i, "band": band, "t": t[keep], "flux": f,
                                       "err": np.full(keep.sum(), flux * scale * sigma), "flags": 0,
@@ -98,6 +100,11 @@ def test_magnitudes_and_cells_come_from_the_light_curve():
     assert s["g_mag"].to_numpy() == pytest.approx(15.2, abs=0.01)
     assert s["bp_rp"].to_numpy() == pytest.approx(25.3385 - 24.7479 - 2.5 * np.log10(0.4 / 0.6), abs=0.01)
     assert (s["gbin"] == np.digitize(15.2, drift.G_EDGES[1:-1])).all()
+    assert s["flux_ratio"].to_numpy() == pytest.approx(1.0, abs=0.002)        # (0.4 + 0.6) / 1 of the G flux
+    more = summary.star_summary(lightcurves(rng, ("noise",) * 3, extra={1: 1.25}))
+    assert more["flux_ratio"].to_numpy() == pytest.approx([1.0, 1.25, 1.0], abs=0.003)
+    assert more["bp_rp"].to_numpy() == pytest.approx(s["bp_rp"].to_numpy(), abs=0.01)   # the colour is unchanged
+    assert summary.star_summary(lightcurves(rng, ("noise",) * 2, bands=False))["flux_ratio"].isna().all()
     cells = pd.DataFrame({"gbin": np.int8(2), "cbin": np.int8(0)}, index=pd.Index([1], name="source_id"))
     s2 = summary.star_summary(lc, cells=cells)
     assert s2["gbin"].tolist() == [2, s["gbin"].iloc[1], s["gbin"].iloc[2]]   # a catalogue's cell where it has one
@@ -125,7 +132,7 @@ def test_stored_summary_round_trips(tmp_path):
     summary.write(s.assign(full=True, ref=True), tmp_path / "s.parquet", extra=("full", "ref"))
     back = summary.from_store(pd.read_parquet(tmp_path / "s.parquet"))
     assert (back["gbin"] == s["gbin"]).all() and (back["cbin"] == s["cbin"]).all()
-    for c in ("slope", "slope_err", "s_fade", "s_rise", "sigma_visit", "abbe", "g_mag", "slope_bp"):
+    for c in ("slope", "slope_err", "s_fade", "s_rise", "sigma_visit", "abbe", "g_mag", "slope_bp", "flux_ratio"):
         np.testing.assert_allclose(back[c].to_numpy(float), s[c].to_numpy(float), rtol=2e-6, equal_nan=True, err_msg=c)
     np.testing.assert_allclose(back["slope_z"], s["slope_z"], rtol=1e-5, equal_nan=True)
     strong = s["s_fade"].to_numpy() >= summary.STORE_MIN_SCORE
@@ -234,6 +241,96 @@ def test_reference_has_a_colour_term_that_adds_to_the_sky_cells():
     assert abs(again["mid"]) < 0.1 and abs(again["red"]) < 0.1
 
 
+def test_reference_has_a_flux_excess_term_counted_from_the_stars_own_median_ratio():
+    rng = np.random.default_rng(23)
+
+    def ratio(colour, g):               # the median flux ratio rises with colour and sits higher for faint stars
+        return 1.15 + 0.1 * colour + 0.05 * (g > 14)
+
+    def group(n, pixel, g, excess, trend):
+        d = stars_frame(rng, n, pixel=pixel, g=g, offset=0.001 + trend)
+        d["bp_rp"] = rng.uniform(0.82, 0.98, n)
+        d["flux_ratio"] = ratio(d["bp_rp"], d["g_mag"]) + excess + rng.normal(0, 0.001, n)
+        return d
+    # per pixel: 600 single stars; 150 with an excess of 0.15, whose trend is 0.3% a year lower (1.5 errors);
+    # 20 with an excess of 0.7, too few for a row; fainter stars with a higher median ratio, 80 of them with the
+    # same excess of 0.15 and a trend 0.6% a year lower; and 5 stars without a flux ratio
+    parts, names = [], []
+    for k in (3, 9):
+        for name, n, g, excess, trend in (("single", 600, (13.0, 13.4), 0.0, 0.0), ("mixed", 150, (13.0, 13.4), 0.15, -0.003),
+                                          ("rare", 20, (13.0, 13.4), 0.7, -0.01), ("faint", 300, (14.1, 14.4), 0.0, 0.0),
+                                          ("faint mixed", 80, (14.1, 14.4), 0.15, -0.006), ("blank", 5, (13.0, 13.4), 0.0, 0.0)):
+            parts.append(group(n, k, g, excess, trend))
+            names += [name] * n
+    s = pd.concat(parts, ignore_index=True).assign(group=names)
+    s.loc[s["group"] == "blank", "flux_ratio"] = np.nan
+    ref = summary.reference_table(s)
+    locus, rows = ref[ref["level"] == summary.REF_LOCUS], ref[ref["level"] == summary.REF_EXCESS]
+    assert len(locus) >= 6 and set(locus["grange"]) == set(summary._g_bin([13.2, 14.2]))
+    # the excess is counted from the median ratio of the star's own magnitude and colour
+    e = pd.Series(summary.flux_excess(ref, s["g_mag"], s["bp_rp"], s["flux_ratio"])).groupby(s["group"]).median()
+    assert abs(e["single"]) < 0.003 and abs(e["faint"]) < 0.003
+    assert e["mixed"] == pytest.approx(0.15, abs=0.005) and e["faint mixed"] == pytest.approx(0.15, abs=0.005)
+    assert np.isnan(e["blank"])
+    # rows: no excess and 0.1 to 0.2 in each magnitude bin; the 40 stars at 0.7 are too few
+    assert sorted(rows["pix"]) == [4, 4, 8, 8] and (rows["n"] >= 50).all()
+    out = summary.apply_reference(s, ref)
+    med = out.groupby("group")["slope_z"].median()
+    for g in ("single", "mixed", "faint", "faint mixed"):
+        assert abs(med[g]) < 0.07, g
+    np.testing.assert_allclose(out["flux_excess"], summary.flux_excess(ref, s["g_mag"], s["bp_rp"], s["flux_ratio"]))
+    # the scatter of the ratio among stars of the same magnitude and colour step: the 0.001 the single stars were
+    # given and the ratio's change across a step of colour
+    assert 0.001 < out.loc[s["group"] == "single", "flux_excess_scatter"].median() < 0.004
+    assert out.loc[s["group"] == "blank", "flux_excess_scatter"].isna().all()
+    # without the flux-excess rows the mixed stars sit low
+    before = ref[ref["level"] != summary.REF_EXCESS]
+    plain = summary.apply_reference(s, before)
+    low = plain.groupby("group")["slope_z"].median()
+    assert low["mixed"] < -0.9 and low["faint mixed"] < -2.0
+    # no row for its excess, or no flux ratio: the sky and colour rows alone
+    for g in ("rare", "blank"):
+        np.testing.assert_allclose(out.loc[s["group"] == g, "slope_z"], plain.loc[s["group"] == g, "slope_z"])
+    # the row's error adds to the others'
+    m = s["group"] == "mixed"
+    assert (out.loc[m, "slope_ref_err"] > plain.loc[m, "slope_ref_err"]).all()
+    # a frame without flux ratios, and a table made before them, behave as before
+    old = summary.reference_table(s.drop(columns="flux_ratio"))
+    assert (old["level"] >= summary.REF_COLOUR).all()
+    got = summary.apply_reference(s.drop(columns="flux_ratio"), ref)
+    np.testing.assert_allclose(got["slope_z"], plain["slope_z"])
+    assert "flux_excess" not in got and "flux_excess" not in summary.apply_reference(s, old)
+    np.testing.assert_allclose(summary.apply_reference(s, old)["slope_z"], plain["slope_z"])
+    # a fake is placed by its host's flux ratio
+    host = s[m].iloc[[0]]
+    fake = host.assign(slope=host["slope"].iloc[0] - 0.03, flux_ratio=1.23)
+    placed = summary.apply_reference(fake, ref, flux_ratio=host["flux_ratio"].to_numpy())
+    assert placed["slope_ref"].iloc[0] == out.loc[m, "slope_ref"].iloc[0] and placed["slope_z"].iloc[0] < -10
+    # a whole-sky run: median ratios from a sample of every file, then residual samples drawn by colour and by
+    # excess, bounded as they are read
+    halves = [s[s["source_id"] < 5 * LEVEL6], s[s["source_id"] >= 5 * LEVEL6]]
+    steps = pd.concat([summary.locus_sample(h, per_cell=400) for h in halves], ignore_index=True)
+    assert set(summary.locus_sample(steps, 400)["source_id"]) == set(summary.locus_sample(s, 400)["source_id"])
+    coarse = summary.locus_rows(steps)
+    samples = [summary.residual_sample(h, per_cell=100, coarse=coarse) for h in halves]
+    for x in samples:
+        assert x["by_colour"].sum() == 200                     # one colour range in two magnitude bins
+        assert x.loc[x["by_excess"]].groupby([summary._g_bin(x.loc[x["by_excess"], "g_mag"]),
+                                              summary.excess_range(x.loc[x["by_excess"], "excess"])]).size().max() == 100
+    both = summary.bound_sample(pd.concat(samples, ignore_index=True), 150)
+    whole = summary.bound_sample(pd.concat([summary.residual_sample(h, per_cell=10 ** 6, coarse=coarse) for h in halves],
+                                           ignore_index=True), 150)
+    assert both["by_colour"].sum() == 300                      # bounded again, 150 a cell
+    assert set(both.loc[both["by_colour"], "source_id"]) == set(whole.loc[whole["by_colour"], "source_id"])
+    full = summary.bound_sample(pd.concat(samples, ignore_index=True), 10_000)
+    colour = summary.colour_rows(full)
+    by_parts = pd.concat([summary.reference_table(h, colours=False) for h in halves]
+                         + [coarse, colour, summary.excess_rows(full, colour)], ignore_index=True)
+    again = summary.apply_reference(s, by_parts).groupby(s["group"])["slope_z"].median()
+    for g in ("single", "mixed", "faint", "faint mixed"):
+        assert abs(again[g]) < 0.15, g
+
+
 def test_cell_sample_is_bounded_and_repeatable():
     rng = np.random.default_rng(8)
     s = pd.concat([stars_frame(rng, 500, pixel=1), stars_frame(rng, 30, pixel=70)], ignore_index=True)
@@ -298,6 +395,18 @@ def test_star_kind_places_stars_on_the_colour_magnitude_diagram():
                           "parallax too uncertain", "no astrometry", "no colour", "no measurable motion"]
     assert kinds.absolute_magnitude(12.0, 10.0) == pytest.approx(7.0)
     assert set(k) <= set(kinds.READ_ORDER)
+    # a flux excess above 0.05, and above twice the scatter of the ratio at the star's magnitude where that is
+    # given, is a kind of its own, read after the other moving stars; an excess below zero is not
+    excess = np.array([0.2, 0.04, -0.07, np.nan, 0.08, 0.08, 0.3, 0.0, 0.5])
+    k = kinds.star_kind(g, still, excess)
+    assert k.tolist() == ["flux excess", "hot dwarf", "M dwarf", "giant or subgiant", "flux excess",
+                          "flux excess", "flux excess", "no colour", "no measurable motion"]
+    scatter = np.array([0.003, 0.003, 0.003, 0.003, 0.03, 0.05, np.nan, 0.003, 0.003])
+    k = kinds.star_kind(g, still, excess, scatter)
+    assert k.tolist() == ["flux excess", "hot dwarf", "M dwarf", "giant or subgiant", "flux excess",
+                          "parallax too uncertain", "flux excess", "no colour", "no measurable motion"]
+    order = kinds.READ_ORDER.index
+    assert order("no astrometry") < order("flux excess") < order("no measurable motion")
 
 
 def test_rank_measures_fades_against_the_same_kind_of_stars_brightening():
@@ -433,7 +542,9 @@ def test_pass_flag_and_cuts_end_to_end(tmp_path):
     for k in range(2):
         shapes_ = ("noise",) * 120 + ("fade", "dip", "rise", "short")
         sid0 = 1 + k * 1000
-        pq.write_table(lightcurves(rng, shapes_, flux=flux, sid0=sid0), lcdir / f"part{k}.parquet")
+        # in the second file the star with the fade and one steady star have 30% more BP and RP flux than G predicts
+        pq.write_table(lightcurves(rng, shapes_, flux=flux, sid0=sid0, extra={5: 1.3, 120: 1.3} if k else None),
+                       lcdir / f"part{k}.parquet")
         planted.update({sid0 + 120: "fade", sid0 + 121: "dip", sid0 + 122: "rise"})
     run = tmp_path / "run"
     assert ss.main(["pass", "--out", str(run), "--lightcurves", str(lcdir), "--rule", str(rule_v3.RULE_DIR),
@@ -455,6 +566,13 @@ def test_pass_flag_and_cuts_end_to_end(tmp_path):
     s = json.loads((lists / "summary.json").read_text())
     assert s["stars"] == 248 and s["by_magnitude"]["G<19"]["scored"] == 246
     assert abs(s["trend_offset_by_G"]["14-15"]["median_trend_z_against_neighbours"]) < 0.05
+    by_excess = s["trend_offset_by_flux_excess"]
+    assert by_excess["-0.006 to 0.006"]["stars"] == 244 and by_excess["0.2 to 0.5"] == {
+        "stars": 2, "median_trend_z": pytest.approx(by_excess["0.2 to 0.5"]["median_trend_z"]),
+        "median_trend_z_against_neighbours": pytest.approx(by_excess["0.2 to 0.5"]["median_trend_z_against_neighbours"]),
+        "fading": 1, "rising": 0}
+    assert fading.set_index("id")["flux_excess"].loc[1121] == pytest.approx(0.3, abs=0.01)
+    assert abs(fading.set_index("id")["flux_excess"].loc[121]) < 0.006
     # the cuts step from a file of catalogue rows: kinds and reading order
     ids = pd.read_parquet(lists / "flags.parquet")["id"].to_numpy()
     gaia = pd.DataFrame({"source_id": ids, "parallax": 5.0, "parallax_error": 0.02, "pmra": 10.0, "pmra_error": 0.02,
@@ -466,9 +584,14 @@ def test_pass_flag_and_cuts_end_to_end(tmp_path):
     gaia.to_parquet(tmp_path / "gaia.parquet", index=False)
     assert ss.main(["cuts", "--run", str(lists), "--gaia", str(tmp_path / "gaia.parquet")]) == 0
     fading = pd.read_parquet(lists / "fading.parquet")
-    assert (fading["kind"] == "FGK dwarf").all() and not fading["still"].any()
-    assert fading["read_order"].is_monotonic_increasing and fading["id"].iloc[-1] == 121    # classified: read last
+    assert not fading["still"].any()
+    # the star with a flux excess is a kind of its own, read after the dwarfs; of those the classified one is last
+    assert fading.set_index("id")["kind"].loc[1121] == "flux excess"
+    assert (fading.loc[fading["id"] != 1121, "kind"] == "FGK dwarf").all()
+    assert fading["read_order"].is_monotonic_increasing and fading["id"].tolist()[-2:] == [121, 1121]
     assert {"q_kind", "n_fade_kind", "n_rise_kind", "band_verdict", "vari_class"} <= set(fading.columns)
     c = json.loads((lists / "cuts_summary.json").read_text())
-    assert c["fading_by_kind"]["FGK dwarf"]["listed"] == len(fading)
-    assert c["above_strength_by_kind"]["FGK dwarf"]["1.0"]["fading"] >= len(fades)
+    assert c["fading_by_kind"]["FGK dwarf"]["listed"] == len(fading) - 1
+    assert c["fading_by_kind"]["flux excess"]["listed"] == 1
+    assert c["above_strength_by_kind"]["FGK dwarf"]["1.0"]["fading"] >= len(fades) - 1
+    assert c["above_strength_by_kind"]["flux excess"]["1.0"]["fading"] == 1
