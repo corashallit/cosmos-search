@@ -1,7 +1,7 @@
 """Run the per-candidate checks (cosmos_search.slow.checks) on the strongest stars of a search's fading list.
 
     python scripts/slow_checks.py --fading R/fading.parquet --out R/checks [--n 100] [--schema gaiadr4] [--max-g 17]
-        [--skip-class ECL] [--skip-still] [--skip-band] [--workers 6] [--lightcurves R/lightcurves]
+        [--skip-class ECL] [--skip-still] [--skip-band] [--workers 6] [--lightcurves R/lightcurves [--lightcurves D]]
         [--surveys ztf,atlas,skymapper,noirlab[,asassn] | none] [--no-tess]
 
 --fading is the list `scripts/slow_search.py flag` writes (ordered by strength). For each of the first --n stars
@@ -10,8 +10,12 @@ class, the colour of the change, NEOWISE W1/W2 against what each explanation pre
 against outside for an episode, the slope over the light curve's years for a trend; a repeating dimming has no
 single window and gets neither), and ZTF levels before and after 2020-01-20. Writes checks.csv (one row per star)
 and the raw NEOWISE and ZTF epochs. With --lightcurves, also whether a strict-period eclipsing binary explains the
-dips on G and ZTF together (`checks.eclipse`; `eb_explained` stars leave the review). A failed fetch is recorded and
-the next star goes on. Stars are checked
+dips on G and ZTF together (`checks.eclipse`; `eb_explained` stars leave the review). The scoring pass keeps light
+curves only for stars brighter than G 19 (`search.LC_G_MAX`), and the fading list also holds fainter stars: a star
+with no G epochs in any --lightcurves directory gets no eclipsing-binary test, `g_lightcurve` False in checks.csv
+and a line in no_lightcurve.csv. Fetch those stars through DataLink and give that directory as a second
+--lightcurves, or keep the checks to brighter stars with --max-g. A failed fetch is recorded and the next star
+goes on. Stars are checked
 --workers at a time: one star's NEOWISE and ZTF fetches take one to two minutes, so 10^3 candidates one after
 another would take over a day.
 
@@ -42,6 +46,7 @@ from cosmos_search.gaia.archive import tap
 from cosmos_search.net.tap import Tap
 from cosmos_search.slow import checks
 from cosmos_search.slow import independent as ind
+from cosmos_search.slow.search import LC_G_MAX
 from cosmos_search.surveys import tess_activity
 
 TESS_MAX_G = 16.0      # TGLC has no light curve for stars fainter than about Tmag 16
@@ -111,13 +116,20 @@ def at_2019(r):
 
 
 def g_epochs(lightcurves, ids):
-    """Good G epochs (source_id, t, flux relative to the median) of the given stars from a directory of light-curve
-    files (epoch.SCHEMA, e.g. the kept light curves of `slow_search.py score`), found by each file's source_id
-    range."""
+    """Good G epochs (source_id, t, flux relative to the median) of the given stars from one or more directories
+    of light-curve files (epoch.SCHEMA, e.g. the kept light curves of `slow_search.py pass`), found by each
+    file's source_id range. A star in more than one directory is read from the first that has it."""
     import pyarrow.parquet as pq
 
     from cosmos_search.slow import drift
 
+    if not isinstance(lightcurves, (str, Path)):
+        out, left = [], np.asarray(ids, np.int64)
+        for d in lightcurves:
+            got = g_epochs(d, left)
+            out.append(got)
+            left = np.setdiff1d(left, got["source_id"].to_numpy(np.int64))
+        return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=["source_id", "t", "flux"])
     files = sorted(Path(lightcurves).glob("*.parquet"))
     ids = np.sort(np.asarray(ids, np.int64))
     out = []
@@ -131,6 +143,14 @@ def g_epochs(lightcurves, ids):
             ep = ep[ep["band"] == 0]
             out.append(pd.DataFrame({"source_id": ep["source_id"], "t": ep["t"], "flux": 1 + ep["frac"]}))
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame(columns=["source_id", "t", "flux"])
+
+
+def without_lightcurve(cand, gep):
+    """The candidates with no G epoch in the light curves read (`g_epochs`): source_id, phot_g_mean_mag, strength
+    and by, strongest first. No eclipsing-binary test can be run on them."""
+    have = np.unique(gep["source_id"].to_numpy(np.int64)) if len(gep) else np.array([], np.int64)
+    cols = [c for c in ("source_id", "phot_g_mean_mag", "strength", "by") if c in cand]
+    return cand.loc[~cand["source_id"].isin(have), cols].sort_values("strength", ascending=False)
 
 
 def other_surveys(r, z, names, schema, with_tess):
@@ -244,8 +264,10 @@ def main(argv=None):
     ap.add_argument("--skip-band", action="store_true",
                     help="leave out fades whose G change disagrees with BP and RP (`slow_search.py cuts`)")
     ap.add_argument("--workers", type=int, default=6, help="stars checked at once (IRSA and ZTF fetches)")
-    ap.add_argument("--lightcurves", help="the run's kept light curves (`slow_search.py score` R/lightcurves): adds "
-                                          "the eclipsing-binary check on G and ZTF")
+    ap.add_argument("--lightcurves", action="append",
+                    help="the run's kept light curves (`slow_search.py pass` R/lightcurves): adds the eclipsing-"
+                         "binary check on G and ZTF. Repeatable: a second directory (light curves fetched through "
+                         "DataLink) covers listed stars the pass kept no light curve for (fainter than G 19)")
     ap.add_argument("--surveys", default=",".join(surveys.DEFAULT),
                     help="other surveys to compare Gaia's change with, comma-separated, or none; asassn is read "
                          "only when named here")
@@ -275,6 +297,15 @@ def main(argv=None):
     irsa = Tap(checks.IRSA_TAP, job_slots=a.workers)
     gep = g_epochs(a.lightcurves, cand["source_id"]) if a.lightcurves else None
     g_of = dict(tuple(gep.groupby("source_id"))) if gep is not None else {}
+    if gep is not None:
+        none = without_lightcurve(cand, gep)
+        none.to_csv(out / "no_lightcurve.csv", index=False)
+        if len(none):
+            faint = int((none["phot_g_mean_mag"] >= LC_G_MAX).sum())
+            print(f"WARNING: {len(none)} of {len(cand)} stars have no G light curve in {', '.join(a.lightcurves)} "
+                  f"({faint} of them fainter than G {LC_G_MAX:g}, where the scoring pass keeps none): no eclipsing-"
+                  f"binary test for these. They are listed in {out / 'no_lightcurve.csv'}; fetch their light curves "
+                  "through DataLink and add that directory as a second --lightcurves, or use --max-g.", flush=True)
 
     rows, wise_all, ztf_all, lc_all, tess_all = [], [], [], [], []
     t0 = time.time()
@@ -284,6 +315,8 @@ def main(argv=None):
         for fut in as_completed(futs):
             r = futs[fut]
             row, w, z, lc, sectors = fut.result()
+            if gep is not None:
+                row["g_lightcurve"] = r.source_id in g_of
             rows.append(row)
             wise_all.append(w)
             if z is not None:

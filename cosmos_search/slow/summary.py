@@ -1,7 +1,7 @@
 """A summary of every star in a light-curve table, in one compiled pass, and trends measured against neighbours.
 
     summ = star_summary(lc, table)            # one row per star of a light-curve table (epoch.SCHEMA)
-    ref = reference_table(summ)               # median trend of nearby stars of similar brightness
+    ref = reference_table(summ)               # median trend of nearby stars of similar brightness and colour
     summ = apply_reference(summ, ref)         # slope_z now against that median
 
 Why. The release-day run used to score only the stars an archive-side cut picked (0.1% per G bin by `select.slow_z`).
@@ -32,6 +32,15 @@ errors are about 2.7 times smaller, so the same offset would be 2.3 errors. `ref
 trend of all stars (a median is not moved by the few that really change) in each sky pixel and 0.5 mag range of G,
 at the finest HEALPix level where the cell holds at least REF_MIN_STARS stars, and `apply_reference` measures each
 star's trend against it, with the median's error added to the star's own.
+
+Colour. The trend left after the drift correction also depends on colour (found by the occurrence-limit work on
+2026-11-11: +0.06 to +0.22% a year for stars redder than BP-RP 2 and about +0.1% a year for stars bluer than 0.5,
+which is 0.3 to 0.5 errors on DR3). The drift table's narrow colour ranges remove it where quiet stars are common
+(`drift.FINE_EDGES`); they cannot where quiet stars are rare (4 of 501 stars at G 15-16 and BP-RP 2.2-2.6). So the
+reference has a second part: the median of what is left of each star's trend after its sky cell, over all the
+run's stars of the same magnitude (1 mag) and colour range. The two parts add. A colour range put into the sky
+cells instead would move a quarter of the stars to coarser pixels, and the sky part is worth keeping fine: on the
+Andromeda field the medians of level-6 pixels differ by 0.16 errors without it.
 """
 
 
@@ -324,7 +333,7 @@ def magnitudes(med_flux):
 
 def corrected_epochs(lc, table=None, cells=None, marks=True, own=True):
     """Good epochs of a light-curve table with `frac_corr` (drift-corrected with `table`; uncorrected without one),
-    ordered by star, band and time, and one row per star with g_mag, bp_rp, gbin and cbin.
+    ordered by star, band and time, and one row per star with g_mag, bp_rp and its cells (drift.CELL_COLUMNS).
 
     cells: G and colour bins from a catalogue (`drift.star_cells`), used for the stars it has; the rest, and every
     star when it is None, are placed by the magnitudes of their own median fluxes. marks, own: as
@@ -336,9 +345,9 @@ def corrected_epochs(lc, table=None, cells=None, marks=True, own=True):
     if cells is not None:
         given = cells.reindex(own.index)
         has = given["gbin"].notna().to_numpy()
-        for c in ("gbin", "cbin"):
+        for c in own.columns.intersection(given.columns):
             own[c] = np.where(has, given[c].to_numpy(), own[c].to_numpy()).astype(np.int8)
-    stars[["gbin", "cbin"]] = own.to_numpy()
+    stars[list(own.columns)] = own.to_numpy()
     order = np.lexsort((ep["t"].to_numpy(), ep["band"].to_numpy(), ep["source_id"].to_numpy()))
     if not np.all(order[1:] > order[:-1]):
         ep = ep.iloc[order].reset_index(drop=True)
@@ -456,12 +465,16 @@ def random_share(source_id, share):
     return h < np.uint64(int(max(share, 0.0) * 2.0 ** 64))
 
 
-# -- trends against neighbours of similar brightness -------------------------------------------------------------
+# -- trends against neighbours of similar brightness and colour ---------------------------------------------------
 
 REF_G_STEP = 0.5                         # width of the G ranges
 REF_G_RANGE = (5.0, 21.5)                # brighter and fainter stars join the end ranges
 REF_LEVELS = (6, 5, 4, 3, 2, 1, 0, -1)   # HEALPix levels tried, finest first; -1 is every star given
 REF_MIN_STARS = 50
+REF_COLOUR = -2                          # level of the colour rows: pix 0, grange a drift.G_EDGES bin, crange
+REF_ALL_COLOURS = -9                     # crange of the sky rows
+REF_NO_COLOUR = -1                       # crange of stars without a BP-RP
+REF_COLUMNS = ["level", "pix", "grange", "crange", "n", "med", "err"]
 
 
 def g_range(g_mag):
@@ -470,15 +483,45 @@ def g_range(g_mag):
     return np.floor((g - REF_G_RANGE[0]) / REF_G_STEP).astype(np.int16)
 
 
+def colour_range(bp_rp):
+    """Index of each star's colour range (`drift.FINE_EDGES`); REF_NO_COLOUR without a BP-RP."""
+    c = np.asarray(bp_rp, float)
+    return np.where(np.isfinite(c), np.digitize(np.nan_to_num(c, nan=0.0), drift.FINE_EDGES[1:-1]),
+                    REF_NO_COLOUR).astype(np.int16)
+
+
+def _g_bin(g_mag):
+    return np.digitize(np.nan_to_num(np.asarray(g_mag, float), nan=99.0), drift.G_EDGES[1:-1]).astype(np.int16)
+
+
 def _pixel(source_id, level):
     sid = np.asarray(source_id, np.int64)
     return drift.sky_pixel(sid, level) if level >= 0 else np.zeros(len(sid), np.int64)
 
 
-def reference_table(summ, col="slope", levels=REF_LEVELS, min_stars=REF_MIN_STARS):
-    """Median of `col` over the stars of each sky pixel and G range, for every level in `levels`, where at least
-    min_stars stars have a value: level, pix, grange, n, med, err. err is the median's standard error from the
-    cell's robust scatter, 1.2533 x 1.4826 MAD / sqrt(n).
+def _medians(keys, v, min_stars):
+    """n, med and err (1.2533 x 1.4826 MAD / sqrt(n)) of v per cell of the key columns, for cells of min_stars."""
+    d = pd.DataFrame({**keys, "v": v})
+    names = list(keys)
+    g = d.groupby(names, sort=False)["v"]
+    t = pd.DataFrame({"n": g.size(), "med": g.median(),
+                      "mad": (d["v"] - g.transform("median")).abs().groupby([d[k] for k in names], sort=False).median()})
+    t = t[t["n"] >= min_stars].reset_index()
+    t["err"] = 1.2533 * 1.4826 * t["mad"] / np.sqrt(t["n"])
+    return t.drop(columns="mad")
+
+
+def reference_table(summ, col="slope", levels=REF_LEVELS, min_stars=REF_MIN_STARS, colours=True):
+    """The reference for `col`, in two parts (REF_COLUMNS):
+
+    - sky rows: the median over the stars of each sky pixel and G range, for every level in `levels`, where at
+      least min_stars stars have a value. err is the median's standard error from the cell's robust scatter,
+      1.2533 x 1.4826 MAD / sqrt(n);
+    - colour rows (level REF_COLOUR), when colours is True and `summ` has bp_rp: the median of what the sky rows
+      leave (`residuals`), per 1 mag bin of G and colour range (`colour_rows`).
+
+    A whole-sky run builds the parts separately: sky rows region by region with colours=False, colour rows once
+    from `residual_sample` of every file.
 
     Build it from real stars only. A star with a fake change injected is then measured with `apply_reference`
     against the table its host helped make, and never enters it."""
@@ -488,47 +531,97 @@ def reference_table(summ, col="slope", levels=REF_LEVELS, min_stars=REF_MIN_STAR
     gr = g_range(summ["g_mag"].to_numpy(float)[ok])
     parts = []
     for level in levels:
-        d = pd.DataFrame({"pix": _pixel(sid, level), "grange": gr, "v": v})
-        g = d.groupby(["pix", "grange"], sort=False)["v"]
-        med = g.transform("median")
-        t = pd.DataFrame({"n": g.size(), "med": g.median(),
-                          "mad": (d["v"] - med).abs().groupby([d["pix"], d["grange"]], sort=False).median()})
-        t = t[t["n"] >= min_stars].reset_index()
-        t["err"] = 1.2533 * 1.4826 * t["mad"] / np.sqrt(t["n"])
-        t.insert(0, "level", level)
-        parts.append(t[["level", "pix", "grange", "n", "med", "err"]])
-    return pd.concat(parts, ignore_index=True)
+        t = _medians({"pix": _pixel(sid, level), "grange": gr}, v, min_stars)
+        parts.append(t.assign(level=level, crange=REF_ALL_COLOURS))
+    sky = pd.concat(parts, ignore_index=True)[REF_COLUMNS]
+    if not (colours and "bp_rp" in summ):
+        return sky
+    return pd.concat([sky, colour_rows(residuals(summ, sky, col), min_stars)], ignore_index=True)
 
 
-def lookup(ref, source_id, g_mag):
-    """Each star's reference from `reference_table`: the finest level with a cell for it. Returns ref (median),
-    ref_err, n_ref and ref_level (NaN, NaN, 0 and -9 where no level has one)."""
+def residuals(summ, sky, col="slope"):
+    """What the sky rows leave of each star's `col`: source_id, g_mag, bp_rp, resid, for the stars with a sky
+    cell."""
+    v = summ[col].to_numpy(float)
+    med, _, cnt, _ = lookup(sky, summ["source_id"].to_numpy(), summ["g_mag"].to_numpy())
+    ok = np.isfinite(v) & (cnt > 0)
+    return pd.DataFrame({"source_id": summ["source_id"].to_numpy(np.int64)[ok],
+                         "g_mag": summ["g_mag"].to_numpy(float)[ok], "bp_rp": summ["bp_rp"].to_numpy(float)[ok],
+                         "resid": (v - med)[ok]})
+
+
+def colour_rows(resid, min_stars=REF_MIN_STARS):
+    """The reference's colour rows from `residuals` (or `residual_sample`): the median residual per 1 mag bin of
+    G (`drift.G_EDGES`) and colour range, where at least min_stars stars have one."""
+    t = _medians({"grange": _g_bin(resid["g_mag"]), "crange": colour_range(resid["bp_rp"])},
+                 resid["resid"].to_numpy(float), min_stars)
+    return t.assign(level=REF_COLOUR, pix=0)[REF_COLUMNS]
+
+
+def residual_sample(summ, per_cell=2000, col="slope", levels=REF_LEVELS, coarse=None):
+    """Up to per_cell stars' residuals (`residuals`) per 1 mag bin of G and colour range, in a repeatable
+    pseudo-random order, against the sky rows of the frame's own stars at `levels` and the rows of `coarse`. A
+    whole-sky run takes one from every file, with its coarse sky rows, and builds the colour rows from them all
+    (`colour_rows`): no one region holds enough stars of the rarer colours, and no one file enough bright stars
+    for sky cells of its own."""
+    if not len(summ):
+        return pd.DataFrame(columns=["source_id", "g_mag", "bp_rp", "resid"])
+    sky = reference_table(summ, col, levels=levels, colours=False)
+    if coarse is not None:
+        sky = pd.concat([sky, coarse], ignore_index=True)
+    return bound_sample(residuals(summ, sky, col), per_cell)
+
+
+def bound_sample(resid, per_cell):
+    """The first per_cell rows of each (G bin, colour range) cell of a residual frame, in hash order."""
+    r = resid.iloc[np.argsort(_hash(resid["source_id"].to_numpy()), kind="stable")]
+    first = r.groupby([_g_bin(r["g_mag"]), colour_range(r["bp_rp"])]).cumcount() < per_cell
+    return r[first.to_numpy()].reset_index(drop=True)
+
+
+def lookup(ref, source_id, g_mag, bp_rp=None):
+    """Each star's reference from `reference_table`: the sky row of the finest level with a cell for it, plus,
+    for a star with one, the colour row of its G bin and colour range when the table has it and bp_rp is given
+    (errors added in quadrature). Returns ref (median), ref_err, n_ref and ref_level of the sky row (NaN, NaN, 0
+    and -9 where no level has one). A table made before 2026-11-11 has sky rows only."""
     sid = np.asarray(source_id, np.int64)
     gr = g_range(g_mag)
     n = len(sid)
     med, err = np.full(n, np.nan), np.full(n, np.nan)
     cnt, lev = np.zeros(n, np.int64), np.full(n, -9, np.int16)
-    for level in sorted(ref["level"].unique(), reverse=True):
+    sky = ref[ref["level"] > REF_COLOUR]
+    for level in sorted(sky["level"].unique(), reverse=True):
         todo = np.flatnonzero(cnt == 0)
         if not len(todo):
             break
-        r = ref[ref["level"] == level].set_index(["pix", "grange"])
+        r = sky[sky["level"] == level].set_index(["pix", "grange"])
         hit = r.index.get_indexer(pd.MultiIndex.from_arrays([_pixel(sid[todo], level), gr[todo]]))
         ok = hit >= 0
         med[todo[ok]], err[todo[ok]] = r["med"].to_numpy()[hit[ok]], r["err"].to_numpy()[hit[ok]]
         cnt[todo[ok]], lev[todo[ok]] = r["n"].to_numpy()[hit[ok]], level
+    col = ref[ref["level"] == REF_COLOUR]
+    if bp_rp is not None and len(col):
+        r = col.set_index(["grange", "crange"])
+        hit = r.index.get_indexer(pd.MultiIndex.from_arrays([_g_bin(g_mag), colour_range(bp_rp)]))
+        ok = (hit >= 0) & (cnt > 0)
+        med[ok] += r["med"].to_numpy()[hit[ok]]
+        err[ok] = np.hypot(err[ok], r["err"].to_numpy()[hit[ok]])
     return med, err, cnt, lev
 
 
-def apply_reference(summ, ref, g_mag=None):
+def apply_reference(summ, ref, g_mag=None, bp_rp=None):
     """`summ` with trends measured against `ref`: slope_ref, slope_ref_err, n_ref, ref_level, the unreferenced
     significance as slope_z_raw, and slope_z = (slope - slope_ref) / sqrt(slope_err^2 + slope_ref_err^2). Stars
-    without a reference keep slope_z_raw as slope_z.
+    without a reference keep slope_z_raw as slope_z. Each star is placed by its G and, when `summ` has bp_rp,
+    its colour.
 
-    g_mag: magnitudes to place the stars by instead of their own (a fake's host's, so the fake is measured
-    against exactly its host's cell)."""
+    g_mag, bp_rp: magnitudes and colours to place the stars by instead of their own (a fake's host's, so the
+    fake is measured against exactly its host's cells)."""
     out = summ.copy()
-    med, err, cnt, lev = lookup(ref, out["source_id"].to_numpy(), out["g_mag"].to_numpy() if g_mag is None else g_mag)
+    if bp_rp is None and "bp_rp" in out:
+        bp_rp = out["bp_rp"].to_numpy()
+    med, err, cnt, lev = lookup(ref, out["source_id"].to_numpy(), out["g_mag"].to_numpy() if g_mag is None else g_mag,
+                                bp_rp)
     raw = out["slope_z_raw"].to_numpy(float) if "slope_z_raw" in out else out["slope_z"].to_numpy(float)
     slope = out["slope"].to_numpy(float)
     with np.errstate(invalid="ignore", divide="ignore"):

@@ -407,15 +407,24 @@ def _hist_median(h):
     return float(np.interp(c[-1] / 2, c, Z_EDGES[1:])) if c[-1] else float("nan")
 
 
-def coarse_reference(sfiles, level, per_cell=200):
-    """The reference for cells too sparse at `level` and finer: medians in coarser pixels, from a bounded sample
-    of every (pixel at `level`, G range) cell of the run's reference rows."""
+def coarse_reference(sfiles, level, per_cell=200, per_colour=2000, colour_max=200_000):
+    """The parts of the reference no one region can give: the sky rows for cells too sparse at `level` and finer
+    (medians in coarser pixels, from a bounded sample of every (pixel at `level`, G range) cell of the run's
+    reference rows), and the colour rows (`summary.colour_rows`), from a bounded sample of every file's residuals
+    against its own stars' sky cells at `level` and finer and the coarse sky rows (`summary.residual_sample`)."""
+    cols = ["source_id", "g_mag", "bp_rp", "slope", "ref"]
     parts = []
     for f in sfiles:
-        t = pd.read_parquet(f, columns=["source_id", "g_mag", "slope", "ref"])
+        t = pd.read_parquet(f, columns=cols)
         parts.append(summary.cell_sample(t[t["ref"]], level, per_cell))
     sample = summary.cell_sample(pd.concat(parts, ignore_index=True), level, per_cell)
-    return summary.reference_table(sample, levels=tuple(x for x in summary.REF_LEVELS if x < level))
+    sky = summary.reference_table(sample, levels=tuple(x for x in summary.REF_LEVELS if x < level), colours=False)
+    fine, resid = tuple(x for x in summary.REF_LEVELS if x >= level), []
+    for f in sfiles:
+        t = pd.read_parquet(f, columns=cols)
+        resid.append(summary.residual_sample(t[t["ref"]], per_colour, levels=fine, coarse=sky))
+    colour = summary.colour_rows(summary.bound_sample(pd.concat(resid, ignore_index=True), colour_max))
+    return pd.concat([sky, colour], ignore_index=True)
 
 
 def scored_counts(run):
@@ -452,6 +461,8 @@ def flag(a):
     small, refs, lists = [], [coarse], {"fading": [], "early": [], "rising": []}
     summ_total, n = {}, 0
     hist = {k: np.zeros((len(drift.G_EDGES) - 1, len(Z_EDGES) - 1), np.int64) for k in ("raw", "referenced")}
+    # the same per colour range (row 0: stars without a colour)
+    hist_c = {k: np.zeros((len(drift.FINE_EDGES), len(Z_EDGES) - 1), np.int64) for k in ("raw", "referenced")}
     for k in range(12 * 4 ** a.chunk_level):
         sm = _read(sfiles, sranges, k * width, (k + 1) * width, SUMMARY_COLUMNS)
         if not len(sm):
@@ -461,13 +472,16 @@ def flag(a):
             continue
         n += len(sm)
         st = _read(tfiles, tranges, k * width, (k + 1) * width, ("source_id",) + search.STATS_ONLY)
-        fine = summary.reference_table(sm[sm["ref"]], levels=fine_levels)
+        fine = summary.reference_table(sm[sm["ref"]], levels=fine_levels, colours=False)
         refs.append(fine)
         m = summary.apply_reference(search.merge(sm, st if len(st) else None), pd.concat([fine, coarse]))
         for name, col in (("raw", "slope_z_raw"), ("referenced", "slope_z")):
             z, gb = m.loc[m["ref"], col].to_numpy(), m.loc[m["ref"], "gbin"].to_numpy()
             for b in np.unique(gb):
                 hist[name][b] += np.histogram(np.clip(z[(gb == b) & np.isfinite(z)], -11.99, 11.99), Z_EDGES)[0]
+            cb = summary.colour_range(m.loc[m["ref"], "bp_rp"].to_numpy()) + 1
+            for b in np.unique(cb):
+                hist_c[name][b] += np.histogram(np.clip(z[(cb == b) & np.isfinite(z)], -11.99, 11.99), Z_EDGES)[0]
         f = search.flag(m, a.rule)
         f["phot_g_mean_mag"], f["bp_rp"] = m["g_mag"].to_numpy(), m["bp_rp"].to_numpy()
         if aux is not None:  # catalogue magnitudes where the catalogue has the star
@@ -500,8 +514,15 @@ def flag(a):
                                                   "median_trend_z_against_neighbours":
                                                       round(_hist_median(hist["referenced"][b]), 3)}
                for b in range(len(edges) - 1) if hist["raw"][b].sum()}
+    ce = drift.FINE_EDGES
+    names = ["no colour", f"below {ce[1]:g}", *(f"{ce[i]:g}-{ce[i + 1]:g}" for i in range(1, len(ce) - 2)),
+             f"above {ce[-2]:g}"]
+    by_colour = {names[b]: {"stars": int(hist_c["raw"][b].sum()),
+                            "median_trend_z": round(_hist_median(hist_c["raw"][b]), 3),
+                            "median_trend_z_against_neighbours": round(_hist_median(hist_c["referenced"][b]), 3)}
+                 for b in range(len(names)) if hist_c["raw"][b].sum()}
     summ = {"rule": str(a.rule), "stars": int(stars), "with_scores": int(sum(scored.values())),
-            "by_magnitude": summ_total, "trend_offset_by_G": offsets}
+            "by_magnitude": summ_total, "trend_offset_by_G": offsets, "trend_offset_by_BP_RP": by_colour}
     (out / "summary.json").write_text(json.dumps(summ, indent=1))
     print(json.dumps(summ, indent=1))
 
