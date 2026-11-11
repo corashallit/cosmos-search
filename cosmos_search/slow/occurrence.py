@@ -3,7 +3,8 @@
 The one result the search gives with or without a find: of the Sun-like dwarfs searched, at most a fraction f is
 fading steadily at a given rate. It needs three measured things and no reading of light curves:
 
-- the stars searched: FGK dwarfs by parallax, absolute magnitude and colour (`fgk_dwarf`) with a measured trend;
+- the stars searched: FGK dwarfs by parallax, absolute magnitude and colour (`fgk_dwarf`) with a measured trend,
+  less those whose light is mixed with a neighbour's (`flux_excess`, `unblended`);
 - how many of them fade, and how many brighten, beyond a given trend significance (`cell_counts`);
 - recall: steady fades injected into real light curves of the same stars and scored like any star
   (`cosmos_search.slow.recall`) give the share of faders at each rate that would pass (`efficiency`).
@@ -24,11 +25,11 @@ Beside the limit, for each rate, what subtracting the chance fades would give (`
 own variability and the instrument sent its trend either way equally often, the brightening count m would
 estimate the chance fades among the n (statistics.md §2, mirror null): n Poisson with mean b + f x detectable, m
 Poisson with mean b, and `single_limit` gives the limit on f. It is stronger for slow fades, and it is only as
-good as that symmetry. On DR3 brightening stars outnumber fading ones 89 to 61 beyond 6 errors and 28 to 12
-beyond 8, and fading ones lead 1,664 to 1,477 between 3 and 5 (docs/arms/occurrence.md), and in simulated counts
-with chance fades at 0.6 of the chance brightenings this number fell below the true share in a fifth to all of
-the samples (2026-11-10). So it is reported as what
-symmetry would buy and is never the limit. With it:
+good as that symmetry. On DR3 brightening stars outnumber fading ones 80 to 55 beyond 6 errors and 26 to 12
+beyond 8; between 3 and 5 errors fading ones led 1,664 to 1,477 until two instrument effects were taken out
+(docs/arms/occurrence.md). In simulated counts with chance fades at 0.6 of the chance brightenings this number
+fell below the true share in a fifth to all of the samples (2026-11-10). So it is reported as what symmetry
+would buy and is never the limit. With it:
 - its region is chosen on fading + brightening together (`choose_mirror_region`), never on which way the stars
   went, so with no real fades and perfect symmetry the split of the chosen region is a fair coin;
 - `fade_excess_p`: the chance of at least n fading stars out of n + m for that coin (exact binomial). A small
@@ -40,13 +41,18 @@ symmetry would buy and is never the limit. With it:
 Trend significance is each star's G trend over its error, measured against stars like it. On DR3 the drift
 correction leaves +0.08% a year at G 12-13 (big-picture review, 2026-11-10), which would move every star there
 towards brightening and hide fades. Two steps take that out. The search's own neighbour reference
-(`summary.apply_reference`: the median trend of all stars near a star on the sky and in brightness) removes what
-depends on brightness and place. What is left depends on colour: measured on DR3 on 2026-11-11, stars redder
-than BP-RP 2 brighten by 0.06 to 0.22% a year against it and the FGK dwarfs at G 18-19 sit 0.29 errors low, and
-an offset like that sends the region choice to where few stars brighten and many fade. So the searched dwarfs
-are then centred on their own median at each brightness (`offset_hist`, `offsets`, `centre`), and injected
-stars get the same two steps. A per-star table without a neighbour reference is measured against the running
-median trend of the searched stars nearest in G (`brightness_reference`), which is both steps in one.
+(`summary.apply_reference`: the median trend of all stars near a star on the sky and in brightness, and of
+stars of its colour) removes what depends on brightness, place and colour. The reference is made from all
+kinds of star, so the searched dwarfs are then centred on their own median (`offset_hist`, `offsets`, `centre`),
+among dwarfs of the same brightness and the same flux excess: an offset between the dwarfs and the reference
+sends the region choice to where few stars brighten and many fade. Injected stars get the same two steps. A
+per-star table without a neighbour reference is measured against the running median trend of the searched stars
+nearest in G (`brightness_reference`).
+
+The flux excess is (BP + RP) / G mean flux less the dwarfs' median at that colour: light from a second source
+within about 2 arcsec. Measured on DR3 on 2026-11-11, the G trend falls with it (0.1% a year at 0.05-0.1, 0.7%
+above 0.5) while RP holds, so stars beyond `Config.max_flux_excess` are not searched and the rest are centred by
+it. A fade shared by the three bands leaves the ratio alone, so neither step can hide one.
 
 `reviewed_limit` is the limit after the list has been read: stars in a region that no check and no reviewer
 could explain, over the stars a fade would have put there and the reviewers would have kept.
@@ -69,7 +75,7 @@ CONFIG_DIR = Path(__file__).resolve().parents[2] / "prereg" / "occurrence"
 class Config:
     """Everything that defines the limit. The frozen record for DR4 is prereg/occurrence/<name>.json."""
 
-    name: str = "steady-fades-v1"
+    name: str = "steady-fades-v2"
     # Fades injected: fraction of the star's flux at its first visit lost per year, the same in G, BP and RP.
     rates: tuple = (0.001, 0.002, 0.003, 0.005, 0.01, 0.02, 0.03, 0.05, 0.10)
     # Trend significance a region starts at (fading: -z, brightening: +z).
@@ -87,6 +93,9 @@ class Config:
     ms_slope: float = 3.2
     ms_lo: float = 0.5
     ms_hi: float = 5.5
+    # Stars whose light is mixed with another source's are not searched: (BP + RP) / G mean flux further than
+    # this from the dwarfs' own median at that colour (`flux_excess`). None: every FGK dwarf (steady-fades-v1).
+    max_flux_excess: float | None = 0.05
     # Stars nearest in G whose median trend is each star's reference.
     reference_window: int = 401
     # HEALPix level of the sky pixels for `sky_dispersion` (6: 0.84 square degrees, about Gaia's field of view).
@@ -104,12 +113,13 @@ class Config:
         return json.dumps(asdict(self), indent=1)
 
     @classmethod
-    def load(cls, name_or_path="steady-fades-v1"):
-        """A frozen config: a .json path, or a name in prereg/occurrence/."""
+    def load(cls, name_or_path="steady-fades-v2"):
+        """A frozen config: a .json path, or a name in prereg/occurrence/. A setting the file was frozen
+        without is off, so an older file gives what it gave."""
         p = Path(name_or_path)
         if p.suffix != ".json":
             p = CONFIG_DIR / f"{name_or_path}.json"
-        d = json.loads(p.read_text())
+        d = {"max_flux_excess": None, **json.loads(p.read_text())}
         return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in d.items()})
 
 
@@ -135,6 +145,100 @@ def fgk_dwarf(aux, cfg=Config()):
 def sky_pixel(source_id, level):
     """HEALPix (nested) pixel at `level` from Gaia source_ids (level 12 is source_id // 2^35)."""
     return (np.asarray(source_id, dtype=np.int64) // 2 ** 35) // 4 ** (12 - level)
+
+
+# -- stars whose light is mixed with a neighbour's ----------------------------------------------------------------
+#
+# G is measured by fitting the image inside a window about 0.7 arcsec long; BP and RP are sums over 3.5 arcsec. A
+# second source within a couple of arcseconds adds more to BP + RP than to G, so the ratio (BP + RP) / G sits above
+# that of single stars of the same colour. On DR3 (2026-11-11, docs/arms/occurrence.md) the G trend of such stars
+# falls with the excess, by 0.1% a year at an excess of 0.05-0.1 and 0.7% a year above 0.5, while RP holds: 3% of
+# the FGK dwarfs, and they carried the whole excess of fading stars near the threshold. The excess is measured
+# against the dwarfs' own median ratio at each colour, because the ratio's zero depends on the release's passbands.
+
+RATIO_COLUMNS = ("flux_ratio", "phot_bp_rp_excess_factor")     # the ratio as our catalogue step, or DR3, names it
+RATIO_EDGES = np.linspace(0.9, 2.1, 2401)                      # (BP + RP) / G mean flux, in steps of 0.0005
+LOCUS_STEP = 0.1                                               # BP-RP step of the median ratio
+LOCUS_MIN_STARS = 200
+EXCESS_EDGES = (-0.05, -0.02, -0.006, 0.006, 0.02, 0.05, 0.1, 0.2, 0.5)   # classes of the trend-by-excess table
+
+
+def flux_ratio(aux):
+    """(BP + RP) / G mean flux of gaia_source rows, from the first column there is: `flux_ratio` (what
+    `slow_occurrence.py aux` asks the archive for), DR3's `phot_bp_rp_excess_factor` (the same number), or the
+    three mean fluxes. None when the rows carry none of them."""
+    for c in RATIO_COLUMNS:
+        if c in aux:
+            return aux[c].to_numpy(float)
+    if all(f"phot_{b}_mean_flux" in aux for b in ("g", "bp", "rp")):
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return (aux["phot_bp_mean_flux"].to_numpy(float) + aux["phot_rp_mean_flux"].to_numpy(float)) \
+                / aux["phot_g_mean_flux"].to_numpy(float)
+    return None
+
+
+def locus_colours(cfg=Config()):
+    """Edges of the colour steps of the median ratio, over the FGK dwarfs' colour range."""
+    n = max(1, int(round((cfg.colour_hi - cfg.colour_lo) / LOCUS_STEP)))
+    return np.linspace(cfg.colour_lo, cfg.colour_hi, n + 1)
+
+
+def locus_hist(aux, cfg=Config()):
+    """Counts of the flux ratio per colour step among the FGK dwarfs of catalogue rows. Histograms of batches
+    add, so the whole sky's catalogue is read one slice at a time."""
+    edges = locus_colours(cfg)
+    h = np.zeros((len(edges) - 1, len(RATIO_EDGES) - 1), np.int64)
+    ratio = flux_ratio(aux)
+    if ratio is None or not len(aux):
+        return h
+    ok = fgk_dwarf(aux, cfg) & np.isfinite(ratio)
+    col = aux["bp_rp"].to_numpy(float)[ok]
+    k = np.clip(np.digitize(ratio[ok], RATIO_EDGES) - 1, 0, len(RATIO_EDGES) - 2)
+    np.add.at(h, (np.clip(np.digitize(col, edges) - 1, 0, len(edges) - 2), k), 1)
+    return h
+
+
+def locus(hist, min_stars=LOCUS_MIN_STARS):
+    """The dwarfs' median flux ratio per colour step. A step with fewer than min_stars stars is pooled with its
+    neighbours; with fewer than that in all, every step takes the median of what there is (NaN of nothing)."""
+    return _row_medians(hist, RATIO_EDGES, min_stars, np.nan, pool_all=True)
+
+
+def flux_excess(aux, median_ratio, cfg=Config()):
+    """Each row's flux ratio less the dwarfs' median at its colour (`locus`, joined linearly between the middles
+    of its colour steps). NaN without a ratio or a colour."""
+    ratio = flux_ratio(aux)
+    if ratio is None:
+        raise ValueError("no flux ratio in these catalogue rows")
+    edges = locus_colours(cfg)
+    return ratio - np.interp(aux["bp_rp"].to_numpy(float), (edges[:-1] + edges[1:]) / 2,
+                             np.asarray(median_ratio, float))
+
+
+def unblended(excess, cfg=Config()):
+    """Stars whose flux excess is inside the config's cut; every star when the config has none."""
+    excess = np.asarray(excess, float)
+    if cfg.max_flux_excess is None:
+        return np.ones(len(excess), bool)
+    with np.errstate(invalid="ignore"):
+        return np.abs(excess) < cfg.max_flux_excess
+
+
+def excess_class(excess):
+    """Index of each star's class of flux excess (EXCESS_EDGES; stars without one join the last class + 1)."""
+    excess = np.asarray(excess, float)
+    return np.where(np.isfinite(excess), np.digitize(excess, EXCESS_EDGES), len(EXCESS_EDGES) + 1)
+
+
+def excess_table(hist, cfg=Config()):
+    """Per class of flux excess: the stars, whether the class is searched, and their median trend against the
+    neighbour reference (`offset_hist` with `excess_class` as the index)."""
+    e = [-np.inf, *EXCESS_EDGES, np.inf]
+    med = _row_medians(hist, OFFSET_EDGES, 1, np.nan, pool=False)
+    cut = np.inf if cfg.max_flux_excess is None else cfg.max_flux_excess
+    return pd.DataFrame([{"excess_lo": e[i], "excess_hi": e[i + 1], "stars": int(hist[i].sum()),
+                          "searched": bool(max(abs(e[i]), abs(e[i + 1])) <= cut + 1e-12),
+                          "median_trend_per_year": med[i]} for i in range(len(e) - 1)])
 
 
 def stratum(g, cfg=Config()):
@@ -190,6 +294,11 @@ def trend_z(table, g, ref=None):
 OFFSET_G = np.arange(9.0, 19.5 + 1e-9, 0.5)          # G ranges; brighter and fainter stars join the end ranges
 OFFSET_EDGES = np.linspace(-0.01, 0.01, 4001)        # trend against the neighbour reference, per year
 OFFSET_MIN_STARS = 400                               # a median from fewer stars is noisier than what it removes
+# Steps of flux excess inside the cut, each with its own median per G range: the G trend falls with the excess
+# all the way through zero (by 1.7% a year per unit of excess on DR3 at G < 17), so stars are centred among
+# stars of their brightness and their excess. A real fade shared by G, BP and RP leaves a star's excess alone.
+EXCESS_STEPS = (-0.03, -0.02, -0.012, -0.006, -0.002, 0.002, 0.006, 0.012, 0.02, 0.03)
+STEP_REACH = 2                                       # a sparse step borrows from G ranges up to 1 mag away
 
 
 def offset_range(g):
@@ -198,39 +307,90 @@ def offset_range(g):
     return np.clip(np.digitize(g, OFFSET_G) - 1, 0, len(OFFSET_G) - 2)
 
 
-def offset_hist(table):
-    """Counts of the searched stars' trends against their neighbour reference (slope - slope_ref), per G range.
-    Histograms of batches add, so a whole-sky table is read one file at a time."""
+def offset_index(table, rows=None):
+    """Index of each star's cell for the offset: its G range, and for a table with `flux_excess` its step of
+    flux excess as well (the middle step for a star without one). `rows`: the length of the offsets in use; one
+    per G range means G alone."""
+    g = offset_range(table["g_mag"].to_numpy(float))
+    n = len(OFFSET_G) - 1
+    if rows == n or (rows is None and "flux_excess" not in table):
+        return g
+    if "flux_excess" not in table:
+        raise KeyError("these offsets are by flux excess, and the table has no flux_excess column")
+    return g + n * np.digitize(np.nan_to_num(table["flux_excess"].to_numpy(float)), EXCESS_STEPS)
+
+
+def offset_hist(table, index=None, rows=None):
+    """Counts of the searched stars' trends against their neighbour reference (slope - slope_ref), per cell of
+    `offset_index` (or per `index`, a row number for each star, of `rows` rows). Histograms of batches add, so a
+    whole-sky table is read one file at a time."""
     d = table["slope"].to_numpy(float) - np.nan_to_num(table["slope_ref"].to_numpy(float))
     ok = np.isfinite(d)
-    h = np.zeros((len(OFFSET_G) - 1, len(OFFSET_EDGES) - 1), np.int64)
+    if index is None:
+        index = offset_index(table)
+        rows = (len(OFFSET_G) - 1) * ((len(EXCESS_STEPS) + 1) if "flux_excess" in table else 1)
+    h = np.zeros((rows, len(OFFSET_EDGES) - 1), np.int64)
     k = np.clip(np.digitize(d[ok], OFFSET_EDGES) - 1, 0, len(OFFSET_EDGES) - 2)
-    np.add.at(h, (offset_range(table["g_mag"].to_numpy(float)[ok]), k), 1)
+    np.add.at(h, (np.asarray(index)[ok], k), 1)
     return h
 
 
-def offsets(hist, min_stars=OFFSET_MIN_STARS):
-    """Median of each G range's histogram (to within a bin, 0.0005% a year). A range with fewer than min_stars
-    stars is pooled with its neighbours until it has them; 0 when the whole table has not."""
-    out = np.zeros(len(hist))
-    mid = (OFFSET_EDGES[:-1] + OFFSET_EDGES[1:]) / 2
+def _row_medians(hist, edges, min_stars, empty, pool=True, pool_all=False, reach=None):
+    """Median of each row of a histogram over `edges` (to within a bin). With `pool`, a row with fewer than
+    min_stars counts is pooled with its neighbours (up to `reach` rows away) until it has them. A row that
+    never gets them is `empty`, or with `pool_all` the median of the whole histogram."""
+    out = np.full(len(hist), float(empty))
+    mid, step = (edges[:-1] + edges[1:]) / 2, edges[1] - edges[0]
+
+    def median(h):
+        c = np.cumsum(h)
+        j = int(np.searchsorted(c, c[-1] / 2))
+        return mid[j] + ((c[-1] / 2 - (c[j - 1] if j else 0)) / h[j] - 0.5) * step
+
     for i in range(len(hist)):
-        for k in range(len(hist)):
+        for k in range((len(hist) if reach is None else reach + 1) if pool else 1):
             h = hist[max(0, i - k): i + k + 1].sum(axis=0)
             if h.sum() >= min_stars:
-                c = np.cumsum(h)
-                j = int(np.searchsorted(c, c[-1] / 2))
-                before = c[j - 1] if j else 0
-                out[i] = mid[j] + ((c[-1] / 2 - before) / h[j] - 0.5) * (OFFSET_EDGES[1] - OFFSET_EDGES[0])
+                out[i] = median(h)
                 break
+    if pool_all and hist.sum() and not np.isfinite(out).all():
+        out[~np.isfinite(out)] = median(hist.sum(axis=0))
     return out
+
+
+def offsets(hist, min_stars=OFFSET_MIN_STARS):
+    """Median of each cell's histogram (to within a bin, 0.0005% a year), in the order of `offset_index`. A G
+    range with fewer than min_stars stars is pooled with its neighbours until it has them; 0 when the whole
+    table has not. With steps of flux excess, each step's cell takes its own median, pooled over G ranges up to
+    1 mag away when sparse, and the median of every step at that G when still short."""
+    n = len(OFFSET_G) - 1
+    steps = hist.reshape(-1, n, hist.shape[1])
+    base = _row_medians(steps.sum(axis=0), OFFSET_EDGES, min_stars, 0.0)
+    if len(steps) == 1:
+        return base
+    own = [_row_medians(h, OFFSET_EDGES, min_stars, np.nan, reach=STEP_REACH) for h in steps]
+    return np.concatenate([np.where(np.isfinite(m), m, base) for m in own])
+
+
+def offset_table(offset, stars):
+    """The offsets and the stars behind each cell as rows (G range, step of flux excess when there are steps)."""
+    n = len(OFFSET_G) - 1
+    e = [-np.inf, *EXCESS_STEPS, np.inf] if len(offset) > n else [None, None]
+    rows = []
+    for k in range(len(offset)):
+        row = {"g_lo": OFFSET_G[k % n], "g_hi": OFFSET_G[k % n + 1]}
+        if len(offset) > n:
+            row.update(excess_lo=e[k // n], excess_hi=e[k // n + 1])
+        rows.append({**row, "stars": int(stars[k]), "median_trend_per_year": float(offset[k])})
+    return pd.DataFrame(rows)
 
 
 def centre(table, offset):
     """`table` (searched or injected stars measured against the neighbour reference) with the searched stars'
-    own median taken out: slope_ref moved by the offset of each star's G range, slope_z recomputed."""
+    own median taken out: slope_ref moved by the offset of each star's cell (`offset_index`: its G range, and
+    its step of flux excess when the offsets have steps), slope_z recomputed."""
     out = table.copy()
-    ref = np.nan_to_num(out["slope_ref"].to_numpy(float)) + np.asarray(offset)[offset_range(out["g_mag"])]
+    ref = np.nan_to_num(out["slope_ref"].to_numpy(float)) + np.asarray(offset)[offset_index(out, len(offset))]
     ref_err = np.nan_to_num(out["slope_ref_err"].to_numpy(float)) if "slope_ref_err" in out else 0.0
     out["slope_ref"] = ref
     with np.errstate(invalid="ignore", divide="ignore"):
