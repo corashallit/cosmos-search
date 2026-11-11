@@ -66,7 +66,10 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 ## Known answers (S1)
 
 `python -m cosmos_search.slow known --out known.parquet` (`slow/known.py`). On 2026-10-23: 985 stars, 967 matched
-to a Gaia DR3 source within 2″ (median separation 0.07″), 573 of them with DR3 light curves.
+to a Gaia DR3 source within 2″ (median separation 0.07″), 573 of them with DR3 light curves. With `--mirror aip`
+the positions are matched on the AIP copy of `gaiadr3.gaia_source`: on 2026-11-10 ESA's archive refused
+synchronous queries (HTTP 503) for hours, and the mirror gave the same counts (967 matched, 573 with DR3 light
+curves) in 19 minutes.
 
 | Kind | Stars | Matched | DR3 light curve |
 |---|---|---|---|
@@ -771,10 +774,12 @@ field.
 1.5 a second, and the order of fetching decides what can be found. `slow_fallback.py list` writes one order:
 the 2,849 stars DR3 showed still fading at its end, each with a prediction written before DR4 (the DR3 trend
 continued to 2020-01-20, the change expected since DR3's last visit, and the significance expected over DR4's
-span; `fallback.outcome` then calls each continued, slowed, stopped or reversed), then the known answers, then
+span; `fallback.outcome` then calls each continued, slowed, stopped or reversed), then the known answers (942
+stars once the 25 that are both an alert and a VSX star are counted once; none is on the watch-list), then
 the stars `slow_fallback.py abbe` selects on release day: brighter than G 16 with a G Abbe value in the lowest 1%
 of their magnitude bin in `all_source_photometry`. In the injection test the Abbe value alone at a 1% share picks
 59% of 1% a year fades and 98% of 3% a year fades on quiet hosts, where `slow_z` at 0.1% picks none.
+The first two lists together are 3,791 stars: one to four hours of DataLink at 1 to 0.3 light curves a second.
 
 ## Release day, end to end
 
@@ -1055,6 +1060,9 @@ the kind of object this search is for. Measuring duration from the folded light 
 runs of epochs, would tell them apart; it would need its own test. Data: `/mnt/project-files/slow-changes/eb-test/`.
 
 ## Log
+
+- **2026-11-11.** The known answers are in the DataLink fallback list (3,791 stars with the watch-list). ESA's
+  archive refused the position queries, so `slow known` gained `--mirror aip`.
 
 - **2026-11-10.** Every star scored ("Every star scored" above). The archive-side selection picked none of the
   injected steady fades up to 3% a year; the run now summarises every star of the bulk files in one compiled pass
