@@ -21,7 +21,6 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from cosmos_search.slow import drift, fallback, select, summary
@@ -34,7 +33,7 @@ def list_cmd(a):
     out = fallback.ordered(watch, known, abbe)
     out.to_parquet(a.out, index=False)
     counts = out["list"].value_counts().to_dict()
-    print(json.dumps({"stars": int(len(out)), "by_list": counts,
+    print(json.dumps({"stars": len(out), "by_list": counts,
                       "days_at_1_per_second": round(len(out) / 86400, 2)}, indent=1))
     if watch is not None:
         w = out[out["list"] == "watch"]
@@ -61,7 +60,7 @@ def abbe_cmd(a):
     sel = sel.assign(gbin=drift.star_cells(sel)["gbin"].to_numpy())
     sel = sel.merge(cuts, on="gbin", how="left")
     sel.to_parquet(out / "abbe.parquet", index=False)
-    (out / "abbe.json").write_text(json.dumps({"selected": int(len(sel)), "failed": failed, "share": a.share,
+    (out / "abbe.json").write_text(json.dumps({"selected": len(sel), "failed": failed, "share": a.share,
                                                "g_max": a.g_max, "seconds": round(time.time() - t0, 1)}, indent=1))
     print(f"{len(sel)} stars selected, {len(failed)} slices failed")
 
@@ -81,7 +80,7 @@ def check_cmd(a):
     m["outcome"] = fallback.outcome(m["pred_slope"], m["dr4_slope"], m["dr4_slope_err"])
     m.to_parquet(a.out, index=False)
     got = m[m["outcome"] != ""]
-    print(json.dumps({"watch_list": int(len(w)), "with_dr4_trend": int(len(got)),
+    print(json.dumps({"watch_list": len(w), "with_dr4_trend": len(got),
                       "outcomes": got["outcome"].value_counts().to_dict()}, indent=1))
 
 

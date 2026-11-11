@@ -30,9 +30,8 @@ except ImportError:  # pragma: no cover - without numba the loop runs uncompiled
         return (lambda f: f) if not (args and callable(args[0])) else args[0]
 
 # Our own test for bad epochs (`own_good`): DR4's bulk light curves carry no rejection marks.
-import os  # EXPERIMENT
-OWN_ERR_RATIO = float(os.environ.get("X_ERR", 2.0))   # an epoch's error against the star's median error in that band
-OWN_SPIKE = float(os.environ.get("X_SPIKE", 5.0))       # an isolated epoch's distance from both neighbours, in epoch-to-epoch scatters
+OWN_ERR_RATIO = 2.0   # an epoch's error against the star's median error in that band
+OWN_MAX_DROP = 0.2    # a star and band losing more than this share of epochs to the test keeps them all
 TBIN_DAYS = 15.0
 G_EDGES = (0.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 23.0)
 COLOUR_EDGES = (-9.0, 0.8, 1.3, 9.0)
@@ -46,22 +45,24 @@ def _columns(lc):
 
 
 @njit(cache=True)
-def own_good(sid, band, t, flux, err, k_err=OWN_ERR_RATIO, k_spike=OWN_SPIKE):
-    """Epochs to keep by our own test, for rows ordered by star, band and time.
+def own_good(sid, band, err, k_err=OWN_ERR_RATIO, max_drop=OWN_MAX_DROP):
+    """Epochs to keep by our own test, for rows grouped by star and band.
 
     DR3 marked the epochs its variability processing rejected (4.6% of G epochs in the Andromeda field) and
-    `normalise` drops them. DR4's bulk epoch photometry has no such column, so the same job is done from the light
-    curve alone, per star and band:
+    `normalise` drops them. DR4's bulk epoch photometry has no such column, so the job is done from the light
+    curve alone: an epoch whose error is more than k_err times the star's median error in that band is dropped. A
+    G error is the scatter of the transit's CCD fluxes, so a large one marks a disturbed transit, and 42% of DR3's
+    rejected epochs fail this test against 4% of the ones it kept.
 
-    - an epoch whose error is more than k_err times the star's median error is dropped (42% of DR3's rejected
-      epochs, 4% of the ones it kept);
-    - an isolated spike is dropped: an epoch that differs from the epoch before and the epoch after, in the same
-      direction, by more than k_spike times the star's epoch-to-epoch scatter (robust, from first differences, and
-      no smaller than its median error). At either end of the light curve the two nearest epochs stand in.
+    When more than max_drop of a star's epochs in a band fail, its errors have two populations (a close pair
+    resolved in some scan directions, a gate that changes from transit to transit) and all its epochs are kept:
+    dropping one population leaves a tidy two-level light curve that scores as a deep dip.
 
-    The spike test compares neighbours in time, never the star's median: a dimming that lasts two epochs or
-    more moves its neighbours with it and is kept whole, however deep. A clip about the median would remove the
-    deep episodes of quiet stars, which are what the search is for."""
+    Measured on DR3's Andromeda field with the marks ignored (docs/arms/slow-changes.md, "Epochs without rejection
+    marks"): thresholds and the recall of injected fades return to what the marks give. Not used: a clip of
+    outlying epochs. One about the star's median removes the deep episodes of quiet stars, which are what the
+    search is for, and one for isolated spikes against their neighbours in time lengthened the lists and changed
+    no recall."""
     n = len(sid)
     keep = np.ones(n, np.bool_)
     a = 0
@@ -71,25 +72,8 @@ def own_good(sid, band, t, flux, err, k_err=OWN_ERR_RATIO, k_spike=OWN_SPIKE):
             b += 1
         if b - a >= 3:
             ok = err[a:b] <= k_err * np.median(err[a:b])
-            keep[a:b] = ok
-            idx = np.flatnonzero(ok) + a
-            k = len(idx)
-            if k >= 4:
-                f = flux[idx]
-                mf = np.median(f)
-                y = f / mf
-                d = np.diff(y)
-                sig = max(1.4826 * np.median(np.abs(d - np.median(d))) / np.sqrt(2.0), np.median(err[idx]) / mf)
-                lim = k_spike * sig
-                for i in range(k):
-                    if i == 0:
-                        p, q = y[0] - y[1], y[0] - y[2]
-                    elif i == k - 1:
-                        p, q = y[i] - y[i - 1], y[i] - y[i - 2]
-                    else:
-                        p, q = y[i] - y[i - 1], y[i] - y[i + 1]
-                    if p * q > 0 and abs(p) > lim and abs(q) > lim:
-                        keep[idx[i]] = False
+            if ok.sum() >= (1.0 - max_drop) * (b - a):
+                keep[a:b] = ok
         a = b
     return keep
 
@@ -119,8 +103,7 @@ def normalise(lc, with_median=False, marks=True, own=True):
         if not np.all(order[1:] > order[:-1]):
             df = df.iloc[order]
         df = df[own_good(df["source_id"].to_numpy(np.int64), df["band"].to_numpy(np.int64),
-                         np.ascontiguousarray(df["t"].to_numpy(float)), np.ascontiguousarray(df["flux"].to_numpy(float)),
-                         np.ascontiguousarray(df["err"].to_numpy(float)), OWN_ERR_RATIO, OWN_SPIKE)]
+                         np.ascontiguousarray(df["err"].to_numpy(float)), OWN_ERR_RATIO, OWN_MAX_DROP)]
     med = df.groupby(["source_id", "band"])["flux"].transform("median")
     out = pd.DataFrame({"source_id": df["source_id"].to_numpy(), "band": df["band"].to_numpy(),
                         "t": df["t"].to_numpy(), "frac": (df["flux"] / med - 1).to_numpy(),

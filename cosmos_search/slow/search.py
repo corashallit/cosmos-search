@@ -27,7 +27,6 @@ list of their own, read separately, since stars in other galaxies are still too.
 import numpy as np
 import pandas as pd
 
-from cosmos_search.gaia import features
 from cosmos_search.slow import detect, drift, period, rule_v3, select
 from cosmos_search.slow import summary as per_star  # `summary` below is the lists' summary
 from cosmos_search.slow.rule import mag_group
@@ -233,7 +232,7 @@ def summary(flags):
     for grp, d in flags.groupby(mag_group(flags["gbin"])):
         by = d.loc[d["flagged"], "by"]
         out[grp] = {
-            "scored": int(len(d)),
+            "scored": len(d),
             "fading": int(d["flagged"].sum()),
             "fading_share": float(d["flagged"].mean()),
             "fading_by": {k: int(by.str.contains(k).sum()) for k in ("episode", "trend", "repeat")},

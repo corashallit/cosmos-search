@@ -1,6 +1,6 @@
 """Release-day slow-change search, step by step (cosmos_search.slow.search; docs/arms/slow-changes.md, "Release day").
 
-    python scripts/slow_search.py pass --out S --dr4-bulk --files-share 0.01 --keep-lightcurves all
+    python scripts/slow_search.py pass --out S --dr4-bulk --files-share 0.002 --keep-lightcurves all
     python scripts/slow_release_thresholds.py --lightcurves S/lightcurves --out RULE \\
         --check-against prereg/rules/slow-v3
     python scripts/slow_search.py pass --out R --rule RULE --dr4-bulk [--shard i/n] [--durable DIR]
@@ -66,7 +66,7 @@ def _split_fetch(fetch, lo, hi, depth=3):
     400 on 8 of 1,000 DR3 level-5 patches), the same range as four quarters, down to `depth` levels."""
     try:
         return [fetch(lo, hi)]
-    except Exception:  # noqa: BLE001
+    except Exception:
         if depth == 0:
             raise
     q = (hi - lo + 1) // 4
@@ -89,7 +89,7 @@ def _fetch_patch(job):
         aux = pd.concat(_split_fetch(lambda x, y: tap.query(
             f"SELECT source_id, phot_g_mean_mag, bp_rp FROM {a['schema']}.gaia_source WHERE source_id BETWEEN {x} AND "
             f"{y} AND has_epoch_photometry = 'True'", sync=True, maxrec=10**7).to_pandas(), lo, hi), ignore_index=True)
-    return i, lc, aux, {"patch": i, "lo": lo, "hi": hi, "stars": int(len(ids)), "pieces": len(lcs),
+    return i, lc, aux, {"patch": i, "lo": lo, "hi": hi, "stars": len(ids), "pieces": len(lcs),
                         "seconds": round(time.time() - t0, 1)}
 
 
@@ -164,8 +164,8 @@ def select_cmd(a):
                                        log=lambda s: print(s, flush=True))
     el = time.time() - t0
     sel.to_parquet(out / "selection.parquet", index=False)
-    rec = {"slices": len(ranges), "level": a.level, "selected": int(len(sel)), "failed": failed,
-           "seconds": round(el, 1), "share": a.share, "sample": int(len(smp))}
+    rec = {"slices": len(ranges), "level": a.level, "selected": len(sel), "failed": failed,
+           "seconds": round(el, 1), "share": a.share, "sample": len(smp)}
     (out / "selection.json").write_text(json.dumps(rec, indent=1))
     print(f"{len(sel)} stars selected from {len(ranges)} slices in {el / 60:.1f} min, {len(failed)} failed")
 
@@ -284,9 +284,9 @@ def pass_one(item, a):
     pq.write_table(lcs, tmp, compression="zstd")
     tmp.replace(paths["lightcurves"])
     rec = {"name": name, "stars": int(n_stars), "with_scores": int(by_gbin.sum()),
-           "with_scores_by_gbin": [int(x) for x in by_gbin], "summary_rows": int(len(sm)),
-           "full_scores": int(len(st)), "period_search": n_period,
-           "kept": int(len(pc.unique(lcs["source_id"]))), "rows": n_rows, "read_s": round(t_read, 1),
+           "with_scores_by_gbin": [int(x) for x in by_gbin], "summary_rows": len(sm),
+           "full_scores": len(st), "period_search": n_period,
+           "kept": len(pc.unique(lcs["source_id"])), "rows": n_rows, "read_s": round(t_read, 1),
            "seconds": round(time.time() - t0, 1)}
     if a.get("durable"):
         dr3_pass._publish(paths, Path(a["durable"]), name, rec)
@@ -570,7 +570,7 @@ def cuts_cmd(a):
     m.to_parquet(run / "cuts.parquet", index=False)
     print(f"{found} of {len(listed)} stars' catalogue rows in {time.time() - t0:.0f} s; still {int(m['still'].sum())}",
           flush=True)
-    summ = {"still": int(m["still"].sum()), "looked_up": int(len(listed)), "found": found}
+    summ = {"still": int(m["still"].sum()), "looked_up": len(listed), "found": found}
     added = [c for c in m.columns if c != "id"] + ["band_z", "band_verdict"]
     for name in ("fading", "early", "rising"):
         d = pd.read_parquet(run / f"{name}.parquet").drop(columns=added, errors="ignore")
@@ -582,7 +582,7 @@ def cuts_cmd(a):
             summ["fading_band_verdicts_moving"] = {
                 grp: x["band_verdict"].value_counts().to_dict()
                 for grp, x in moving.groupby(np.where(moving["gbin"] <= 7, "G<19", "G>=19"))}
-            summ["fading_by_kind"] = {k: {"listed": int(len(x)), "without_class": int(x["vari_class"].isna().sum()),
+            summ["fading_by_kind"] = {k: {"listed": len(x), "without_class": int(x["vari_class"].isna().sum()),
                                           "q_kind_below_0.5": int((x["q_kind"] < 0.5).sum())}
                                       for k, x in d.groupby("kind")}
         if name != "rising":

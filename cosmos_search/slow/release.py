@@ -96,7 +96,7 @@ def thresholds(stats, mirrors=None, share=SHARE, n_boot=200, seed=0):
                 continue
             v = float(np.quantile(x, 1 - share))
             boot = [np.quantile(rng.choice(x, len(x)), 1 - share) for _ in range(n_boot)]
-            res[key] = {"value": v, "n": int(len(x)), "beyond": int(np.sum(x > v)),
+            res[key] = {"value": v, "n": len(x), "beyond": int(np.sum(x > v)),
                         "lo": float(np.quantile(boot, 0.16)) if boot else float("nan"),
                         "hi": float(np.quantile(boot, 0.84)) if boot else float("nan")}
         out[grp] = res

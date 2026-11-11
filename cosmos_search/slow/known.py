@@ -84,13 +84,21 @@ def match_gaia(known, tap, radius_arcsec=RADIUS_ARCSEC):
     One cone query per row: the archive answers a single cone in ~0.3 s, while a positional join against an
     uploaded table timed out (HTTP 408) even for 50 rows on 2026-10-23.
     """
+    import time
+
     rows = []
     for i, r in enumerate(known.itertuples(index=False)):
-        res = tap.query(
-            "SELECT source_id, phot_g_mean_mag AS g_mag, bp_rp, phot_variable_flag, has_epoch_photometry, "
-            f"DISTANCE(POINT({r.ra}, {r.dec}), POINT(ra, dec)) * 3600 AS sep_arcsec FROM gaiadr3.gaia_source "
-            f"WHERE 1 = CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {r.ra}, {r.dec}, {radius_arcsec / 3600}))",
-            sync=True).to_pandas()
+        q = ("SELECT source_id, phot_g_mean_mag AS g_mag, bp_rp, phot_variable_flag, has_epoch_photometry, "
+             f"DISTANCE(POINT({r.ra}, {r.dec}), POINT(ra, dec)) * 3600 AS sep_arcsec FROM gaiadr3.gaia_source "
+             f"WHERE 1 = CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {r.ra}, {r.dec}, {radius_arcsec / 3600}))")
+        for attempt in range(6):  # the archive answers 503 when its synchronous queue is full (2026-11-10)
+            try:
+                res = tap.query(q, sync=True).to_pandas()
+                break
+            except Exception:
+                if attempt == 5:
+                    raise
+                time.sleep(5 * 2 ** attempt)
         if len(res):
             rows.append(res.sort_values("sep_arcsec").iloc[0].to_dict() | {"row": i})
     m = pd.DataFrame(rows)

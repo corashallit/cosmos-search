@@ -179,7 +179,7 @@ def main(argv=None):
     # The trend threshold the unreferenced significance would have given, for the record.
     raw = release.thresholds(qs, {"z_unreferenced": "slope_z_raw"}, share=a.share, n_boot=0)
     meta = {"rule": rule_v3.NAME, "label": a.label, "lightcurves": str(a.lightcurves), "files": len(files),
-            "stars": int(len(stats)), "quiet_stars": int(len(qs)), "sky_level": a.sky, "mirrors": mirrors,
+            "stars": len(stats), "quiet_stars": len(qs), "sky_level": a.sky, "mirrors": mirrors,
             "rejected_epoch_marks_used": not a.no_marks, "own_bad_epoch_test": not a.no_own_test,
             "trend": "against the median of nearby stars of similar brightness (summary.apply_reference)",
             "trend_unreferenced": {g: v["z_unreferenced"]["value"] for g, v in raw.items() if v},

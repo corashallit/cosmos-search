@@ -34,7 +34,6 @@ at the finest HEALPix level where the cell holds at least REF_MIN_STARS stars, a
 star's trend against it, with the median's error added to the star's own.
 """
 
-import math
 
 import numpy as np
 import pandas as pd

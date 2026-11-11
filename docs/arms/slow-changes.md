@@ -59,6 +59,7 @@ and 4% of random variables (2,981 sampled). In DR4 most stars are quiet, so far 
 | S4 | Whole-sky selection on TAP (Abbe values; fallback DR4 minus DR3 mean against neighbours), recall measured on DR3 | S1, S3 | Done 2026-10-23 (below); download routes in docs/infra/dr4-downloads.md |
 | S5 | Checks per candidate: NEOWISE same years, colour of the change, position (`astrometry.dips`), ZTF and ASAS-SN after 2020, known-variable catalogues | S3 | First version done 2026-10-23 (below); position needs DR4 epoch astrometry |
 | S6 | Pre-registered blind test of the detector: new fake shapes, fresh stars; known variable classes measured openly | S4, S5 | Run 2026-10-23 (below): fails on repeated slow cycles; Cora chose a slow period search, whose own blind test is written down (below) |
+| S4b | Score every star from the bulk files; trends against neighbours; own bad-epoch test; reading order within kind of star; DataLink fallback list | S3, S7's trial | Done 2026-11-10 ("Every star scored" below) |
 | S7 | Freeze before 2026-12-02, run on DR4 (short-dip and astrometry searches run as built alongside) | S6, DR4 | slow-v3 (fades read in time order, below); release-day thresholds from DR4's own stars ready (below); whole run tried on all of DR3 2026-10-30, then the band, eclipsing-binary and NEOWISE checks settled (below) |
 | S8 | Verify top candidates: one new brightness measurement each; per-visit spectra for the best | S7 | |
 
@@ -184,6 +185,10 @@ those. R CrB stars whose median state is the faint one show their recoveries as 
 Open: the sky term from S2; thresholds per colour; families held out of all calibration for the blind test (S6).
 
 ## Whole-sky selection (S4)
+
+**Superseded on 2026-11-10 for any run with bulk files** ("Every star scored" below): measured on injected steady fades,
+this cut picks none up to 3% a year and 3% of the brightest at 5% a year. The table below counted only fakes the detector found among stars passing a
+quiet-star cut that 14.5% of all stars pass. Kept as written, for the record and for `slow_search.py select`.
 
 DR4's light curves come through DataLink only, so the detector runs on stars picked first from the per-star
 columns of `all_source_photometry` (`slow/select.py`). For noise of variance σ² plus a change slower than the gap
@@ -623,6 +628,14 @@ own stars:
    per magnitude range with the count beyond them and a bootstrap 16-84% interval (`release.thresholds`).
 5. Rule files in slow-v3's format plus `release.json` (`release.write_rule`).
 
+Since 2026-11-10 ("Every star scored" below) the script needs no catalogue (each star's G and colour come from its
+light curve; `--aux` is optional), scores every star with the compiled summary, measures each trend against the
+median of nearby stars of similar brightness before taking the trend's 0.1% point, and runs the period search only
+on the quiet stars whose bound on its score is among the largest 8%, checking that every star left out is bounded
+below the threshold found (it widens the share until that holds). The sample can be a share of the bulk files:
+`slow_search.py pass --files-share 0.002 --keep-lightcurves all`. `--drift-share` fits the drift table on a
+random share of the quiet stars when the sample is larger than memory.
+
 How many: the false-alarm rate at a threshold set from N quiet stars is known to about 1/√(0.001 N), so ±20%
 needs 25,000 quiet stars per magnitude range (`release.stars_needed`). At G < 19 that is about 30,000 stars with
 light curves; at ~1,500 light curves per second from the AIP mirror, under a minute; at ESA DataLink's 0.3-1.5 per
@@ -644,29 +657,161 @@ definition). Thresholds with their bootstrap 16-84% intervals, against the froze
 The code reproduces the frozen values within their sampling noise, apart from the faint episode threshold, which
 sits on 3 stars beyond the 0.1% point. That is the case for ~25,000 quiet stars per magnitude range on release day.
 
+## Every star scored (2026-11-10)
+
+`slow/summary.py`, `slow/search.py` (`score_all`), `slow/kinds.py`, `slow/fallback.py`, `scripts/slow_search.py`
+(`pass`, `flag`, `cuts`), `scripts/slow_inject_test.py`, `scripts/slow_fallback.py`. The whole-project review of
+2026-11-10 measured that the archive-side selection above (S4) picks none of the steady fades up to 3% a year
+injected into quiet FGK dwarfs: its 0.1% cut on `slow_z` sits among stars with very large scatter. The bulk
+light-curve files are read in full anyway, so the run now scores every star in them and chooses nothing before a
+light curve is read. Everything below is measured on DR3's Andromeda field, the one part of DR3 with a light curve
+for every star: 1,080,003 stars, 1,003,245 with enough visits for scores, 122 million epochs.
+
+**Summary of every star.** `summary.star_summary` gives, in one compiled loop over stars, the trend and its
+error, the time-ordered episode scores with their kinds and windows, the visit scatter and Abbe value, each
+band's trend on the transits all three bands have, and the quiet-star test. On 3,803 real stars the trend and
+episode numbers equal the detector's (`detect.star_features`): scores, windows and kinds bit for bit, trends to
+2 × 10⁻¹². So the trend and episode parts of the rule are tested on every star at every magnitude. G and BP-RP
+come from the light curve's median fluxes (against the catalogue: median difference 0.0006 mag, scatter 0.022
+mag in G), so no catalogue query comes before the lists.
+
+**Period search only where it can pass.** A window of k visits scores the sum of k − 1 of the star's detrended
+visit deviations over √(k − 1) σ, and no k − 1 visits sum lower than the k − 1 lowest. That bound (`rep_bound`)
+was at or above the period search's score for all 1,423 stars tested, with a median ratio of 1.35. The period
+search runs only on stars brighter than G 16 whose bound exceeds the repeat threshold: 6,103 of the field's stars.
+The detector itself runs only on stars within 0.8 of a threshold, for the per-band depths. On 20,000 stars the
+new pass and the detector plus period search on every star flag the same stars: fading 79 and 79, early 10 and
+10, rising 69 and 69, repeated brightening 50 and 50, no star differing.
+
+**Trends against neighbours.** The drift correction is fitted on quiet stars, which are 1% of stars brighter than
+G 14. After it the median trend of the field's stars is +0.94 errors at G 12-13 (+0.07% a year), +0.24 at G 13-14
+and under 0.15 fainter. DR4's trend errors are about 2.7 times smaller, so the same offset would be about 2.5
+errors. `summary.reference_table` takes the median trend of all stars in each sky pixel and 0.5 mag range of G, at
+the finest HEALPix level (6 down to 0) where the cell holds 50 stars, and `apply_reference` measures each star
+against it with the median's error added to its own. 98% of stars take their reference at level 6. The median
+is then under 0.01 errors in every magnitude range (by construction; `flag` writes both medians to
+`summary.json` as the release-day check), and at G 12-13 the stars beyond 3.8 errors go from 51 brightening and 13
+fading to 20 and 20 (measured with DR3's marks).
+
+**Epochs without rejection marks.** DR3 marks the epochs its variability processing rejected (10% of G epochs in
+one file of this field) and `drift.normalise` drops them. DR4's bulk epoch photometry has no such column (found by
+the release-day practice run). `drift.own_good` now drops epochs whose error is over twice the star's median error
+in that band, unless more than 20% of the star's epochs would go. Each setting was run end to end with its own
+thresholds from the field's quiet stars; G < 19:
+
+| Epochs dropped | Quiet stars | Thresholds (episode, trend, repeat) | Fading / rising lists | Above strength 5 | 0.5% a year fade listed | 1% a year |
+|---|---|---|---|---|---|---|
+| DR3's marks | 265,172 | 5.43, 3.65, 6.93 | 3,008 / 2,883 | 28 / 29 | 63% | 83% |
+| None | 165,381 | 5.54, 4.71, 7.33 | 2,751 / 4,145 | 53 / 82 | 43% | 71% |
+| Our own test, marks ignored | 278,452 | 5.42, 3.68, 6.77 | 3,960 / 3,707 | 54 / 106 | 64% | 82% |
+
+With no test, bright outliers widen the brightening mirror, the trend threshold rises by a third and small fades
+are lost. With our own test the thresholds and the recall return to what the marks give. The lists are still 30%
+longer and the far tail holds twice as many fades and nearly four times as many brightenings as with the marks:
+the artefacts left are mostly bright ones, such as close pairs that are resolved in some scan directions. Tried
+and dropped: a clip of isolated spikes against their neighbours in time (lists 5% longer, recall unchanged). A
+clip about the star's median is never used: it removes the deep episodes of quiet stars. DR4's per-transit flags
+(a neighbour in the window, attitude, satellite events; `gaia/dr4.py` reads them into `flags`) are the next thing
+to test against this in the first hours.
+
+**Injection test.** `scripts/slow_inject_test.py` puts fakes into real light curves and scores them as the run
+does: the summary, the reference built from the real stars and looked up with the host's magnitude, the
+shared-date test against the real stars of the host's sky pixel, then the rule. 4,800 hosts brighter than G 19
+(600 from each magnitude bin) and 1,200 fainter, 16 kinds of fake each, marks ignored, thresholds from the field.
+Share listed as fading, beside the share the earlier archive-side cut would have picked at all:
+
+| Steady fade, % a year | 0.3 | 0.5 | 1 | 2 | 3 | 5 | 10 |
+|---|---|---|---|---|---|---|---|
+| New run, G < 13 | 49% | 77% | 89% | 94% | 95% | 97% | 99% |
+| New run, G 13-16 | 59% | 80% | 90% | 94% | 96% | 97% | 98% |
+| New run, G 16-19 | 15% | 38% | 69% | 90% | 94% | 96% | 97% |
+| New run, G ≥ 19 | 1% | 2% | 6% | 26% | 46% | 68% | 88% |
+| New run, quiet hosts on no list, G < 19 | 37% | 61% | 86% | 99% | 100% | 100% | 100% |
+| Archive-side cut, G < 13 | 0% | 0% | 0% | 0% | 0% | 3% | 60% |
+| Archive-side cut, G 13-16 | 0% | 0% | 0% | 0% | 0% | 0% | 30% |
+| Archive-side cut, G 16-19 | 0% | 0% | 0% | 0% | 0% | 0% | 2% |
+
+By kind of star at 1% a year: FGK dwarfs 92% (2,456 hosts), giants and subgiants 91%, M dwarfs 52%, stars with
+uncertain parallaxes 61%. Untouched hosts are on the fading list 1.1% of the time and the same fakes turned into
+brightenings land on the rising list at the fades' rates (83% at 1% a year) and on the fading list 1.4% of the
+time. Drawn families (`inject.lightcurve`), all hosts with G < 19: steady fades of any size and colour 63%, ramps
+38%, long dips 16% (55% of those deeper than 10%), repeated long dips 14%, slow cycles 10%; the archive-side cut
+picks 1% of the long dips and none of the rest. The long-dip and cycle numbers are the detector's own limits on
+DR3's 19 visits a star, which this work does not change.
+
+**Reading order within kind of star.** By raw strength the lists start with known variables. `cuts` now gives
+each listed star its kind (`kinds.star_kind`: parallax, absolute magnitude, colour, no extinction correction) and
+each fade its standing against the brightenings of the same kind, `q_kind` (`kinds.rank`, a knockoff-style
+estimate of the share of chance and ordinary variability among the kind's fades at least as strong). The fading
+list is written in reading order: FGK dwarfs, M dwarfs, hot dwarfs, giants, then the rest; within a kind, stars
+without a variability class first, then by `q_kind`, then brightest first. In the field (fading / brightening
+above each strength):
+
+| Kind | > 1 | > 2 | > 3 | > 5 |
+|---|---|---|---|---|
+| FGK dwarf | 1,713 / 1,571 | 129 / 199 | 34 / 83 | 11 / 25 |
+| M dwarf | 394 / 629 | 30 / 68 | 7 / 28 | 1 / 8 |
+| Giant or subgiant | 253 / 210 | 42 / 35 | 18 / 13 | 7 / 2 |
+| No measurable motion (quasars, M31's stars) | 2,801 / 2,620 | 753 / 720 | 233 / 229 | 34 / 26 |
+
+Dwarfs brighten at least as often as they fade at every strength, so no dwarf has `q_kind` below 0.5 and their
+order falls back on brightness; only giants (7 stars) and hot dwarfs do. Far out the brightenings outnumber the
+fades (bright artefacts, above), so `q_kind` overstates chance there. What the order buys is position: a fake FGK
+dwarf fading 3% a year has a median strength of 7.8 and two real FGK dwarfs of the field's 1,713 listed ahead of
+it; at 1% a year, strength 3.3 and 22 ahead.
+
+**Cost.** The pass took 0.9 min for the field on 4 cores: 0.2 ms per star per core at DR3's sampling, against
+14.7 ms for the detector and period search on every star. For DR4's ~2 × 10⁹ stars at about twice the epochs
+that is 200 to 300 core-hours, less than the download. Stored: about 70 bytes a star (every star brighter than G
+19, a tenth of the fainter ones, any star near a threshold), so about 60 GB for DR4, plus light curves for the
+0.7% of stars that are brighter than G 19 and near a threshold on the fading side, or in the random 0.1%. The thresholds step took 3.5 min for the
+field.
+
+**DataLink fallback list.** If the bulk files are late or absent, light curves come one star at a time at 0.3 to
+1.5 a second, and the order of fetching decides what can be found. `slow_fallback.py list` writes one order:
+the 2,849 stars DR3 showed still fading at its end, each with a prediction written before DR4 (the DR3 trend
+continued to 2020-01-20, the change expected since DR3's last visit, and the significance expected over DR4's
+span; `fallback.outcome` then calls each continued, slowed, stopped or reversed), then the known answers, then
+the stars `slow_fallback.py abbe` selects on release day: brighter than G 16 with a G Abbe value in the lowest 1%
+of their magnitude bin in `all_source_photometry`. In the injection test the Abbe value alone at a 1% share picks
+59% of 1% a year fades and 98% of 3% a year fades on quiet hosts, where `slow_z` at 0.1% picks none.
+
 ## Release day, end to end
 
 `scripts/slow_search.py` runs the search step by step; `slow/search.py` holds the scoring and flagging. On DR4:
 
 1. Routes: `python -m cosmos_search.gaia.dr4_routes --out routes.json` (docs/infra/dr4-downloads.md).
-2. Thresholds from DR4's own stars: `slow_search.py sample --out S --patches 300 --level 9 --schema gaiadr4`, then
-   `slow_release_thresholds.py --lightcurves S/lightcurves --aux S/aux.parquet --out RULE --check-against
-   prereg/rules/slow-v3` (section above).
-3. Whole-sky selection: `slow_search.py select --out SEL` (ESA TAP, 768 sky slices, 5 jobs at once). Its
-   `selection.parquet` carries G and BP-RP and serves as `--aux` below.
-4. Light curves of the selected stars: `dr4_bulk pull --select SEL/selection.parquet`, or the AIP mirror by
-   source_id range.
-5. Scores: `slow_search.py score --lightcurves DIR --aux SEL/selection.parquet --rule RULE --out R`, split over
-   machines with `--shard i/n`; resumes from done-markers and keeps the light curves of stars near a threshold
-   (fading or brightening).
-6. Lists: `slow_search.py flag --run R --aux SEL/selection.parquet --rule RULE --out L`: the shared-date test, then
-   the fading list, the `early` list and the rising list, each ordered by strength, one sky region at a time.
-7. Cuts: `slow_search.py cuts --run L` looks up parallax, proper motion and BP/RP blend counts for every star
-   above strength 1 either way, marks those with no measurable motion as `still` (quasars, galaxies, stars in other
-   galaxies), which are read as a list of their own, and adds whether each fade's G change agrees with BP and RP
-   (`band_verdict`, "G against BP and RP" below). `L/cuts_summary.json` has the fading and rising counts above each
-   strength without the still stars, and the fading list's band verdicts.
-8. Reading: from the top of the fading list down to where it stops standing clear of the rising list. The checks:
+2. Thresholds from DR4's own stars: `slow_search.py pass --out S --dr4-bulk --files-share 0.002 --keep-lightcurves
+   all` reads a random share of the bulk files (whole patches of sky) and keeps their light curves, then
+   `slow_release_thresholds.py --lightcurves S/lightcurves --out RULE --check-against prereg/rules/slow-v3`
+   (section above). Without bulk files: `slow_search.py sample --out S --patches 300 --level 9` from a mirror.
+3. Every star scored: `slow_search.py pass --out R --rule RULE --dr4-bulk`, split over machines with `--shard i/n`
+   and resumed from done-markers ("Every star scored" below). Each bulk file is downloaded, read and deleted. It
+   writes a summary row for every star brighter than G 19 and a tenth of the fainter ones (plus any star near a
+   threshold), the full scores of the stars that need them, and the light curves of stars near a threshold on the
+   fading side. No star is chosen before its light curve is read, and no catalogue query is needed: each star's G
+   and colour come from its light curve.
+4. Lists: `slow_search.py flag --run R --rule RULE --out L`: each star's trend against the median of nearby stars
+   of similar brightness, the shared-date test, then the fading list, the `early` list and the rising list, one
+   sky region at a time. `L/summary.json` holds the median trend by magnitude before and after the reference
+   (the first-hour check that trends sit at zero) and the counts above each strength.
+5. Cuts: `slow_search.py cuts --run L` looks up parallax, proper motion, colour, BP/RP blend counts and the
+   variability class of every star above strength 1 either way (the run's one catalogue query, through
+   `targets.releases`, so DR4's table names are in one place). It marks stars with no measurable motion as
+   `still` (quasars, galaxies, stars in other galaxies), gives each star its kind (`kinds.star_kind`) and each
+   fade its standing against the brightenings of the same kind (`q_kind`), adds whether each fade's G change
+   agrees with BP and RP (`band_verdict`, "G against BP and RP" below), and writes the fading list in reading
+   order: ordinary dwarfs with good parallaxes first, stars without a variability class before those with one.
+   `L/cuts_summary.json` has the fading and brightening counts above each strength by kind of star.
+6. If the bulk files are late or absent: `slow_fallback.py` ("DataLink fallback list" below) gives the order in
+   which to fetch light curves one star at a time, and `slow_search.py pass --lightcurves DIR` scores whatever
+   has arrived. `slow_search.py select`, the earlier archive-side choice of stars, is kept only for comparison:
+   it picks none of the steady fades it was meant to find ("Every star scored").
+7. First-hour checks on the lists: the median trend by magnitude (`L/summary.json`, `trend_offset_by_G`), the
+   fading against the brightening counts by kind (`L/cuts_summary.json`), and the watch-list's predictions
+   (`slow_fallback.py check`).
+8. Reading: the fading list in its reading order, kind by kind, each down to where its fades stop standing
+   clear of the same kind's brightenings. The checks:
    `slow_checks.py --fading L/fading.parquet --lightcurves R/lightcurves --out L/checks --skip-still --skip-band
    --skip-class ECL --n 1000`. DR4's eclipsing-binary class is left out first; `--lightcurves` adds the
    eclipsing-binary filter on G and ZTF (`eb_explained`, its period and duration), shown to the reviewer as
@@ -910,6 +1055,14 @@ the kind of object this search is for. Measuring duration from the folded light 
 runs of epochs, would tell them apart; it would need its own test. Data: `/mnt/project-files/slow-changes/eb-test/`.
 
 ## Log
+
+- **2026-11-10.** Every star scored ("Every star scored" above). The archive-side selection picked none of the
+  injected steady fades up to 3% a year; the run now summarises every star of the bulk files in one compiled pass
+  (0.2 ms per star per core) and flags the same stars as the detector on every star. Trends are measured against
+  neighbours of similar brightness (the +0.94 error offset at G 12-13 is gone). DR4's bulk files carry no rejected-
+  epoch marks, so the scoring has its own test, which restores the thresholds and recall the marks gave; lists are
+  30% longer. Injected fades of 1% a year: 82% listed over all hosts brighter than G 19, 86% on quiet ones. The
+  cuts step ranks within kind of star, and a DataLink fallback list with a prediction per watch-list star exists.
 
 - **2026-10-30.** Last checks before DR4. G against BP and RP: passes its pre-written test twice (0 of 300 real
   changes cut; 54, then 51, of 100 G-only fakes caught) and is a cut on release day. DR3's own fades showed that

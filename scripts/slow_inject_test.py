@@ -228,7 +228,7 @@ def main(argv=None):
     fakes["fake"] = pd.Categorical(fakes["fake"], categories=order)
     bright = fakes[fakes["host_g"] < 19]
     clean = bright[bright["host_quiet"] & ~bright["host_listed"]]
-    res = {"hosts": int(len(hosts)), "fakes": int(len(fakes)), "rule": str(a.rule),
+    res = {"hosts": len(hosts), "fakes": len(fakes), "rule": str(a.rule),
            "archive_cut_slow_z": {int(k): float(v) for k, v in cut_z.items()},
            "marks": not a.no_marks, "own_test": not a.no_own_test}
     for title, d in (("all hosts with G < 19", bright), ("quiet hosts on no list, G < 19", clean),

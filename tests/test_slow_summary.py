@@ -225,7 +225,7 @@ def test_period_search_runs_only_where_the_bound_allows():
     rng = np.random.default_rng(10)
     lc = lightcurves(rng, ("noise",) * 80 + ("repeat",) * 4, flux=10 ** ((25.6874 - 14.2) / 2.5))
     thr, thr_p, table = rule_v3.load()
-    summ, stats, _ = search.score_all(lc, table, thr, thr_p)
+    _, stats, _ = search.score_all(lc, table, thr, thr_p)
     n_searched = int(stats["s_rep_any"].notna().sum())
     assert 4 <= n_searched < 30
     rep = stats.set_index("source_id").loc[[81, 82, 83, 84], "s_rep"]
@@ -279,29 +279,27 @@ def test_rank_measures_fades_against_the_same_kind_of_stars_brightening():
     assert c["FGK dwarf"]["5.0"]["fading"] == 3 and c["FGK dwarf"]["5.0"]["rising"] == 0
 
 
-def test_own_test_drops_spikes_and_high_errors_and_keeps_a_deep_dip_whole():
+def test_own_test_drops_high_error_epochs_and_keeps_a_deep_dip_whole():
     rng = np.random.default_rng(12)
     t = np.sort(rng.uniform(0.0, 1000.0, 60))
     flux = 1e4 * (1 + rng.normal(0, 0.002, 60))
     err = np.full(60, 20.0)
-    flux[10] *= 1.08                      # one epoch 8% bright between ordinary neighbours
-    flux[30:33] *= 0.85                   # a 15% dimming over three epochs
-    flux[45] *= 0.90                      # one epoch 10% faint
-    err[50] = 70.0                        # one epoch with 3.5 times the median error
+    flux[30:33] *= 0.85                   # a 15% dimming over three epochs, with ordinary errors
+    err[[10, 50]] = 70.0                  # two epochs with 3.5 times the median error
     sid, band = np.ones(60, np.int64), np.zeros(60, np.int64)
-    keep = drift.own_good(sid, band, t, flux, err)
-    assert np.flatnonzero(~keep).tolist() == [10, 45, 50]
-    flux[0] *= 1.10                       # a spike at the first epoch is judged against the next two
-    assert not drift.own_good(sid, band, t, flux, err)[0]
+    assert np.flatnonzero(~drift.own_good(sid, band, err)).tolist() == [10, 50]
+    two = err.copy()
+    two[::3] = 70.0                       # a third of the epochs with large errors: two populations, all kept
+    assert drift.own_good(sid, band, two).all()
     # normalise: DR3's marks and our own test are separate switches
     df = pd.DataFrame({"source_id": 1, "band": "G", "t": t, "flux": flux, "err": err, "flags": 0, "transit_id": 0,
                        "fov": 1, "ccd_row": 1, "n_obs": 9})
     df.loc[20, "flags"] = epoch.FLAG_VARI_REJECT
     lc = pa.Table.from_pandas(df, schema=epoch.SCHEMA, preserve_index=False)
     n = {(m, o): len(drift.normalise(lc, marks=m, own=o)) for m in (True, False) for o in (True, False)}
-    assert n == {(True, True): 55, (True, False): 59, (False, True): 56, (False, False): 60}
+    assert n == {(True, True): 57, (True, False): 59, (False, True): 58, (False, False): 60}
     s = summary.star_summary(lc, marks=False)
-    assert s["n_g"].iloc[0] == 56 and s["s_fade"].iloc[0] > 6          # the dip is still there, and found
+    assert s["n_g"].iloc[0] == 58 and s["s_fade"].iloc[0] > 6          # the dip is still there, and found
 
 
 def test_fallback_predictions_order_and_archive_query():
