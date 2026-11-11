@@ -23,6 +23,15 @@ import pandas as pd
 
 from cosmos_search.gaia import features
 
+try:
+    from numba import njit
+except ImportError:  # pragma: no cover - without numba the loop runs uncompiled (slow)
+    def njit(*args, **kwargs):
+        return (lambda f: f) if not (args and callable(args[0])) else args[0]
+
+# Our own test for bad epochs (`own_good`): DR4's bulk light curves carry no rejection marks.
+OWN_ERR_RATIO = 2.0   # an epoch's error against the star's median error in that band
+OWN_MAX_DROP = 0.2    # a star and band losing more than this share of epochs to the test keeps them all
 TBIN_DAYS = 15.0
 G_EDGES = (0.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 23.0)
 COLOUR_EDGES = (-9.0, 0.8, 1.3, 9.0)
@@ -35,11 +44,48 @@ def _columns(lc):
     return lc.column_names if hasattr(lc, "column_names") else list(lc.columns)
 
 
-def normalise(lc):
+@njit(cache=True)
+def own_good(sid, band, err, k_err=OWN_ERR_RATIO, max_drop=OWN_MAX_DROP):
+    """Epochs to keep by our own test, for rows grouped by star and band.
+
+    DR3 marked the epochs its variability processing rejected (4.6% of G epochs in the Andromeda field) and
+    `normalise` drops them. DR4's bulk epoch photometry has no such column, so the job is done from the light
+    curve alone: an epoch whose error is more than k_err times the star's median error in that band is dropped. A
+    G error is the scatter of the transit's CCD fluxes, so a large one marks a disturbed transit, and 42% of DR3's
+    rejected epochs fail this test against 4% of the ones it kept.
+
+    When more than max_drop of a star's epochs in a band fail, its errors have two populations (a close pair
+    resolved in some scan directions, a gate that changes from transit to transit) and all its epochs are kept:
+    dropping one population leaves a tidy two-level light curve that scores as a deep dip.
+
+    Measured on DR3's Andromeda field with the marks ignored (docs/arms/slow-changes.md, "Epochs without rejection
+    marks"): thresholds and the recall of injected fades return to what the marks give. Not used: a clip of
+    outlying epochs. One about the star's median removes the deep episodes of quiet stars, which are what the
+    search is for, and one for isolated spikes against their neighbours in time lengthened the lists and changed
+    no recall."""
+    n = len(sid)
+    keep = np.ones(n, np.bool_)
+    a = 0
+    while a < n:
+        b = a + 1
+        while b < n and sid[b] == sid[a] and band[b] == band[a]:
+            b += 1
+        if b - a >= 3:
+            ok = err[a:b] <= k_err * np.median(err[a:b])
+            if ok.sum() >= (1.0 - max_drop) * (b - a):
+                keep[a:b] = ok
+        a = b
+    return keep
+
+
+def normalise(lc, with_median=False, marks=True, own=True):
     """Good epochs of a long light-curve table (epoch.SCHEMA) as fractional flux about each star's median.
 
-    Returns source_id, band (0 G, 1 BP, 2 RP), t (days), frac, err_frac, fov and transit_id. Epochs DPAC
-    rejected, with non-positive flux or without an error are dropped.
+    Returns source_id, band (0 G, 1 BP, 2 RP), t (days), frac, err_frac, fov and transit_id, ordered by star,
+    band and time. Dropped: epochs with non-positive flux or without an error, epochs DPAC marked as rejected
+    (marks; DR3 has the marks, DR4's bulk files do not) and epochs our own test rejects (own, `own_good`).
+    marks=False on DR3 reads it as DR4 will arrive. with_median adds med_flux, the median flux of the star in
+    that band (e-/s), which gives its magnitude without a catalogue (`summary.magnitudes`).
     """
     band = np.asarray(lc["band"].combine_chunks().indices) if hasattr(lc["band"], "combine_chunks") \
         else np.asarray(lc["band"])
@@ -48,14 +94,24 @@ def normalise(lc):
                        "flags": np.asarray(lc["flags"]), "fov": np.asarray(lc["fov"]),
                        "transit_id": np.asarray(lc["transit_id"]) if "transit_id" in _columns(lc)
                        else np.zeros(len(band), np.int64)})
-    good = ((df["flags"] & features.FLAG_VARI_REJECT) == 0) & (df["flux"] > 0) & (df["err"] > 0) \
-        & np.isfinite(df["err"])
+    good = (df["flux"] > 0) & (df["err"] > 0) & np.isfinite(df["err"])
+    if marks:
+        good &= (df["flags"] & features.FLAG_VARI_REJECT) == 0
     df = df[good]
+    if own and len(df):
+        order = np.lexsort((df["t"].to_numpy(), df["band"].to_numpy(), df["source_id"].to_numpy()))
+        if not np.all(order[1:] > order[:-1]):
+            df = df.iloc[order]
+        df = df[own_good(df["source_id"].to_numpy(np.int64), df["band"].to_numpy(np.int64),
+                         np.ascontiguousarray(df["err"].to_numpy(float)), OWN_ERR_RATIO, OWN_MAX_DROP)]
     med = df.groupby(["source_id", "band"])["flux"].transform("median")
-    return pd.DataFrame({"source_id": df["source_id"].to_numpy(), "band": df["band"].to_numpy(),
-                         "t": df["t"].to_numpy(), "frac": (df["flux"] / med - 1).to_numpy(),
-                         "err_frac": (df["err"] / med).to_numpy(), "fov": df["fov"].to_numpy(),
-                         "transit_id": df["transit_id"].to_numpy()})
+    out = pd.DataFrame({"source_id": df["source_id"].to_numpy(), "band": df["band"].to_numpy(),
+                        "t": df["t"].to_numpy(), "frac": (df["flux"] / med - 1).to_numpy(),
+                        "err_frac": (df["err"] / med).to_numpy(), "fov": df["fov"].to_numpy(),
+                        "transit_id": df["transit_id"].to_numpy()})
+    if with_median:
+        out["med_flux"] = med.to_numpy()
+    return out
 
 
 def star_cells(aux):

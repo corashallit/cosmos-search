@@ -224,7 +224,8 @@ def star_features(epochs, col="frac_corr"):
         (s_fade, kind, t0, t1), (s_rise, rkind, r0, r1) = ordered_episodes(tv, yv, sig)
         row = {"source_id": int(sid[a]), "n_visits": len(tv), "t_first": tv[0], "t_last": tv[-1],
                "sigma_visit": sig, "abbe": abbe(yv),
-               "slope": slope, "slope_z": slope / (sig_trend / np.sqrt(sxx)) if sxx > 0 else np.nan,
+               "slope": slope, "slope_err": sig_trend / np.sqrt(sxx) if sxx > 0 else np.nan,
+               "slope_z": slope / (sig_trend / np.sqrt(sxx)) if sxx > 0 else np.nan,
                "s_dim": s_dim, "s_bright": s_br, "s_fade": s_fade, "s_rise": s_rise, "fade_kind": kind,
                "rise_kind": rkind, "rise_t0": r0, "rise_t1": r1,
                "dim_depth": np.nan, "dim_depth_err": np.nan, "dim_t0": np.nan, "dim_t1": np.nan, "dim_visits": 0,
