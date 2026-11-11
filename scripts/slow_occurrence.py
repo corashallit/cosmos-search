@@ -16,8 +16,7 @@ resume.
 
 `limit`: the per-star scores of the stars searched (`slow_search.py score` output, or the per-star summary of the
 bulk-file pass: source_id, slope, slope_z or slope_err, n_visits, t_first, t_last), the same `--aux` columns for
-them or `--kind`, and the injections. A table with a neighbour reference (`slope_ref`) is counted one file at a
-time, whatever its size. Writes limit.json (config, inputs, the limit per rate, the symmetry tables), curve.csv,
+them, and the injections. A table with a neighbour reference (`slope_ref`) is counted one file at a time. Writes limit.json (config, inputs, the limit per rate, the symmetry tables), curve.csv,
 regions.parquet (counts and recall of every region per rate), past_cut.parquet (every searched star past the first
 cut either way, strongest fades first) and, with matplotlib, the figure.
 
@@ -193,55 +192,44 @@ def _files(path):
     return sorted(f for f in p.glob("*.parquet") if pq.read_metadata(f).num_rows) if p.is_dir() else [p]
 
 
-def _population(f, aux, cfg, kind):
-    """The searched population among one per-star score file's rows, and how many rows it held."""
+def _population(f, aux, cfg):
+    """The searched population among one per-star score file's rows, and how many rows it held: FGK dwarfs by
+    the catalogue rows of `aux`, in the config's G range, with enough visits and a measured trend. Rows of a
+    bulk-file summary that are not a fair sample of their magnitude (`ref` false) are left out."""
     have = set(pq.read_schema(f).names)
-    d = pd.read_parquet(f, columns=[c for c in STAR_COLUMNS + ["kind", "phot_g_mean_mag", "g_mag"] if c in have])
+    d = pd.read_parquet(f, columns=[c for c in [*STAR_COLUMNS, "ref"] if c in have])
     scored = len(d)
-    if "g_mag" in d and "phot_g_mean_mag" not in d:
-        d = d.rename(columns={"g_mag": "phot_g_mean_mag"})
-    if kind is not None:
-        if "kind" not in d:
-            raise SystemExit(f"--kind given and {f} has no kind column")
-        d = d[d["kind"] == kind].drop(columns="kind")
-    else:
-        d = d.drop(columns=["phot_g_mean_mag", "g_mag", "kind"], errors="ignore").join(aux, on="source_id", how="inner")
-        d = d[occurrence.fgk_dwarf(d, cfg)]
+    if "ref" in d:
+        d = d[d["ref"].astype(bool)].drop(columns="ref")
+    d = d.join(aux, on="source_id", how="inner")
+    d = d[occurrence.fgk_dwarf(d, cfg)]
     ok = (d["n_visits"] >= cfg.min_visits) & np.isfinite(d["slope_z"]) \
         & (occurrence.stratum(d["phot_g_mean_mag"], cfg) >= 0)
     return d[ok], scored
 
 
-def _aux_index(aux_path, kind):
-    if kind is None and not aux_path:
-        raise SystemExit("--aux (parallaxes) or --kind (a label of the per-star table's kind column) is needed")
-    return _aux(aux_path).set_index("source_id") if kind is None else None
-
-
-def read_stars(path, aux_path, cfg, kind=None):
-    """The searched population from per-star score files, in memory: FGK dwarfs in the config's G range with
-    enough visits and a measured trend. With `kind`, the table's own `kind` column (slow.kinds) says which stars
-    are FGK dwarfs and its `g_mag` their brightness; otherwise the stars are placed from `--aux`."""
-    aux = _aux_index(aux_path, kind)
-    parts = [_population(f, aux, cfg, kind) for f in _files(path)]
+def read_stars(path, aux_path, cfg):
+    """The searched population from per-star score files, in memory (`_population` of every file)."""
+    aux = _aux(aux_path).set_index("source_id")
+    parts = [_population(f, aux, cfg) for f in _files(path)]
     return pd.concat([d for d, _ in parts], ignore_index=True).drop_duplicates("source_id"), sum(n for _, n in parts)
 
 
-def gather(path, aux_path, cfg, kind, host_ids):
+def gather(path, aux_path, cfg, host_ids):
     """What the limit needs of the searched stars: their counts, the stars past the first cut, the hosts' rows,
     and the reference the injected stars are measured against.
 
-    Per-star tables that carry a neighbour reference (`slope_ref`) are counted one file at a time, so a
-    whole-sky pass never has to fit in memory. Others (`slow_search.py score` output) are read whole, because
-    their reference is the running median of every star's trend."""
+    Per-star tables that carry a neighbour reference (`slope_ref`) are counted one file at a time, so the
+    scores of a whole-sky pass never have to fit in memory. Others (`slow_search.py score` output) are read
+    whole, because their reference is the running median of every star's trend."""
     files = _files(path)
     referenced = all("slope_ref" in pq.read_schema(f).names for f in files)
     if referenced:
-        aux = _aux_index(aux_path, kind)
-        batches = (_population(f, aux, cfg, kind) for f in files)
+        aux = _aux(aux_path).set_index("source_id")
+        batches = (_population(f, aux, cfg) for f in files)
         ref = None
     else:
-        stars, scored = read_stars(path, aux_path, cfg, kind)
+        stars, scored = read_stars(path, aux_path, cfg)
         batches = [(stars, scored)]
         ref = occurrence.brightness_reference(stars["phot_g_mean_mag"].to_numpy(float), stars["slope"].to_numpy(float),
                                               cfg.reference_window)
@@ -308,7 +296,7 @@ def limit(a):
     out.mkdir(parents=True, exist_ok=True)
     inj = pd.concat([pd.read_parquet(f) for f in _files(a.injections)], ignore_index=True)
     t0 = time.time()
-    got = gather(a.stars, a.aux, cfg, a.kind, pd.unique(inj["source_id"]))
+    got = gather(a.stars, a.aux, cfg, pd.unique(inj["source_id"]))
     t, past, span = got["tally"], got["past"], got["span"]
     inj_z, inj_strat = occurrence.injection_significances(got["hosts"], inj, cfg, got["ref"])
     curve, cells = occurrence.curve_from_tally(t, past, inj_z, inj_strat, inj["rate"], cfg, span)
@@ -359,7 +347,7 @@ def planted(a):
     """Coverage on the real stars: plant fades in a random share of them (their own injected scores), compute the
     limit, and count how often it falls below the share planted."""
     cfg = occurrence.Config.load(a.config)
-    stars, _ = read_stars(a.stars, a.aux, cfg, a.kind)
+    stars, _ = read_stars(a.stars, a.aux, cfg)
     inj = pd.concat([pd.read_parquet(f) for f in _files(a.injections)], ignore_index=True)
     rng = np.random.default_rng(a.seed)
     rows = []
@@ -486,16 +474,14 @@ def main(argv=None):
     x.set_defaults(func=aux_cmd)
     m = sub.add_parser("limit", help="the limit per rate from per-star scores and injections")
     m.add_argument("--stars", required=True, help="per-star score files (a directory or one Parquet file)")
-    m.add_argument("--aux", help="Parquet with " + ", ".join(AUX_COLUMNS) + " (not needed with --kind)")
-    m.add_argument("--kind", help="take the FGK dwarfs from the per-star table's `kind` column: the label to keep")
+    m.add_argument("--aux", required=True, help="Parquet with " + ", ".join(AUX_COLUMNS))
     m.add_argument("--injections", required=True, help="the inject step's injections directory")
     m.add_argument("--out", required=True)
     m.add_argument("--config", default=occurrence.Config.name)
     m.set_defaults(func=limit)
     c = sub.add_parser("planted", help="check on real stars: how often the limit falls below a share of fades planted")
     c.add_argument("--stars", required=True)
-    c.add_argument("--aux")
-    c.add_argument("--kind")
+    c.add_argument("--aux", required=True)
     c.add_argument("--injections", required=True)
     c.add_argument("--out", required=True)
     c.add_argument("--config", default=occurrence.Config.name)

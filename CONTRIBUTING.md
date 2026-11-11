@@ -27,6 +27,7 @@ Several Claude threads work in this repo at once. These rules keep them out of e
 | `cosmos_search/residual/` | Simplest-model residual search | Eclipse baseline, flux-level residuals, ranking v1's demotion rule (docs/arms/residual.md) |
 | `cosmos_search/astrometry/` | Astrometric non-Keplerian filter | Epoch loader, nested fits, cascade, simulator, decision rule, Kepler bound, dip localisation (A1–A3) |
 | `cosmos_search/slow/` | Strategy review before DR4 (until a dedicated thread) | Slow-change search: known answers, calibration drift, trends (docs/arms/slow-changes.md) |
+| `cosmos_search/slow/occurrence.py`, `slow/recall.py`, `prereg/occurrence/` | Compute occurrence limit for steady fades | Upper limit on the share of FGK dwarfs fading steadily, recall by injected fades (docs/arms/occurrence.md) |
 | `docs/` | DR4 plan and repo layout | Arms own their page under `docs/arms/` and `docs/infra/` |
 
 To change a package you don't own, message its owner thread first.

@@ -836,6 +836,8 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
     goes into them only with `--with-eclipse`, because no calibration batch has measured the reviewer on files
     that carry it. A star whose NEOWISE or ZTF fetch failed in the checks is left out and listed, so that its
     checks are run again first.
+11. The limit on how common steady fades are among FGK dwarfs, find or no find: `slow_occurrence.py` on the
+    threshold sample of step 2 (docs/arms/occurrence.md, "On DR4").
 
 ### Trial on all of DR3 (2026-10-30)
 
@@ -1237,6 +1239,13 @@ or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet
 - **2026-11-11.** The known answers are in the DataLink fallback list (3,791 stars with the watch-list). ESA's
   archive refused the position queries, so `slow known` gained `--mirror aip`.
 
+- **2026-11-10.** Upper limit on how common steady fades are among FGK dwarfs (docs/arms/occurrence.md), built
+  and run on the 195,572 FGK dwarfs of DR3's Andromeda field: fewer than 1 in 110 fade at 0.2% a year, 1 in
+  7,545 at 1%, 1 in 51,304 at 5% (95%). Recall comes from steady fades injected into every one of those stars.
+  Every fading star past the cut counts as a possible real fade; subtracting chance fades estimated from
+  brightening stars was dropped as the limit, because on DR3 the two are not equally common far out (30
+  brightening against 10 fading beyond 8 errors) and a subtracted limit then falls below the truth. Settings for
+  DR4 frozen in `prereg/occurrence/steady-fades-v1.json`.
 - **2026-11-10.** Every star scored ("Every star scored" above). The archive-side selection picked none of the
   injected steady fades up to 3% a year; the run now summarises every star of the bulk files in one compiled pass
   (0.2 ms per star per core) and flags the same stars as the detector on every star. Trends are measured against

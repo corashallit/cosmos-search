@@ -19,6 +19,10 @@ Nulls are built from the data so that they keep its systematics:
   brightening statistics, computed in the same strata (magnitude, colour, ecliptic latitude, crowding, number
   of transits), estimates the dimming statistic's null. Brightening has its own astrophysics (flares,
   microlensing), which makes this null conservative in some strata. Measure that, don't assume it.
+  Measured for trends of FGK dwarfs on DR3 (arms/occurrence.md, 2026-11-10): beyond 6 errors brightening
+  stars outnumber fading ones 85 to 55, beyond 8 errors 30 to 10, and directions cluster on the sky. An upper
+  limit that subtracts the brightening count is then below the truth in most simulated samples, so the
+  occurrence limit counts every fading star and uses the brightening count only to choose where to count.
 - **Per-source competition.** Each source's dimming statistic competes with its own brightening
   statistic, and the bright winners above a threshold estimate the false discoveries among the dim winners
   (knockoff+, Barber & Candès 2015; the same idea as target–decoy competition in proteomics). FDR control

@@ -413,8 +413,9 @@ def test_script_inject_and_limit(tmp_path):
 
 
 def test_limit_counts_a_referenced_table_file_by_file(tmp_path):
-    """A per-star table with its own neighbour reference and kind of star, as the bulk-file pass writes it, in
-    two files: the limit step tallies them one at a time and gets what the in-memory route gets."""
+    """A per-star table with its own neighbour reference, in two files: the limit step tallies them one at a
+    time and gets what the in-memory route gets. Giants by parallax and rows marked as not a fair sample of
+    their magnitude (`ref` false) are left out."""
     spec = importlib.util.spec_from_file_location("slow_occurrence", REPO / "scripts" / "slow_occurrence.py")
     script = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(script)
@@ -422,20 +423,26 @@ def test_limit_counts_a_referenced_table_file_by_file(tmp_path):
     stars = population(6_000, np.random.default_rng(31), faders=20, rate=0.02)
     err = oc.slope_error(stars)
     ref, ref_err = np.where(stars["phot_g_mean_mag"] < 13, 6e-4, 0.0), 0.3 * err
+    k = np.arange(len(stars))
     table = stars.assign(slope_err=err, slope_ref=ref, slope_ref_err=ref_err, slope_z_raw=stars["slope_z"],
-                         slope_z=(stars["slope"] - ref) / np.hypot(err, ref_err),
-                         kind=np.where(np.arange(len(stars)) % 12 == 5, "giant", "FGK dwarf"))
+                         slope_z=(stars["slope"] - ref) / np.hypot(err, ref_err), ref=k % 20 != 7)
+    # Catalogue rows: a main-sequence parallax for each star's G at BP-RP 0.9, a giant's for one star in twelve.
+    aux = pd.DataFrame({"source_id": stars["source_id"], "phot_g_mean_mag": stars["phot_g_mean_mag"], "bp_rp": 0.9,
+                        "parallax": 10 ** ((5.9 - stars["phot_g_mean_mag"] + 10) / 5) * np.where(k % 12 == 5, 0.01, 1.0)})
+    aux["parallax_error"] = aux["parallax"] / 50
+    aux.to_parquet(tmp_path / "aux.parquet", index=False)
     inj = injected(stars, cfg).assign(slope_err=np.tile(err, len(cfg.rates)))
     (tmp_path / "summary").mkdir()
     (tmp_path / "inj").mkdir()
-    on_disk = table.rename(columns={"phot_g_mean_mag": "g_mag"})
+    on_disk = table.drop(columns="phot_g_mean_mag")
     on_disk.iloc[:2_500].to_parquet(tmp_path / "summary" / "a.parquet", index=False)
     on_disk.iloc[2_500:].to_parquet(tmp_path / "summary" / "b.parquet", index=False)
     inj.to_parquet(tmp_path / "inj" / "a.parquet", index=False)
-    assert script.main(["limit", "--stars", str(tmp_path / "summary"), "--kind", "FGK dwarf",
+    assert script.main(["limit", "--stars", str(tmp_path / "summary"), "--aux", str(tmp_path / "aux.parquet"),
                         "--injections", str(tmp_path / "inj"), "--out", str(tmp_path / "limit")]) == 0
     rec = json.loads((tmp_path / "limit" / "limit.json").read_text())
-    dwarfs = table[table["kind"] == "FGK dwarf"].drop(columns="kind")
+    dwarfs = table[(k % 12 != 5) & (k % 20 != 7)].drop(columns="ref")
+    assert 5_000 < len(dwarfs) < 5_300
     assert rec["inputs"]["neighbour_reference"] and rec["inputs"]["stars_scored"] == 6_000
     assert rec["inputs"]["fgk_dwarfs_searched"] == len(dwarfs) == rec["inputs"]["injection_hosts"]
     curve, _, sym = oc.limit_curve(dwarfs, inj, cfg)
