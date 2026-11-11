@@ -901,8 +901,8 @@ The first two lists together are 3,791 stars: one to four hours of DataLink at 1
 11. The limit on how common steady fades are among FGK dwarfs, find or no find (docs/arms/occurrence.md, "On
     DR4"): on day one `slow_occurrence.py` on the light curves of step 2, with the pass and flag steps run on
     that directory; then on every star, from `R/summary`, `L/reference.parquet`, the light curves the pass keeps
-    of its random share of stars, and the dwarfs' parallaxes fetched in sky slices (`slow_occurrence.py aux
-    --sky 4`).
+    of its random share of stars, and the dwarfs' parallaxes and flux ratios fetched in sky slices
+    (`slow_occurrence.py aux --sky 4`).
 
 ### Trial on all of DR3 (2026-10-30)
 
@@ -1315,6 +1315,13 @@ or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet
 
 ## Log
 
+- **2026-11-11.** Found by the occurrence limit on the pass with the colour term (docs/arms/occurrence.md, "Stars
+  mixed with a neighbour"): the G trend of a star falls with its excess of (BP + RP) over G mean flux, the sign
+  of a second source within about 2 arcsec. On DR3's FGK dwarfs it is −0.04% a year at an excess of 0.02 to
+  0.05 and −0.7% above 0.5, while RP holds; above 0.05, 988 dwarfs fade between 2 and 5 errors and 63 brighten.
+  The limit leaves those stars out and measures the rest against stars of their own excess (settings v2: 1 in
+  107 at 0.2% a year, 7,883 at 1%, 57,843 at 5%). The lists do not yet, and at DR4's trend errors such stars
+  would stand high on the fading list.
 - **2026-11-11.** Drift by colour ("Every star scored"). The trend left after the drift correction depended on
   colour (red and blue stars brightening by 0.3 to 0.6 errors on DR3; found by the occurrence-limit work). The
   drift table now has narrow colour ranges and the trend's reference a colour term; the median trend is at zero
@@ -1356,7 +1363,7 @@ or from the AIP mirror when ESA rejects the query. Epochs go to `surveys.parquet
   Every fading star past the cut counts as a possible real fade; subtracting chance fades estimated from
   brightening stars was dropped as the limit, because on DR3 the two are not equally common far out (30
   brightening against 10 fading beyond 8 errors) and a subtracted limit then falls below the truth. Settings for
-  DR4 frozen in `prereg/occurrence/steady-fades-v1.json`.
+  DR4 frozen in `prereg/occurrence/steady-fades-v1.json` (v2 since 2026-11-11).
 - **2026-11-10.** Every star scored ("Every star scored" above). The archive-side selection picked none of the
   injected steady fades up to 3% a year; the run now summarises every star of the bulk files in one compiled pass
   (0.2 ms per star per core) and flags the same stars as the detector on every star. Trends are measured against

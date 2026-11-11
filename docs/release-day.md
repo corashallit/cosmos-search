@@ -95,7 +95,7 @@ The limit on how common steady fades are among FGK dwarfs, which is reported wit
 ([arms/occurrence.md](arms/occurrence.md), "On DR4": first on the threshold sample, then on every star):
 
 ```
-python scripts/slow_occurrence.py aux --sky 4 --schema gaiadr4 --out A        # the dwarfs' parallaxes, in sky slices
+python scripts/slow_occurrence.py aux --sky 4 --schema gaiadr4 --out A        # the dwarfs' parallaxes and flux ratios, in sky slices
 python scripts/slow_occurrence.py inject --lightcurves R/lightcurves --random-share 0.001 --aux A --rule RULE --out O
 python scripts/slow_occurrence.py limit --stars R/summary --reference L/reference.parquet --aux A --injections O/injections --out O/limit
 ```
