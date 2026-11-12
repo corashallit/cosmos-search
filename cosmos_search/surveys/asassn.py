@@ -24,11 +24,17 @@ this reader uses flux, never mag. Kept epochs: quality "G" (good image) from a c
 to bh) or g list (bA to bH, bi to bt, cB). Each camera is its own group, since their zero points differ by up to
 a few percent and a camera change in 2017-2018 would otherwise read as a step.
 
-Be gentle with this host. On 2026-11-10 two empty connections to the port a second apart (the first version of
-`reachable`) were followed within two minutes by the whole hawaii.edu network dropping the machine's address,
-while the service stayed up for everyone else: most likely a border filter reading the probes as a port scan.
-`reachable` is now one ordinary request, the host's policy retries a failed call twice at most, and nothing
-here should ever open a connection without sending a request.
+Be gentle with this host, and do not expect it to answer. On 2026-11-10 two empty connections to the port a
+second apart (the first version of `reachable`) were followed within two minutes by the whole hawaii.edu network
+dropping the machine's address for about two hours, while the service stayed up for everyone else. `reachable`
+is now one ordinary request, the host's policy retries a failed call twice at most, and nothing here should ever
+open a connection without sending a request. On 2026-11-12 that one request, sent once from the same machine,
+was answered in 0.4 s by a firewall at the university's border with HTTP 503 and a page titled "Virus/Spyware
+Download Blocked": the firewall classes the `skypatrol` client's own opening call from that address as malware
+traffic, so the empty connections may not have been the cause of the first block. `reachable` reads any answer
+but 200 as unreachable, so the reader then raises `Unreachable` and sends nothing more. Each try risks another
+block of the whole university for the machine's address: do not try again from there without the owner's say
+(docs/arms/slow-changes.md, "Other surveys").
 
 ASAS-SN's pixels are 8 arcsec and its point-spread function about 16 arcsec, so neighbours matter more here than
 anywhere else: `slow.independent` divides the expected change by 1 + (neighbours' flux inside that beam over the
