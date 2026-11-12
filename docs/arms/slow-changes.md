@@ -1339,7 +1339,7 @@ only say `went_on` for fast fades. ZTF carries the years since for the northern 
 is 0.11 to 0.13% per year at every G from 13 to 18.5 (the drift floor dominates), so it tells whether a fade of
 0.4% per year or more went on. With the made-up trend continued into ZTF's epochs, 97% of 230 stars read
 `went_on`; left constant, 91% read `stopped`. South of −30° the years since rest on ATLAS, and for stars brighter
-than G 12.5 on ASAS-SN. ATLAS's trend error after 2020 is 0.12 to 0.14% per year at G 12.5-17 and 0.25% at
+than G 12.5 on ASAS-SN, which cannot be read at present (below). ATLAS's trend error after 2020 is 0.12 to 0.14% per year at G 12.5-17 and 0.25% at
 17-18.5; with the made-up trend continued, 31 of 32 constant stars read `went_on`, and left constant 29 read
 `stopped`, 2 `undecided` and 1 `reversed`. At G 17-18.5 its errors there are about 1.4 times too small and the
 constant stars brightened by a median 0.5% per year since 2020, so a `stopped` or `reversed` from ATLAS for a
@@ -1414,11 +1414,19 @@ better measure of activity and are not read yet.
 
 **Not yet tested against the live service.**
 
-- ASAS-SN answers only on port 9006, which cloud containers cannot open. On 2026-11-10 the first try from kore
-  ended within two minutes with the whole hawaii.edu network dropping kore's address, most likely because the
-  reachability check opened two empty connections that looked like a port scan. The check is now one ordinary
-  request, retries are limited to two, and ASAS-SN is read only when named (`--surveys ...,asassn`). Its floor is
-  provisional and its reader has not seen live data.
+- ASAS-SN answers only on port 9006, which cloud containers cannot open, and from kore the university's
+  firewall refuses it. On 2026-11-10 the first try ended within two minutes with the whole hawaii.edu network
+  dropping kore's address for about two hours. On 2026-11-12 a single ordinary request (the `skypatrol` client's
+  own opening call, `GET /get_current_message`) was answered in 0.4 s with HTTP 503 and a firewall page titled
+  "Virus/Spyware Download Blocked"; nothing on kore's side filters traffic, so the page came from the
+  university's border, which classes the request as malware traffic. The empty connections of the first try
+  (since replaced by one ordinary request) may therefore not have been what set off the block. No public report
+  of this page was found (web search, the client's issue list), and the client's latest release (0.6.21,
+  2025-10) uses the same address and port, so the refusal may be specific to kore's address. Until
+  the ASAS-SN team or the university says otherwise, ASAS-SN cannot be read from kore: it is read only when
+  named (`--surveys ...,asassn`), its floor is provisional and its reader has not seen live data. Stars
+  brighter than G 12.5 therefore have NEOWISE (to 2024) and, south of +16°, SkyMapper (to 2021-09) for the years
+  after Gaia, and no optical survey after that.
 
 **In a blind test.** Fakes are injected into Gaia's epochs only, so every fake would read `not_seen` here and
 give itself away. Until the fakes are also injected into these epochs (`dayone.external.apply` takes this table:
@@ -1442,6 +1450,11 @@ and has not answered yet, and with `--ids D/reviewed.csv --ids-where shortlisted
 shortlisted.
 
 ## Log
+
+- **2026-11-12.** ASAS-SN cannot be read from kore ("Other surveys", not yet tested against the live service).
+  One ordinary request, a day after the block of 2026-11-10 had lifted, was answered by the university
+  firewall's "Virus/Spyware Download Blocked" page. Nothing further is sent; ASAS-SN stays out of the default
+  surveys, and stars brighter than G 12.5 have no optical check for the years after 2021.
 
 - **2026-11-11.** ATLAS against the live service ("Other surveys"). Measured on 32 constant stars: its
   reduced-image fluxes step by 1.3% at ATLAS's reference change of 2018-10-26 and scatter far more before it
